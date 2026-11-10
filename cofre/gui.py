@@ -565,9 +565,26 @@ class CofreGUI:
 
     def wizard_backup(self, event=None):
         drive = self.dest_var.get().strip().rstrip("\\") + "\\"
+        target = Path(drive) / KEY_FILENAME
+        if not Path(drive).exists():
+            self.set_foot(f"la unidad {drive} no esta conectada. Enchufa el "
+                         "pendrive y pulsa de nuevo.")
+            return False
         try:
-            src, _ = find_stick(None, self.vault_path, False)
-            copy_key_to(drive + KEY_FILENAME, read_key(src))
+            src, _src_serial = find_stick(None, self.vault_path, False)
+        except Exception as exc:
+            self.set_foot(f"no hay llave que copiar: {exc}")
+            return False
+        if Path(src).resolve() == target.resolve():
+            self.set_foot("la unidad destino es la misma que tiene la llave: "
+                         "elige otro pendrive")
+            return False
+        if target.is_file():
+            self.set_foot(f"{target} ya contiene una llave. No se sobrescribe: eso "
+                         "dejaria el cofre inaccesible si esa llave es otra.")
+            return False
+        try:
+            copy_key_to(str(target), read_key(src))
             serial = volume_serial(drive)
             register_stick(self.vault_path, serial, drive, role="reserva")
             record(self.vault_path, "stick-copy", self.gate, serial, ok=True)
