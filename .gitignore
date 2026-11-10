@@ -1,0 +1,7 @@
+cofre.json
+.cofre-salt
+.cofre-sticks.json
+.cofre-access.log
+.cofre-access.log.old
+.venv/
+__pycache__/
