@@ -16,6 +16,51 @@ CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 
 
+def clipboard_text() -> str | None:
+    """Lee el portapapeles real de Windows (para saber si sigue siendo el nuestro).
+
+    Ojo con los tipos: GetClipboardData devuelve un handle de 64 bits. Sin
+    restype=c_void_p, ctypes lo devuelve como int de 32 bits, GlobalLock falla
+    y la lectura da None aunque el portapapeles tenga contenido.
+    """
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    user32.GetClipboardData.argtypes = [ctypes.c_uint]
+    if not user32.OpenClipboard(0):
+        return None
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return None
+        ptr = kernel32.GlobalLock(handle)
+        if not ptr:
+            return None
+        try:
+            # string_at lee hasta el NUL: un texto UTF-16 termina en 00 00
+            return ctypes.string_at(ptr).decode("utf-16-le")
+        finally:
+            kernel32.GlobalUnlock(handle)
+    except Exception:
+        return None
+    finally:
+        user32.CloseClipboard()
+
+
+def clear_clipboard() -> bool:
+    user32 = ctypes.windll.user32
+    if not user32.OpenClipboard(0):
+        return False
+    try:
+        user32.EmptyClipboard()
+    finally:
+        user32.CloseClipboard()
+    return True
+
+
 def copy_text(text: str) -> bool:
     kernel32 = ctypes.windll.kernel32
     user32 = ctypes.windll.user32

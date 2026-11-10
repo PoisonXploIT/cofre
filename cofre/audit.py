@@ -62,6 +62,45 @@ def tail(vault_path: str | Path, lines: int = 20) -> list[str]:
     return p.read_text(encoding="utf-8").splitlines()[-lines:]
 
 
+VERBS = {
+    "add": "guardado",
+    "get": "leido",
+    "reveal": "mostrado en pantalla",
+    "clipboard": "copiado al portapapeles",
+    "del": "borrado",
+    "gen": "contraseña generada",
+    "list": "listado de secretos",
+    "exec": "comando ejecutado con",
+    "export": "volcado a pantalla",
+    "lock": "cofre bloqueado",
+    "gui-gate": "intento de apertura rechazado",
+    "stick-init": "llave creada en el pendrive",
+    "stick-copy": "llave copiada a otro pendrive",
+    "stick-register": "pendrive autorizado",
+    "stick-revoke": "pendrive dado de baja",
+    "stick-role": "rol de pendrive cambiado",
+}
+
+
+def tail_human(vault_path: str | Path, lines: int = 6) -> list[str]:
+    """Las mismas entradas del log, pero legibles para una persona."""
+    out = []
+    for line in tail(vault_path, lines):
+        parts = line.split()
+        if not parts:
+            continue
+        stamp = parts[0][11:16] if len(parts[0]) > 11 else parts[0]
+        fields = {p.split("=", 1)[0]: p.split("=", 1)[1] for p in parts[1:] if "=" in p}
+        cmd = fields.get("cmd", "?")
+        name = fields.get("name", "-")
+        stick = fields.get("stick", "-")
+        ok = "ok" if fields.get("ok") == "1" else "FALLO"
+        verb = VERBS.get(cmd, cmd)
+        extra = name if name not in ("-",) else ""
+        out.append(f"{stamp}  {verb} {extra}  [{ok}]  llave {stick}")
+    return out
+
+
 def stats(vault_path: str | Path) -> dict:
     p = log_path(vault_path)
     if not p.exists():

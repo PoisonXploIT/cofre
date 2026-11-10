@@ -32,7 +32,9 @@ from cofre.audit import record, tail
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
-from cofre.usb import KEY_FILENAME, drive_letters, load_registry, volume_serial
+from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters,
+                       find_stick, load_registry, read_key, register_stick,
+                       revoke_stick, volume_serial)
 
 BG = "#0d1117"
 PANEL = "#141a22"
@@ -62,6 +64,10 @@ class CofreGUI:
         self.selected = None
         self.reveal_id = None
         self.sticky = False
+        self.needs_init = False
+        self.clipboard_ttl = 30
+        self._clip_id = None
+        self._key_cache: set[str] = set()
 
         self.root = root or tk.Tk()
         self.root.title("COFRE - boveda de secretos")
@@ -125,6 +131,7 @@ class CofreGUI:
         self.status_label = tk.Label(top, textvariable=self.status_var, fg=WARN,
                                      bg=PANEL2, font=self.f_sub, padx=10, pady=6)
         self.status_label.pack(side="right")
+        self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
         self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 10))
 
         # ---------- cuerpo ----------
@@ -141,11 +148,17 @@ class CofreGUI:
         tk.Label(sticks_box, text="Pendrives que abren este cofre",
                  fg=FG, font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 2))
         self.stick_rows = []
-        for _ in range(4):
-            lab = tk.Label(sticks_box, text="", fg=MUT, font=self.f_small, bg=PANEL2,
-                           anchor="w")
-            lab.pack(fill="x")
+        self.stick_revokes = []
+        for _ in range(3):
+            rrow = tk.Frame(sticks_box, bg=PANEL2)
+            rrow.pack(fill="x")
+            lab = tk.Label(rrow, text="", fg=MUT, font=self.f_small, bg=PANEL2, anchor="w")
+            lab.pack(side="left", fill="x", expand=True)
+            btn = self._btn(rrow, "Revocar", lambda e, l=lab: self.revoke_from_gui(l))
+            btn.pack(side="right")
+            btn.pack_forget()
             self.stick_rows.append(lab)
+            self.stick_revokes.append(btn)
         tk.Label(sticks_box, text="Basta con conectar UNO cualquiera. No hace falta "
                                  "conectar los dos.", fg=MUT, font=self.f_small,
                  bg=PANEL2).pack(anchor="w", pady=(4, 6))
@@ -153,7 +166,8 @@ class CofreGUI:
         tk.Label(left, text="Secretos", fg=FG, font=self.f_sub, bg=PANEL).pack(
             anchor="w", padx=14, pady=(12, 6))
         self.query_var = tk.StringVar()
-        self._entry(left, self.query_var).pack(fill="x", padx=14, pady=6)
+        self.query_entry = self._entry(left, self.query_var)
+        self.query_entry.pack(fill="x", padx=14, pady=6)
         tk.Label(left, text="buscar", fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w", padx=14)
         self.list_frame = tk.Frame(left, bg=PANEL)
         self.list_frame.pack(fill="both", expand=True, padx=14)
@@ -161,24 +175,45 @@ class CofreGUI:
         tk.Label(left, textvariable=self.count_var, fg=MUT, font=self.f_small,
                  bg=PANEL).pack(anchor="w", padx=14, pady=(10, 8))
 
-        help_box = tk.Frame(left, bg=PANEL2)
-        help_box.pack(fill="x", padx=14, pady=(8, 12))
-        tk.Label(help_box, text="Como se usa, en 4 pasos", fg=FG, font=self.f_sub,
-                 bg=PANEL2).pack(anchor="w", pady=(4, 2))
+        self.help_box = tk.Frame(left, bg=PANEL2)
+        tk.Label(self.help_box, text="Como funciona (F1 para ocultar)", fg=FG,
+                 font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 2))
         for line in (
-            "1. Conecta el pendrive (cualquiera de los autorizados).",
-            "2. Pulsa Reconectar: arriba aparece cual esta abierto.",
-            "3. Escribe nombre y valor, pulsa Guardar. El nombre es lo que "
-            "buscaras luego (p. ej. TAVILY_API_KEY).",
-            "4. Para usarla: Copiar y pegar, o en terminal",
-            "   run.cmd exec --name TAVILY_API_KEY -- python script.py",
+            "El pendrive guarda la llave (32 bytes en COFRE.KEY). Sin el pendrive, "
+            "cofre.json es ruido: no se descifra.",
+            "Basta con conectar UNO de los autorizados. La reserva abre el mismo cofre.",
+            "Guardar: nombre + valor + Guardar. Ver: solo con click de raton.",
+            "Bloquear (Ctrl+L) tira la llave de la RAM. Copiar pone el valor en el "
+            "portapapeles y lo limpia a los 30 s.",
+            "Atajos: Ctrl+F buscar, Ctrl+N nombre, Ctrl+C copiar, flechas navegar, F1 ayuda.",
         ):
-            tk.Label(help_box, text=line, fg=MUT, font=self.f_small, bg=PANEL2,
+            tk.Label(self.help_box, text=line, fg=MUT, font=self.f_small, bg=PANEL2,
                      anchor="w").pack(fill="x")
+        self.help_box.pack(fill="x", padx=14, pady=(8, 12))
 
-        # derecha: detalle + alta
+        # derecha: wizard + detalle + alta
         right = tk.Frame(body, bg=PANEL2)
         right.pack(side="left", fill="both", expand=True, padx=(16, 0))
+
+        self.wizard = tk.Frame(right, bg=PANEL)
+        tk.Label(self.wizard, text="Puesta en marcha", fg=FG, font=self.f_h2,
+                 bg=PANEL).pack(anchor="w", padx=16, pady=(14, 4))
+        self.wizard_msg = tk.StringVar(value="")
+        tk.Label(self.wizard, textvariable=self.wizard_msg, fg=MUT, font=self.f_sub,
+                 bg=PANEL).pack(anchor="w", padx=16, pady=(0, 8))
+        self.dest_var = tk.StringVar(value="F:\\")
+        wrow = tk.Frame(self.wizard, bg=PANEL)
+        wrow.pack(fill="x", padx=16, pady=6)
+        tk.Label(wrow, text="unidad destino", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left")
+        dent = self._entry(wrow, self.dest_var, mono=True)
+        dent.configure(width=6)
+        dent.pack(side="left", padx=6)
+        self._btn(wrow, "Crear llave en esa unidad",
+                  lambda e: self.wizard_create_key(event=e)).pack(side="left", padx=6)
+        self._btn(wrow, "Inicializar cofre",
+                  lambda e: self.wizard_init(event=e), accent=True).pack(side="left", padx=6)
+        self._btn(wrow, "Copiar la llave a esa unidad (reserva)",
+                  lambda e: self.wizard_backup(event=e)).pack(side="left", padx=6)
 
         self.detail_name = tk.Label(right, text="sin seleccion", fg=FG,
                                     font=self.f_h2, bg=PANEL2)
@@ -204,10 +239,16 @@ class CofreGUI:
             self._ver_targets.add(w)
         self._ver_frame = ver
         for b in (self._btn(row, "Ocultar", self.hide),
-                  self._btn(row, "Copiar al portapapeles", self.copy_to_clipboard)):
+                  self._btn(row, "Copiar el valor", self.copy_to_clipboard),
+                  self._btn(row, "Copiar el nombre", self.copy_name),
+                  self._btn(row, "Copiar comando exec", self.copy_exec_command)):
             b.pack(side="left", padx=8)
         self.sticky_btn = self._btn(row, "Fijar", self.toggle_sticky)
         self.sticky_btn.pack(side="left", padx=8)
+        self.edit_btn = self._btn(row, "Editar valor", self.edit_selected)
+        self.edit_btn.pack(side="left", padx=8)
+        self.rename_btn = self._btn(row, "Renombrar", self.rename_selected)
+        self.rename_btn.pack(side="left", padx=8)
         self.del_btn = self._btn(row, "Borrar", self.delete_selected)
         self.del_btn.pack(side="left", padx=8)
 
@@ -236,12 +277,20 @@ class CofreGUI:
         wentry.pack(side="left")
         tk.Label(add, text="nombre (sin espacios), p. ej. TAVILY_API_KEY", fg=MUT,
                  font=self.f_small, bg=PANEL).pack(anchor="w")
+        self.tags_var = tk.StringVar(value="")
+        tk.Label(add, text="tags (opcional, separados por coma). Ej: google, trabajo",
+                 fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
+        self._entry(add, self.tags_var).pack(fill="x", pady=(2, 4))
         self.name_entry = self._entry(add, self.name_var)
         self.name_entry.pack(fill="x", pady=(2, 6))
         tk.Label(add, text="valor: la contraseña, la clave API o el token",
                  fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
         self.val_entry = self._entry(add, self.val_var, mono=True, show="*")
         self.val_entry.pack(fill="x", pady=(2, 6))
+        self.strength_var = tk.StringVar(value="fuerza: sin valor")
+        tk.Label(add, textvariable=self.strength_var, fg=MUT, font=self.f_small,
+                 bg=PANEL).pack(anchor="w")
+        self.val_entry.bind("<Key>", self._update_strength)
         self.name_entry.bind("<Return>", lambda _e: self.add_secret())
         self.val_entry.bind("<Return>", lambda _e: self.add_secret())
         genrow = tk.Frame(add, bg=PANEL)
@@ -275,7 +324,7 @@ class CofreGUI:
         tk.Label(logbox, text="Actividad reciente", fg=MUT, font=self.f_sub, bg=PANEL).pack(
             anchor="w", pady=(6, 2))
         self.log_labels = []
-        for _ in range(3):
+        for _ in range(4):
             lab = tk.Label(logbox, text="", fg=MUT, font=self.f_small, bg=PANEL, anchor="w")
             lab.pack(fill="x")
             self.log_labels.append(lab)
@@ -293,7 +342,17 @@ class CofreGUI:
                  bg=PANEL, anchor="w").pack(fill="x", padx=18, pady=10)
 
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
+        self.root.bind("<Control-l>", lambda _e: self.lock())
+        self.root.bind("<Control-f>", lambda _e: self.query_entry.focus_set())
+        self.root.bind("<Control-n>", lambda _e: self.name_entry.focus_set())
+        self.root.bind("<Control-c>", lambda _e: self.copy_to_clipboard())
+        self.root.bind("<Prior>", lambda _e: self.move_selection(-1))
+        self.root.bind("<Next>", lambda _e: self.move_selection(1))
+        self.root.bind("<F1>", lambda _e: self.toggle_help())
+        self.refresh_wizard()
         self.unlock()
+        self._key_cache = self._key_drives()
+        self.root.after(2000, self._poll)
 
     # ---------- estado ----------
 
@@ -303,9 +362,10 @@ class CofreGUI:
                                     bg=PANEL2)
 
     def refresh_log(self):
-        entries = tail(self.vault_path, 3)
+        from cofre.audit import tail_human
+        entries = tail_human(self.vault_path, len(self.log_labels))
         for i, lab in enumerate(self.log_labels):
-            lab.configure(text=entries[-(i + 1)] if len(entries) > i else "")
+            lab.configure(text=entries[i] if i < len(entries) else "")
 
     def set_foot(self, text):
         self.foot_var.set(text)
@@ -337,19 +397,22 @@ class CofreGUI:
 
     def refresh_sticks(self) -> None:
         report = self.stick_report()
-        if not report:
-            text = "ninguno registrado. Ejecuta: run.cmd stick-init E:\\COFRE.KEY"
-        else:
-            parts = []
-            for s in report:
-                parts.append(f"{s['drive']}  {s['label'] or 'USB'}  {s['role']}  "
-                             f"{'conectado' if s['connected'] else 'NO conectado'}")
-            text = "  |  ".join(parts)
         for i, lab in enumerate(self.stick_rows):
-            lab.configure(text=parts[i] if report and i < len(parts) else "")
+            if i < len(report):
+                s = report[i]
+                lab.configure(text=f"serial {s['serial']}  {s['drive']}  {s['label'] or 'USB'}  "
+                                  f"{s['role']}  {'conectado' if s['connected'] else 'NO conectado'}")
+                if len(report) > 1:
+                    self.stick_revokes[i].pack(side="right")
+                else:
+                    self.stick_revokes[i].pack_forget()
+            else:
+                lab.configure(text="")
+                self.stick_revokes[i].pack_forget()
         if not report:
-            self.stick_rows[0].configure(text=text)
-        self._stick_text = text
+            self.stick_rows[0].configure(text="ninguno registrado: usa 'Crear llave' "
+                                        "en el panel de Puesta en marcha")
+        self._stick_text = " | ".join(r.cget("text") for r in self.stick_rows if r.cget("text"))
 
     def unlock(self, event=None):
         # En usb-pin la GUI siempre pasa su propio PIN (aunque este vacio),
@@ -365,34 +428,66 @@ class CofreGUI:
             self.set_foot("gate cerrado: " + (str(exc) if str(exc) else "no se ha encontrado COFRE.KEY"))
             record(self.vault_path, "gui-gate", self.gate, None, ok=False, detail=str(exc))
             self.refresh_sticks()
+            self.refresh_wizard()
             self.refresh_list()
             return False
 
         if not self.vault.load().get("wrapper"):
-            self.session = None
-            self.set_status("cofre vacio: hay que inicializarlo", warn=True)
-            self.set_foot("cofre no inicializado. En una terminal: run.cmd init "
-                          "(con el pendrive conectado) y luego run.cmd add TAVILY_API_KEY")
+            self.needs_init = True
+            self.set_status("hay llave, pero el cofre no esta inicializado", warn=True)
+            self.set_foot("cofre no inicializado: usa 'Inicializar cofre' en el "
+                          "panel de Puesta en marcha")
             self.refresh_sticks()
+            self.refresh_wizard()
             self.refresh_list()
             return False
 
         used = next((s for s in self.stick_report()
                      if s["serial"] == str(self.serial)), None)
         which = f"{used['drive']} ({used['role']})" if used else str(self.serial)
-        self.set_status(f"abierto  |  llave usada: {which}", warn=False)
+        n = len(self.vault.names())
+        self.set_status(f"abierto  |  llave: {which}  |  {n} secreto(s)", warn=False)
         self.refresh_sticks()
+        self.refresh_wizard()
         self.refresh_list()
         return True
+
+    def lock(self, event=None):
+        """Bloquear: se tira la clave de sesion de la RAM. Hace falta el
+        pendrive otra vez para abrir."""
+        self.session = None
+        self.serial = None
+        self.selected = None
+        self.hide()
+        self.detail_name.configure(text="sin seleccion")
+        self.meta_var.set("cofre bloqueado")
+        self.refresh_list()
+        self.refresh_wizard()
+        self.set_status("bloqueado  |  la llave ya no esta en memoria", warn=True)
+        record(self.vault_path, "lock", self.gate, None, ok=True)
 
     def refresh_list(self):
         for w in self.list_frame.winfo_children():
             w.destroy()
         if not self.session:
             self.count_var.set("gate cerrado")
+            self._names = []
             return
         q = self.query_var.get().strip().lower()
-        names = [n for n in self.vault.names() if not q or q in n.lower()]
+        tags = []
+        if q.startswith("tag:"):
+            tags = [t for t in q[4:].split(",") if t]
+            q = ""
+        names = []
+        for n in self.vault.names():
+            if q and q not in n.lower():
+                continue
+            if tags:
+                entry_tags = [t.lower() for t in self.vault.meta(n).get("tags", [])]
+                if not all(t in entry_tags for t in tags):
+                    continue
+            names.append(n)
+        self._names = names
         self.count_var.set(f"{len(names)} entrada(s)")
         if not names:
             tk.Label(self.list_frame, text="no hay secretos (o ninguno coincide)",
@@ -409,6 +504,213 @@ class CofreGUI:
             lab.bind("<Button-1>", lambda _e, name=n: self.select(name))
             outer.bind("<Button-1>", lambda _e, name=n: self.select(name))
 
+    def _key_drives(self) -> set[str]:
+        return {d for d in drive_letters() if (Path(d) / KEY_FILENAME).is_file()}
+
+    def state(self) -> str:
+        if self.session and self.vault.load().get("wrapper"):
+            return "empty" if not self.vault.names() else "open"
+        if not self._key_drives() and not self.stick:
+            return "no-key"
+        if not self.vault.load().get("wrapper"):
+            return "key-no-vault"
+        return "closed"
+
+    def refresh_wizard(self) -> None:
+        st = self.state()
+        drives = sorted(self._key_drives())
+        if st == "no-key":
+            self.wizard_msg.set(
+                "No hay COFRE.KEY en ningun volumen. Conecta el pendrive y "
+                "pulsa 'Crear llave' (se escriben 32 bytes aleatorios en el USB).")
+            self.wizard.pack(fill="x", padx=16, pady=(12, 6), before=self.detail_name)
+        elif st == "key-no-vault":
+            self.wizard_msg.set(
+                f"La llave esta en {', '.join(drives)} pero el cofre no esta "
+                "inicializado. Pulsa 'Inicializar cofre'.")
+            self.wizard.pack(fill="x", padx=16, pady=(12, 6), before=self.detail_name)
+        else:
+            self.wizard.pack_forget()
+
+    def wizard_create_key(self, event=None):
+        drive = self.dest_var.get().strip().rstrip("\\") + "\\"
+        try:
+            path = create_key_on(drive + KEY_FILENAME)
+            serial = volume_serial(drive)
+            register_stick(self.vault_path, serial, drive)
+            record(self.vault_path, "stick-init", self.gate, serial, ok=True)
+            self.set_foot(f"llave de 32 bytes creada en {path} (serial {serial})")
+        except Exception as exc:
+            self.set_foot(f"no se pudo crear la llave: {exc}")
+            return
+        self.unlock()
+        return True
+
+    def wizard_init(self, event=None):
+        if not self.session:
+            if not self.unlock():
+                return False
+        try:
+            self.vault.init(self.session)
+            record(self.vault_path, "init", self.gate, self.serial, ok=True)
+            self.set_foot("cofre inicializado. Ahora pulsa Guardar para guardar "
+                          "tu primer secreto.")
+        except Exception as exc:
+            self.set_foot(f"no se pudo inicializar: {exc}")
+            return False
+        self.needs_init = False
+        self.unlock()
+        self.refresh_wizard()
+        return True
+
+    def wizard_backup(self, event=None):
+        drive = self.dest_var.get().strip().rstrip("\\") + "\\"
+        try:
+            src, _ = find_stick(None, self.vault_path, False)
+            copy_key_to(drive + KEY_FILENAME, read_key(src))
+            serial = volume_serial(drive)
+            register_stick(self.vault_path, serial, drive, role="reserva")
+            record(self.vault_path, "stick-copy", self.gate, serial, ok=True)
+            self.set_foot(f"llave copiada de {src} a {drive}{KEY_FILENAME}. Dos "
+                         "copias de la misma llave: es el precio del respaldo.")
+        except Exception as exc:
+            self.set_foot(f"no se pudo copiar la llave: {exc}")
+            return False
+        self.refresh_sticks()
+        return True
+
+    def _poll(self) -> None:
+        drives = self._key_drives()
+        if drives != self._key_cache:
+            self._key_cache = drives
+            self.refresh_sticks()
+            self.refresh_wizard()
+            if not self.session and drives:
+                if any(s["connected"] for s in self.stick_report()):
+                    self.unlock()
+        self.root.after(2000, self._poll)
+
+    def move_selection(self, delta: int) -> None:
+        names = getattr(self, "_names", [])
+        if not names:
+            return
+        try:
+            i = names.index(self.selected) if self.selected in names else 0
+        except ValueError:
+            i = 0
+        self.select(names[(i + delta) % len(names)])
+
+    def toggle_help(self) -> None:
+        if self.help_box.winfo_ismapped():
+            self.help_box.pack_forget()
+        else:
+            self.help_box.pack(fill="x", padx=14, pady=(8, 12))
+
+    def revoke_from_gui(self, lab) -> None:
+        serial = lab.cget("text").split("serial ")[1].split(" ")[0] if "serial " in lab.cget("text") else None
+        if serial is None:
+            return
+        if not getattr(self, "_confirm_revoke", None):
+            self._confirm_revoke = serial
+            self.set_foot(f"pulsa Revocar otra vez para dar de baja el pendrive {serial}")
+            self.root.after(6000, lambda: setattr(self, "_confirm_revoke", None))
+            return
+        self._confirm_revoke = None
+        if self.revoke_stick_safe(int(serial)):
+            self.refresh_sticks()
+            self.set_foot(f"pendrive {serial} dado de baja")
+
+    def revoke_stick_safe(self, serial: int) -> bool:
+        reg = load_registry(self.vault_path)
+        if len(reg.get("sticks", {})) <= 1:
+            self.set_foot("no se puede revocar el unico pendrive: perderias el cofre")
+            return False
+        ok = revoke_stick(self.vault_path, serial)
+        if ok:
+            record(self.vault_path, "stick-revoke", self.gate, serial, ok=True)
+        return ok
+
+    def _update_strength(self, event=None) -> None:
+        value = self.val_var.get()
+        if not value:
+            self.strength_var.set("fuerza: sin valor")
+            return
+        import math
+        chars = set(value)
+        bits = len(value) * math.log2(max(len(chars), 2))
+        label = "debil" if bits < 40 else "aceptable" if bits < 60 else "fuerte"
+        self.strength_var.set(f"fuerza: {label}  ({len(value)} caracteres, ~{bits:.0f} bits)")
+
+    def copy_name(self, event=None) -> None:
+        if not self.selected:
+            self.set_foot("no hay seleccion")
+            return
+        try:
+            from cofre.clipboard import copy_text
+            copy_text(self.selected)
+            record(self.vault_path, "copy-name", self.gate, self.serial, name=self.selected)
+            self.set_foot(f"copiado el nombre '{self.selected}'. Copiar el nombre no "
+                         "revela el valor.")
+        except Exception as exc:
+            self.set_foot(f"no se pudo copiar: {exc}")
+
+    def copy_exec_command(self, event=None) -> None:
+        if not self.selected:
+            self.set_foot("no hay seleccion")
+            return
+        cmd = f"run.cmd exec --name {self.selected} -- python script.py"
+        try:
+            from cofre.clipboard import copy_text
+            copy_text(cmd)
+            record(self.vault_path, "copy-exec", self.gate, self.serial, name=self.selected)
+            self.set_foot("copiado el comando. Sustituye 'python script.py' por tu "
+                         "comando real.")
+        except Exception as exc:
+            self.set_foot(f"no se pudo copiar: {exc}")
+
+    def rename_selected(self, event=None) -> None:
+        new = self.name_var.get().strip()
+        if not self.selected or not self.session:
+            self.set_foot("no hay seleccion")
+            return
+        if not new:
+            self.set_foot("escribe el nombre nuevo en el campo nombre y pulsa Renombrar")
+            return
+        if new == self.selected:
+            self.set_foot("el nombre ya es ese")
+            return
+        try:
+            ok = self.vault.rename(self.session, self.selected, new)
+        except Exception as exc:
+            self.set_foot(f"error al renombrar: {exc}")
+            return
+        if not ok:
+            self.set_foot(f"no se pudo renombrar a '{new}' (quizas ya existe ese nombre)")
+            return
+        record(self.vault_path, "rename", self.gate, self.serial, name=new)
+        old, self.selected = self.selected, new
+        self.name_var.set("")
+        self.detail_name.configure(text=new)
+        self.refresh_list()
+        self.set_foot(f"renombrado '{old}' a '{new}'. El valor no se tocó.")
+
+    def edit_selected(self, event=None) -> None:
+        if not self.selected or not self.session:
+            self.set_foot("no hay seleccion")
+            return
+        try:
+            value = self.vault.get(self.session, self.selected)
+        except Exception as exc:
+            self.set_foot(f"error al leer: {exc}")
+            return
+        self.name_var.set(self.selected)
+        self.val_var.set(value)
+        self.val_entry.configure(show=None)
+        self.show_val_btn.label.configure(text="Ocultar lo escrito")
+        self.set_foot(f"valor de '{self.selected}' cargado en el campo. Cambialo y "
+                     "pulsa Guardar para re-cifrarlo.")
+        record(self.vault_path, "edit-load", self.gate, self.serial, name=self.selected)
+
     def stick_label(self) -> str:
         used = next((s for s in self.stick_report() if s["serial"] == str(self.serial)), None)
         if used:
@@ -419,7 +721,14 @@ class CofreGUI:
         self.selected = name
         self.refresh_list()
         self.detail_name.configure(text=name)
-        self.meta_var.set(f"cifrado AES-256-GCM  |  abierta con la llave de {self.stick_label()}")
+        used = next((s for s in self.stick_report()
+                     if s["serial"] == str(self.serial)), None)
+        which = f"{used['drive']} ({used['role']})" if used else str(self.serial)
+        meta = f"cifrado AES-256-GCM  |  abierta con la llave de {which}"
+        tags = self.vault.meta(name).get("tags", [])
+        if tags:
+            meta += "  |  tags: " + ", ".join(tags)
+        self.meta_var.set(meta)
         self.value_box.delete("1.0", "end")
         self.value_box.insert("1.0", MASK)
 
@@ -508,8 +817,26 @@ class CofreGUI:
             self.set_foot("el portapapeles no se pudo escribir")
             return
         record(self.vault_path, "clipboard", self.gate, self.serial, name=self.selected)
-        self.set_foot("copiado al portapapeles de Windows. Cualquier proceso de la sesion "
-                      "puede leerlo: limpiarlo al terminar.")
+        if self.clipboard_ttl:
+            if self._clip_id is not None:
+                try:
+                    self.root.after_cancel(self._clip_id)
+                except Exception:
+                    pass
+            def _clean():
+                self._clip_id = None
+                try:
+                    from cofre.clipboard import clear_clipboard
+                    clear_clipboard()
+                    self.set_foot("portapapeles vaciado automaticamente")
+                except Exception:
+                    pass
+            self._clip_id = self.root.after(self.clipboard_ttl * 1000, _clean)
+            self.set_foot(f"copiado al portapapeles. Se vacia solo en {self.clipboard_ttl} s "
+                         "(mientras esta ahi, cualquier proceso de la sesion puede leerlo).")
+        else:
+            self.set_foot("copiado al portapapeles de Windows y NO se limpia solo: "
+                         "cualquier proceso de la sesion puede leerlo.")
 
     def toggle_show_value(self, event=None):
         showing = self.val_entry.cget("show") == ""
@@ -560,13 +887,16 @@ class CofreGUI:
             self.set_foot("gate no abierto: conecta el pendrive")
             return
         try:
-            self.vault.add(self.session, name, value)
+            tags = [t.strip() for t in self.tags_var.get().split(",") if t.strip()]
+            self.vault.add(self.session, name, value, tags)
         except Exception as exc:
             self.set_foot(f"error al guardar: {exc}")
             return
         record(self.vault_path, "add", self.gate, self.serial, name=name)
         self.name_var.set("")
         self.val_var.set("")
+        self.tags_var.set("")
+        self._update_strength()
         self.select(name)
         self.set_foot(f"guardado '{name}'")
 

@@ -99,6 +99,17 @@ class Vault:
             raise KeyError(name)
         return decrypt(master, data["entries"][name]["blob"]).decode("utf-8")
 
+    def rename(self, session: bytes, old: str, new: str) -> bool:
+        """Cambiar el nombre de una entrada sin tocar su blob cifrado."""
+        self.unlock(session)
+        data = self.load()
+        entries = data.get("entries", {})
+        if old not in entries or not new or new in entries:
+            return False
+        entries[new] = entries.pop(old)
+        self.save(data)
+        return True
+
     def delete(self, session: bytes, name: str) -> bool:
         """Borra una entrada. Cada secreto esta cifrado aparte, asi que quitar
         su blob no afecta a los demas."""
@@ -112,3 +123,6 @@ class Vault:
 
     def names(self) -> list[str]:
         return sorted(self.load().get("entries", {}))
+
+    def meta(self, name: str) -> dict:
+        return self.load().get("entries", {}).get(name, {})
