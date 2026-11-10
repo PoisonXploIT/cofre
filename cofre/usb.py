@@ -102,15 +102,34 @@ def save_registry(vault_path: str | Path, reg: dict) -> Path:
     return p
 
 
-def register_stick(vault_path: str | Path, serial: int, drive: str = "") -> dict:
+def register_stick(vault_path: str | Path, serial: int, drive: str = "",
+                   role: str | None = None) -> dict:
+    reg = load_registry(vault_path)
+    if role is None:
+        # primera llave = principal, las siguientes = reserva
+        role = "principal" if not reg.get("sticks") else "reserva"
+    if role not in ("principal", "reserva"):
+        raise ValueError("role debe ser principal o reserva")
     entry = {
         "serial": int(serial),
         "drive": drive,
         "label": volume_label(drive) if drive else "",
+        "role": role,
         "registered": datetime.now().isoformat(timespec="seconds"),
     }
     reg = load_registry(vault_path)
     reg["sticks"][str(int(serial))] = entry
+    save_registry(vault_path, reg)
+    return entry
+
+
+def set_role(vault_path: str | Path, serial: int, role: str) -> dict | None:
+    """Declarar explicitamente si un pendrive es principal o reserva."""
+    reg = load_registry(vault_path)
+    entry = reg.get("sticks", {}).get(str(int(serial)))
+    if not entry:
+        return None
+    entry["role"] = role
     save_registry(vault_path, reg)
     return entry
 

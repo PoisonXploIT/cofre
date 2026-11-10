@@ -18,6 +18,7 @@ Uso:
   python -m cofre.cli stick-register <ruta>   # autoriza el serial de un pendrive
   python -m cofre.cli stick-list              # pendrives autorizados
   python -m cofre.cli stick-revoke <serial>   # dar de baja un pendrive
+  python -m cofre.cli stick-role <serial> <principal|reserva>  # declarar el rol
   python -m cofre.cli log [--lines 20] [--stats]  # historial de accesos
 
 Gate:
@@ -103,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
     rv = with_common(sub.add_parser("stick-revoke"))
     rv.add_argument("serial", type=int, help="serial de volumen a dar de baja")
 
+    ro = with_common(sub.add_parser("stick-role"))
+    ro.add_argument("serial", type=int, help="serial de volumen ya registrado")
+    ro.add_argument("role", choices=["principal", "reserva"],
+                    help="que papel juega ese pendrive")
+
     sc = with_common(sub.add_parser("stick-copy"))
     sc.add_argument("dest", help="donde copiar la clave, p. ej. F:\\COFRE.KEY")
     sc.add_argument("--force", action="store_true", help="sobrescribir el destino")
@@ -152,8 +158,8 @@ def cmd_stick_list(vault: str) -> int:
     print(f"{len(sticks)} pendrive(s) autorizados")
     for serial, info in sticks.items():
         mark = "conectado" if serial in present else "no conectado"
-        print(f"  serial {serial}  {info.get('label') or ''}  {info.get('drive','')}  [{mark}]  "
-              f"registrado {info.get('registered','')}")
+        print(f"  serial {serial}  {info.get('drive','')}  {info.get('role','?')}  "
+              f"{info.get('label') or ''}  [{mark}]  registrado {info.get('registered','')}")
     return 0
 
 
@@ -260,6 +266,16 @@ def main(argv: list[str]) -> int:
     if args.command == "log":
         for line in tail(vault_path, args.lines):
             print(line)
+        return 0
+
+    if args.command == "stick-role":
+        from cofre.usb import set_role
+        entry = set_role(str(vault_path), args.serial, args.role)
+        if not entry:
+            print(f"serial {args.serial} no esta registrado (run.cmd stick-list)")
+            return 1
+        print(f"serial {args.serial} ({entry.get('drive') or '?'}) ahora es {args.role}")
+        record(str(vault_path), "stick-role", args.gate, args.serial, ok=True, detail=args.role)
         return 0
 
     if args.command == "stick-revoke":
