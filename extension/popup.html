@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --bg: #080B0F; --surface: #11161E; --card: #1F2836;
+      --border: #334258; --text: #E9EEF5; --muted: #98A5B6;
+      --faint: #6B7787; --accent: #3E9C7A; --on-accent: #04120C; --warn: #D9A44F;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; width: 320px; background: var(--bg); color: var(--text);
+      font: 12px/1.45 "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+    .dot.on { background: var(--accent); }
+    header b { font-size: 12px; letter-spacing: .04em; }
+    #state { margin-left: auto; color: var(--muted); font-size: 11px; }
+    #search {
+      width: 100%; padding: 7px 9px; margin: 8px 0 4px;
+      background: var(--card); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; outline: none;
+    }
+    #search:focus { border-color: var(--accent); }
+    main { padding: 0 12px 10px; max-height: 320px; overflow-y: auto; }
+    .row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 8px; border-radius: 6px; cursor: pointer;
+    }
+    .row:hover { background: var(--card); }
+    .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .kind { color: var(--faint); font-size: 10px; }
+    .row .fill {
+      border: 1px solid var(--border); background: transparent; color: var(--muted);
+      border-radius: 5px; padding: 2px 6px; font-size: 10px; cursor: pointer;
+    }
+    .row .fill:hover { border-color: var(--accent); color: var(--text); }
+    footer {
+      padding: 8px 12px; border-top: 1px solid var(--border);
+      background: var(--surface); color: var(--faint); font-size: 10px;
+    }
+    .empty { color: var(--muted); padding: 14px 4px; }
+    .hint { color: var(--faint); font-size: 10px; padding: 2px 4px 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span>
+    <b>COFRE</b>
+    <span id="state">comprobando...</span>
+  </header>
+  <main>
+    <input id="search" type="text" placeholder="buscar secreto" autocomplete="off">
+    <div id="list"></div>
+  </main>
+  <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto.</footer>
+  <script src="popup.js"></script>
+</body>
+</html>

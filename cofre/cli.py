@@ -82,6 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="secreto a pasar como variable de entorno al comando")
     sx.add_argument("cmd", nargs="+", help="comando a ejecutar, p. ej: python script.py")
 
+    sv = sub.add_parser("serve", help="puente para el navegador (solo 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=47653)
+
     sk = with_common(sub.add_parser(
         "check", help="comprobar que existen unos secretos, SIN mostrar su valor"))
     sk.add_argument("--name", action="append", default=[],
@@ -298,6 +301,10 @@ def main(argv: list[str]) -> int:
             return 0
         print("ese serial no esta registrado")
         return 1
+
+    if args.command == "serve":
+        from cofre.serve import main as serve_main
+        return serve_main(["--port", str(args.port)])
 
     if args.command == "check":
         if not vault.load().get("wrapper"):

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "COFRE - relleno de secretos",
+  "version": "1.0.0",
+  "description": "Rellena contrasenas desde el cofre local. El secreto nunca sale del equipo.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "COFRE"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtmZsv1khv+jBAldABgeGxW+xIXyVLiJVIZ26nJU28w2JWJmIAsGRPt9LiiJZRmIZwALDIMftHLge8qR81cM7PUN0KkxICmY4fg11QJklui4gpR8zMutAjGSP+ZZkfHA0T+E9RIDvW4//6KBr9b+0g45Y+7Iq9j0Ct04jMQSlvv1rx+IwETlfX2oSNrVNS+L3APkIXC6li/nEx8BsvqIWuxJb6EItONqHJm4yzeGktNRwyn0g3Aw4M0yW4YSqWcFNMGXzrpJmCJyfXUlahYe0GbWpSVqXE3IaNQcVzBRbab4yWuFKmgDecnAzrDrFH++AmS0+nY+pSxCJGjA9cmB8lwIDAQAB"
+}

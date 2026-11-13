@@ -5,3 +5,7 @@ cofre.json
 .cofre-access.log.old
 .venv/
 __pycache__/
+
+# Clave privada de la extension: nunca se versiona.
+# La publica va dentro de extension/manifest.json (campo "key").
+extension/.extension-key.pem

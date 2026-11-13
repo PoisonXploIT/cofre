@@ -78,6 +78,8 @@ class CofreGUI:
         self.reveal_id = None
         self.sticky = False
         self.needs_init = False
+        self.bridge = None
+        self.browser_on = False
         self.clipboard_ttl = 30
         self._clip_id = None
         self._key_cache: set[str] = set()
@@ -207,6 +209,9 @@ class CofreGUI:
         self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
                                      bg=PANEL2, font=self.f_sub)
         self.status_label.pack(side="left", padx=(8, 12), pady=6)
+        self.browser_btn = self._btn(top, "Navegador: off",
+                                      lambda _e: self.toggle_browser())
+        self.browser_btn.pack(side="right", padx=(0, 8))
         self._btn(top, "Guia", self.open_guide).pack(side="right", padx=(0, 8))
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
         self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 8))
@@ -478,7 +483,8 @@ class CofreGUI:
         tk.Label(foot, textvariable=self.foot_var, fg=MUT, font=self.f_small,
                  bg=PANEL, anchor="w").pack(fill="x", padx=16, pady=8)
 
-        self.root.bind("<Escape>", lambda _e: self.root.destroy())
+        self.root.bind("<Escape>", lambda _e: self._on_close())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Control-l>", lambda _e: self.lock())
         self.root.bind("<Control-f>", lambda _e: self.query_entry.focus_set())
         self.root.bind("<Control-n>", lambda _e: self.name_entry.focus_set())
@@ -598,6 +604,7 @@ class CofreGUI:
         self.session = None
         self.serial = None
         self.selected = None
+        self.stop_bridge()
         if self.gate == "usb-pin":
             self.pin_var.set("")
         self.hide()
@@ -697,6 +704,53 @@ class CofreGUI:
         self.name_entry.icursor("end")
         self.canvas.yview_moveto(1.0)
         self.set_foot("escribe el nombre (p. ej. TAVILY_API_KEY), el valor, y pulsa Guardar")
+
+    # ---------- puente para el navegador ----------
+
+    def toggle_browser(self) -> None:
+        if self.bridge:
+            self.stop_bridge()
+            self.set_foot("puente del navegador cerrado")
+        else:
+            self.start_bridge()
+
+    def start_bridge(self) -> None:
+        from cofre.serve import SecretServer, allowed_origins_for
+
+        origins = allowed_origins_for()
+        if not origins:
+            self.set_foot("el navegador necesita la extension: ejecuta "
+                          "tools/install_extension.py una vez")
+            return
+        if not self.session:
+            self.set_foot("abre el cofre con el pendrive antes de activar el navegador")
+            return
+        try:
+            self.bridge = SecretServer(self.vault_path, origins, gate=self.gate,
+                                       stick=self.stick).start()
+        except OSError as exc:
+            self.set_foot(f"no se pudo abrir el puerto 47653: {exc}")
+            self.bridge = None
+            return
+        self.browser_on = True
+        self.browser_btn.label.configure(text="Navegador: on", fg=OK)
+        record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
+        self.set_foot(f"navegador conectado en {self.bridge.origin} "
+                      f"(solo mientras el cofre este abierto)")
+
+    def stop_bridge(self) -> None:
+        if self.bridge:
+            try:
+                self.bridge.stop()
+            except Exception:
+                pass
+            self.bridge = None
+        self.browser_on = False
+        self.browser_btn.label.configure(text="Navegador: off", fg=FG)
+
+    def _on_close(self) -> None:
+        self.stop_bridge()
+        self.root.destroy()
 
     def _key_drives(self) -> set[str]:
         return {d for d in drive_letters() if (Path(d) / KEY_FILENAME).is_file()}
