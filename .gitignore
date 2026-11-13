@@ -9,3 +9,6 @@ __pycache__/
 # Clave privada de la extension: nunca se versiona.
 # La publica va dentro de extension/manifest.json (campo "key").
 extension/.extension-key.pem
+
+# Regla de la casa: la documentacion va al vault, no al repo.
+/*.md
