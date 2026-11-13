@@ -1,9 +1,9 @@
-"""Crea el acceso directo COFRE en el escritorio.
+"""Crea los accesos directos del cofre en el escritorio.
 
-Usa pythonw.exe del venv para que no aparezca ninguna ventana de consola.
-El icono sale de assets/cofre.ico.
+  COFRE              -> pythonw.exe, sin consola (uso normal)
+  COFRE (diagnostico)-> run-diag.cmd, con consola (para leer errores)
 
-Uso: python tools/make_shortcut.py [--name COFRE]
+Uso: python tools/make_shortcut.py [--name COFRE] [--only normal|diag]
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PYTHONW = REPO / ".venv" / "Scripts" / "pythonw.exe"
 ICON = REPO / "assets" / "cofre.ico"
+DIAG = REPO / "run-diag.cmd"
 
 
 def desktop_dir() -> Path:
@@ -31,38 +32,53 @@ def desktop_dir() -> Path:
     return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
 
 
+def make(lnk: Path, target: Path, args: str, workdir: Path,
+         description: str, style: int = 1) -> bool:
+    ps = f"""
+$ErrorActionPreference = 'Stop'
+$w = New-Object -ComObject WScript.Shell
+$s = $w.CreateShortcut('{lnk}')
+$s.TargetPath = '{target}'
+$s.Arguments = '{args}'
+$s.WorkingDirectory = '{workdir}'
+$s.IconLocation = '{ICON},0'
+$s.Description = '{description}'
+$s.WindowStyle = {style}
+$s.Save()
+"""
+    result = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        print("error:", result.stderr.strip())
+        return False
+    return lnk.exists()
+
+
 def main() -> int:
     name = "COFRE"
     if "--name" in sys.argv:
         name = sys.argv[sys.argv.index("--name") + 1]
+    only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
 
-    for need, label in ((PYTHONW, "pythonw.exe del venv"), (ICON, "assets/cofre.ico")):
+    for need, label in ((PYTHONW, "pythonw.exe del venv"), (ICON, "assets/cofre.ico"),
+                        (DIAG, "run-diag.cmd")):
         if not need.exists():
             print(f"falta {label}: {need}")
             return 1
 
     desktop = desktop_dir()
-    lnk = desktop / f"{name}.lnk"
-    ps = f"""
-$ErrorActionPreference = 'Stop'
-$w = New-Object -ComObject WScript.Shell
-$s = $w.CreateShortcut('{lnk}')
-$s.TargetPath = '{PYTHONW}'
-$s.Arguments = '-m cofre.cli gui'
-$s.WorkingDirectory = '{REPO}'
-$s.IconLocation = '{ICON},0'
-$s.Description = 'COFRE - boveda de secretos'
-$s.WindowStyle = 1
-$s.Save()
-Write-Output ('creado ' + '{lnk}')
-"""
-    result = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                            capture_output=True, text=True)
-    print(result.stdout.strip() or result.stderr.strip())
-    if not lnk.exists():
-        return 1
-    print("tamano:", lnk.stat().st_size, "bytes")
-    return 0
+    ok = True
+    if only in (None, "normal"):
+        lnk = desktop / f"{name}.lnk"
+        ok &= make(lnk, PYTHONW, "-m cofre.cli gui", REPO,
+                   "COFRE - boveda de secretos")
+        print("normal     :", lnk, "(", lnk.stat().st_size if lnk.exists() else 0, "bytes )")
+    if only in (None, "diag"):
+        lnk = desktop / f"{name} (diagnostico).lnk"
+        ok &= make(lnk, DIAG, "", REPO,
+                   "COFRE - modo diagnostico (con consola)")
+        print("diagnostico:", lnk, "(", lnk.stat().st_size if lnk.exists() else 0, "bytes )")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
