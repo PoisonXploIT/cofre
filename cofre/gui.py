@@ -86,7 +86,8 @@ class CofreGUI:
 
     def _btn(self, parent, text, command, accent=False):
         """Boton plano: Tk tiene un aspecto de los 90; un frame con etiqueta
-        dentro queda mas limpio y permite hover."""
+        dentro queda mas limpio y permite hover. Admite estado deshabilitado:
+        un boton apagado no responde ni al raton ni al hover."""
         bg = ACC2 if accent else PANEL2
         frame = tk.Frame(parent, bg=LINE, highlightthickness=1)
         inner = tk.Frame(frame, bg=bg)
@@ -94,18 +95,44 @@ class CofreGUI:
         inner.pack(fill="both", expand=True, padx=1, pady=1)
         lab.pack(fill="both", expand=True, padx=13, pady=8)
         frame.label = lab
-        def hover(_e, b=bg):
+        frame._enabled = True
+        frame._bg = bg
+
+        def click(_e):
+            if not frame._enabled:
+                return
+            command(_e)
+
+        def hover(_e):
+            if not frame._enabled:
+                return
             for f in (frame, inner, lab):
                 f.configure(bg=ACC)
             lab.configure(fg=BG)
-        def unhover(_e, b=bg):
+
+        def unhover(_e):
+            if not frame._enabled:
+                return
             frame.configure(bg=LINE)
-            inner.configure(bg=b)
-            lab.configure(bg=b, fg=FG)
+            inner.configure(bg=bg)
+            lab.configure(bg=bg, fg=FG)
+
+        def set_enabled(on: bool):
+            frame._enabled = on
+            if on:
+                frame.configure(bg=LINE)
+                inner.configure(bg=bg)
+                lab.configure(bg=bg, fg=FG)
+            else:
+                frame.configure(bg=LINE)
+                inner.configure(bg=PANEL)
+                lab.configure(bg=PANEL, fg="#4a5563")
+
+        frame.set_enabled = set_enabled
         frame.bind("<Enter>", hover)
         frame.bind("<Leave>", unhover)
-        frame.bind("<Button-1>", lambda e: command(e))
-        lab.bind("<Button-1>", lambda e: command(e))
+        frame.bind("<Button-1>", click)
+        lab.bind("<Button-1>", click)
         return frame
 
     def _entry(self, parent, var, mono=False, show=None):
@@ -233,24 +260,31 @@ class CofreGUI:
         row = tk.Frame(right, bg=PANEL2)
         row.pack(fill="x", padx=16, pady=6)
         self._ver_targets = set()
+        self.action_btns = []
         ver = self._btn(row, "Ver", self.reveal, accent=True)
         ver.pack(side="left", padx=8)
+        self._ver_frame = ver
         for w in (ver, *ver.winfo_children(), *[c for w in ver.winfo_children() for c in w.winfo_children()]):
             self._ver_targets.add(w)
-        self._ver_frame = ver
+        self.action_btns.append(ver)
         for b in (self._btn(row, "Ocultar", self.hide),
                   self._btn(row, "Copiar el valor", self.copy_to_clipboard),
                   self._btn(row, "Copiar el nombre", self.copy_name),
                   self._btn(row, "Copiar comando exec", self.copy_exec_command)):
             b.pack(side="left", padx=8)
+            self.action_btns.append(b)
         self.sticky_btn = self._btn(row, "Fijar", self.toggle_sticky)
         self.sticky_btn.pack(side="left", padx=8)
+        self.action_btns.append(self.sticky_btn)
         self.edit_btn = self._btn(row, "Editar valor", self.edit_selected)
         self.edit_btn.pack(side="left", padx=8)
+        self.action_btns.append(self.edit_btn)
         self.rename_btn = self._btn(row, "Renombrar", self.rename_selected)
         self.rename_btn.pack(side="left", padx=8)
+        self.action_btns.append(self.rename_btn)
         self.del_btn = self._btn(row, "Borrar", self.delete_selected)
         self.del_btn.pack(side="left", padx=8)
+        self.action_btns.append(self.del_btn)
 
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
@@ -301,7 +335,7 @@ class CofreGUI:
                   lambda e: self.generate("words", 4, event=e)).pack(side="left", padx=8)
         self._btn(genrow, "6 palabras",
                   lambda e: self.generate("words", 6, event=e)).pack(side="left", padx=8)
-        self.show_val_btn = self._btn(genrow, "Mostrar lo escrito",
+        self.show_val_btn = self._btn(genrow, "Mostrar al teclear",
                                       lambda e: self.toggle_show_value(event=e))
         self.show_val_btn.pack(side="left", padx=8)
         self._btn(genrow, "Guardar", self.add_secret, accent=True).pack(side="right")
@@ -458,6 +492,8 @@ class CofreGUI:
         self.session = None
         self.serial = None
         self.selected = None
+        if self.gate == "usb-pin":
+            self.pin_var.set("")
         self.hide()
         self.detail_name.configure(text="sin seleccion")
         self.meta_var.set("cofre bloqueado")
@@ -472,6 +508,7 @@ class CofreGUI:
         if not self.session:
             self.count_var.set("gate cerrado")
             self._names = []
+            self._refresh_actions()
             return
         q = self.query_var.get().strip().lower()
         tags = []
@@ -488,6 +525,11 @@ class CofreGUI:
                     continue
             names.append(n)
         self._names = names
+        if self.selected not in names:
+            self.selected = None
+            self.detail_name.configure(text="sin seleccion")
+            self.meta_var.set("selecciona un secreto de la lista")
+        self._refresh_actions()
         self.count_var.set(f"{len(names)} entrada(s)")
         if not names:
             tk.Label(self.list_frame, text="no hay secretos (o ninguno coincide)",
@@ -604,7 +646,16 @@ class CofreGUI:
             self.refresh_wizard()
             if not self.session and drives:
                 if any(s["connected"] for s in self.stick_report()):
-                    self.unlock()
+                    if self.gate == "usb-pin":
+                        # B (2026-11-10): con PIN, enchufar no abre. Se exige
+                        # teclear el PIN y pulsar Reconectar.
+                        self.set_status("pendrive detectado  |  escribe el PIN y pulsa "
+                                        "Reconectar", warn=False)
+                        self.set_foot("pendrive detectado. Por usar gate usb-pin, el "
+                                      "cofre no se abre solo: escribe el PIN y pulsa "
+                                      "Reconectar.")
+                    else:
+                        self.unlock()
         # Auto-bloqueo: si desaparece el pendrive que abrio la sesion, la llave
         # no debe seguir viva en RAM. Reabrir es un click con el otro pendrive.
         if self.session and self.serial is not None:
@@ -733,8 +784,8 @@ class CofreGUI:
             return
         self.name_var.set(self.selected)
         self.val_var.set(value)
-        self.val_entry.configure(show=None)
-        self.show_val_btn.label.configure(text="Ocultar lo escrito")
+        self.val_entry.configure(show="")
+        self.show_val_btn.label.configure(text="Ocultar al teclear")
         self.set_foot(f"valor de '{self.selected}' cargado en el campo. Cambialo y "
                      "pulsa Guardar para re-cifrarlo.")
         record(self.vault_path, "edit-load", self.gate, self.serial, name=self.selected)
@@ -744,6 +795,13 @@ class CofreGUI:
         if used:
             return f"{used['drive']} ({used['role']})"
         return f"serial {self.serial}"
+
+    def _refresh_actions(self) -> None:
+        """Los botones del detalle solo tienen sentido con un secreto elegido y
+        el cofre abierto."""
+        usable = bool(self.selected) and self.session is not None
+        for b in getattr(self, "action_btns", []):
+            b.set_enabled(usable)
 
     def select(self, name: str):
         self.selected = name
@@ -867,9 +925,12 @@ class CofreGUI:
                          "cualquier proceso de la sesion puede leerlo.")
 
     def toggle_show_value(self, event=None):
-        showing = self.val_entry.cget("show") == ""
-        self.val_entry.configure(show=None if showing else "*")
-        self.show_val_btn.label.configure(text="Ocultar lo escrito" if showing else "Mostrar lo escrito")
+        visible = self.val_entry.cget("show") == ""
+        # Ojo: configure(show=None) NO cambia nada en tkinter (None = "no tocar");
+        # para mostrar el texto hay que pasar cadena vacia.
+        self.val_entry.configure(show="*" if visible else "")
+        self.show_val_btn.label.configure(
+            text="Mostrar al teclear" if visible else "Ocultar al teclear")
         self.set_foot("el campo valor se muestra o se oculta; esto no guarda nada en disco")
 
     def delete_selected(self, event=None):
