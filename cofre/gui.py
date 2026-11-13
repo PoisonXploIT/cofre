@@ -605,6 +605,17 @@ class CofreGUI:
             if not self.session and drives:
                 if any(s["connected"] for s in self.stick_report()):
                     self.unlock()
+        # Auto-bloqueo: si desaparece el pendrive que abrio la sesion, la llave
+        # no debe seguir viva en RAM. Reabrir es un click con el otro pendrive.
+        if self.session and self.serial is not None:
+            used = next((s for s in self.stick_report()
+                         if s["serial"] == str(self.serial)), None)
+            if used is not None and not used["connected"]:
+                label = f"{used['drive']} ({used['role']})"
+                self.lock()
+                self.set_status(f"bloqueado: se quito el pendrive {label}", warn=True)
+                self.set_foot(f"se retiro el pendrive {label}: el cofre se ha bloqueado "
+                              "solo. Conecta cualquier pendrive del cofre y pulsa Reconectar.")
         self.root.after(2000, self._poll)
 
     def move_selection(self, delta: int) -> None:
