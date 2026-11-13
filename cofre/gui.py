@@ -212,9 +212,8 @@ class CofreGUI:
         self.browser_btn = self._btn(top, "Navegador: off",
                                       lambda _e: self.toggle_browser())
         self.browser_btn.pack(side="right", padx=(0, 8))
-        self._btn(top, "Guia", self.open_guide).pack(side="right", padx=(0, 8))
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
-        self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 8))
+        self._btn(top, "Abrir", self.unlock, accent=True).pack(side="right", padx=(0, 8))
 
         # ---------- cuerpo ----------
         body = tk.Frame(self.root, bg=BG)
@@ -480,8 +479,15 @@ class CofreGUI:
             value="El pendrive GUARDA la clave (32 bytes en COFRE.KEY), no la deriva. "
                   "Sin pendrive el cofre no se abre. Cada accion queda en "
                   ".cofre-access.log (el nombre, nunca el valor).")
-        tk.Label(foot, textvariable=self.foot_var, fg=MUT, font=self.f_small,
-                 bg=PANEL, anchor="w").pack(fill="x", padx=16, pady=8)
+        footrow = tk.Frame(foot, bg=PANEL)
+        footrow.pack(fill="x", padx=16, pady=6)
+        tk.Label(footrow, textvariable=self.foot_var, fg=MUT, font=self.f_small,
+                 bg=PANEL, anchor="w", justify="left",
+                 wraplength=640).pack(side="left", fill="x", expand=True)
+        self.browser_btn = self._btn(footrow, "Navegador: off",
+                                     lambda _e: self.toggle_browser())
+        self.browser_btn.pack(side="right", padx=(SM, 0))
+        self._btn(footrow, "Guia", self.open_guide).pack(side="right", padx=SM)
 
         self.root.bind("<Escape>", lambda _e: self._on_close())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
