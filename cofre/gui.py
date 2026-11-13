@@ -489,6 +489,11 @@ class CofreGUI:
         self.browser_btn.pack(side="right", padx=(SM, 0))
         self._btn(footrow, "Guia", self.open_guide).pack(side="right", padx=SM)
 
+        # Con pythonw no hay consola: si un callback lanza, Tk imprime el
+        # traceback en un stderr invisible y la ventana sigue como si nada.
+        # Se captura y se muestra en el pie, que es donde el usuario mira.
+        self.root.report_callback_exception = self._on_tk_error
+
         self.root.bind("<Escape>", lambda _e: self._on_close())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Control-l>", lambda _e: self.lock())
@@ -711,7 +716,26 @@ class CofreGUI:
         self.canvas.yview_moveto(1.0)
         self.set_foot("escribe el nombre (p. ej. TAVILY_API_KEY), el valor, y pulsa Guardar")
 
+    # ---------- errores ----------
+
+    def _on_tk_error(self, exc_type, exc_value, tb) -> None:
+        """Un fallo en un callback no puede quedarse mudo."""
+        import traceback
+        text = traceback.format_exception(exc_type, exc_value, tb)
+        sys.stderr.write("".join(text))
+        try:
+            self.set_foot(f"error interno: {exc_type.__name__}: {exc_value}. "
+                          "Usa el acceso COFRE (diagnostico) para ver el detalle.")
+        except Exception:
+            pass
+        try:
+            record(self.vault_path, "gui-error", self.gate, self.serial, ok=False,
+                   detail=f"{exc_type.__name__}: {exc_value}"[:120])
+        except Exception:
+            pass
+
     # ---------- puente para el navegador ----------
+
 
     def toggle_browser(self) -> None:
         if self.bridge:
@@ -1326,9 +1350,21 @@ class CofreGUI:
 
     def set_lang(self, code: str, event=None):
         self.lang_var.set(code)
-        info = entropy(words=int(self.words_var.get() or 5), lang=code)
-        self.entropy_var.set(f"{info['palabras']} palabras x {info['bits_por_palabra']} bits "
-                            f"= {info['bits']} bits ({info['lista']} palabras en la lista)")
+        try:
+            words = int(self.words_var.get() or 5)
+        except ValueError:
+            words = 5
+            self.words_var.set("5")
+        info = entropy(words=words, lang=code)
+        if not info.get("lista"):
+            self.entropy_var.set(
+                f"sin lista de palabras: password silabica de ~{info['bits']} bits "
+                "(no depende del numero de palabras). Genera la lista con "
+                "tools/build_wordlist.py")
+            return
+        self.entropy_var.set(
+            f"{info['palabras']} palabras x {info.get('bits_por_palabra', 0)} bits "
+            f"= {info['bits']} bits ({info['lista']} palabras en la lista)")
 
     def generate(self, kind: str, words: int = 5, event=None):
         if kind == "machine":
@@ -1337,9 +1373,12 @@ class CofreGUI:
         else:
             value = human_password(words=words, lang=self.lang_var.get())
             info = entropy(words=words, lang=self.lang_var.get())
-            note = (f"{info['palabras']} palabras de {info['lista']} = {info['bits']} bits. "
-                    f"{info['aviso']}") if info['aviso'] else \
-                f"{info['palabras']} palabras de {info['lista']} = {info['bits']} bits"
+            if info["lista"]:
+                note = (f"{info['palabras']} palabras de {info['lista']} = "
+                        f"{info['bits']} bits")
+            else:
+                note = (f"sin lista: password silabica de ~{info['bits']} bits. "
+                        "Genera la lista con tools/build_wordlist.py")
         self.val_var.set(value)
         self.set_foot(note)
         record(self.vault_path, "gen", self.gate, self.serial)
@@ -1378,6 +1417,12 @@ def main(argv: list[str] | None = None) -> int:
         print("gui construida sin error; entradas:", len(app.vault.names()))
         print("geometria:", app.root.winfo_geometry())
         print(f"dpi: modo={dpi['mode']} {dpi['dpi']} ppp, tk scaling={dpi['scaling']:.3f}")
+        from cofre.gen import entropy as _ent
+        _info = _ent(words=6, lang="es")
+        if _info.get("lista"):
+            print(f"wordlist: {_info['lista']} palabras, {_info['bits_por_palabra']} bits/palabra")
+        else:
+            print("wordlist: NO encontrada (se usara el fallback silabico)")
         app.root.destroy()
         return 0
     app.root.mainloop()

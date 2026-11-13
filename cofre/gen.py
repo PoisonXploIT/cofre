@@ -56,8 +56,12 @@ def load_words(lang: str = "en") -> list[str]:
 def entropy(words: int = 5, lang: str = "en") -> dict:
     wl = load_words(lang)
     if not wl:
+        # Ojo: esta rama tiene que devolver las MISMAS claves que la otra.
+        # En 2026-11-13 la GUI petaba con KeyError 'bits_por_palabra' cuando la
+        # wordlist no estaba disponible.
         bits = 6 * math.log2(len(SYLLABLES)) + math.log2(10)
-        return {"palabras": words, "lista": 0, "bits": round(bits, 1),
+        return {"palabras": words, "lista": 0, "bits_por_palabra": 0.0,
+                "bits": round(bits, 1),
                 "aviso": "sin wordlist: fallback silabico (~36 bits). "
                          "Genera una con tools/build_wordlist.py"}
     per = math.log2(len(wl))
