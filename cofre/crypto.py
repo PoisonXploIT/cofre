@@ -12,10 +12,10 @@ Sin S, el envoltorio no se puede descifrar (AES-256-GCM, 2^256).
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from pathlib import Path
 
+from cofre.paths import atomic_write
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 WRAP_VERSION = 1
@@ -61,18 +61,20 @@ class Vault:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        # H7: escritura atómica (tmp + os.replace), no write() a secas.
+        atomic_write(self.path, json.dumps(data, indent=2))
 
-    def init(self, session: bytes) -> bytes:
+    def init(self, session: bytes, salt: bytes | None = None) -> bytes:
         data = self.load()
         if data.get("wrapper"):
             raise ValueError("el cofre ya existe")
         master = new_master_key()
         data["wrapper"] = wrap_key(master, session)
         data["entries"] = {}
+        if salt:
+            # H9: la sal viaja con el cofre. Un backup de cofre.json es un
+            # backup completo; sin la sal, el cofre no se puede reabrir.
+            data["salt"] = salt.hex()
         self.save(data)
         return master
 

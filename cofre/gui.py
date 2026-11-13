@@ -32,6 +32,7 @@ from cofre.audit import record, tail
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
+from cofre.paths import default_vault
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
                          enable_dpi_awareness)
 from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters,
@@ -264,7 +265,9 @@ class CofreGUI:
             "Guardar: nombre + valor + Guardar. Ver: solo con click de raton.",
             "Bloquear (Ctrl+L) tira la llave de la RAM. Copiar pone el valor en el "
             "portapapeles y lo limpia a los 30 s.",
-            "Atajos: Ctrl+F buscar, Ctrl+N nombre, Ctrl+C copiar, flechas navegar, F1 ayuda.",
+            "Atajos: Ctrl+F buscar, Ctrl+N nombre, Ctrl+C copiar (solo si no "
+            "estás tecleando en un campo), flechas navegar, F1 ayuda, Escape "
+            "bloquea (no cierra), Ctrl+Q sale.",
         ):
             tk.Label(self.help_box, text=line, fg=MUT, font=self.f_small, bg=PANEL2,
                      anchor="w").pack(fill="x")
@@ -491,12 +494,18 @@ class CofreGUI:
         # Se captura y se muestra en el pie, que es donde el usuario mira.
         self.root.report_callback_exception = self._on_tk_error
 
-        self.root.bind("<Escape>", lambda _e: self._on_close())
+        # H4: Escape no cierra la aplicacion. Cierra dialogs, desarma la
+        # confirmacion pendiente y, si no hay nada pendiente, bloquea el cofre.
+        # Para cerrar la ventana: la X, Ctrl+Q o el menu del sistema.
+        self.root.bind("<Escape>", self._on_escape)
+        self.root.bind("<Control-q>", lambda _e: self._on_close())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Control-l>", lambda _e: self.lock())
         self.root.bind("<Control-f>", lambda _e: self.query_entry.focus_set())
         self.root.bind("<Control-n>", lambda _e: self.name_entry.focus_set())
-        self.root.bind("<Control-c>", lambda _e: self.copy_to_clipboard())
+        # H3: Ctrl+C solo copia el secreto cuando NO estas tecleando en un
+        # campo. Si el foco esta en un Entry/Text, ese Ctrl+C es el normal.
+        self.root.bind("<Control-c>", self._on_copy_shortcut)
         self.root.bind("<Prior>", lambda _e: self.move_selection(-1))
         self.root.bind("<Next>", lambda _e: self.move_selection(1))
         self.root.bind("<F1>", lambda _e: self.toggle_help())
@@ -775,6 +784,47 @@ class CofreGUI:
         self.browser_on = False
         self.browser_btn.label.configure(text="Navegador: off", fg=FG)
 
+    def _current_salt(self) -> bytes | None:
+        """La sal del cofre, para guardarla dentro de cofre.json (H9)."""
+        try:
+            from cofre.salt import get_salt
+            return get_salt(self.vault_path, create=not Path(self.vault_path).exists())
+        except Exception:
+            return None
+
+    def _on_escape(self, event=None) -> None:
+        """Escape: desarma confirmaciones, bloquea; nunca cierra la ventana."""
+        if getattr(self, "_confirm_delete", False) or getattr(self, "_confirm_revoke", None):
+            self._cancel_delete()
+            self._confirm_revoke = None
+            self.set_foot("confirmacion cancelada")
+            return
+        if getattr(self, "help_box", None) is not None and self.help_box.winfo_ismapped():
+            self.toggle_help()
+            return
+        if self.session:
+            self.lock()
+            self.set_foot("bloqueado con Escape. La ventana sigue abierta: "
+                          "Ctrl+L o Reconectar para volver a abrir")
+            return
+        self.set_foot("Escape no cierra la ventana. Usa la X, o Ctrl+Q para salir")
+
+    def _on_copy_shortcut(self, event=None) -> None:
+        focused = None
+        try:
+            focused = self.root.focus_get()
+        except Exception:
+            focused = None
+        if focused is None:
+            # Sin foco conocido no se sabe qué quería copiar la persona.
+            # La copia de un secreto es la acción peligrosa: no la hacemos.
+            self.set_foot("Ctrl+C no copia: pulsa primero sobre un secreto de la lista")
+            return
+        if focused.winfo_class() in ("Entry", "Text", "TEntry", "TText"):
+            self.set_foot("Ctrl+C no copia el secreto mientras tecleas en un campo")
+            return
+        self.copy_to_clipboard()
+
     def _on_close(self) -> None:
         self.stop_bridge()
         self.root.destroy()
@@ -826,7 +876,7 @@ class CofreGUI:
             if not self.unlock():
                 return False
         try:
-            self.vault.init(self.session)
+            self.vault.init(self.session, salt=self._current_salt())
             record(self.vault_path, "init", self.gate, self.serial, ok=True)
             self.set_foot("cofre inicializado. Ahora pulsa Guardar para guardar "
                           "tu primer secreto.")
@@ -1387,7 +1437,7 @@ class CofreGUI:
 
 
 def parse_args(argv: list[str]) -> dict:
-    vault = os.environ.get("COFRE_VAULT", str(Path.home() / "AI" / "cofre" / "cofre.json"))
+    vault = str(default_vault())
     out = {"vault": vault, "gate": "usb", "stick": None, "allow_new": False}
     if "--vault" in argv:
         out["vault"] = argv[argv.index("--vault") + 1]

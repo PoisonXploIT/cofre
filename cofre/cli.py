@@ -40,10 +40,12 @@ from pathlib import Path
 
 from cofre.audit import record, tail
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, resolve_session_key
+from cofre.gate import GateUnavailable, resolve_session_key, _salt_for
 from cofre.gen import entropy, human_password, machine_password
+from cofre.paths import default_vault
+from cofre.salt import SaltMismatch, SaltMissing, show as salt_show
 
-DEFAULT_VAULT = Path(os.environ.get("COFRE_VAULT", Path.home() / "AI" / "cofre" / "cofre.json"))
+DEFAULT_VAULT = default_vault()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -126,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     gp.add_argument("--selftest", action="store_true",
                     help="construir la ventana, comprobarla y salir (sin mostrar)")
     with_common(sub.add_parser("stick-list"))
+    with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
     return p
 
 
@@ -353,8 +356,8 @@ def main(argv: list[str]) -> int:
         for name in args.name:
             try:
                 env[name] = vault.get(session, name)
-            except VaultError:
-                missing.append(name)
+            except (KeyError, ValueError) as exc:  # VaultError no existe: era NameError
+                missing.append(f"{name} ({type(exc).__name__})")
         if missing:
             print("no encontrados: " + ", ".join(missing), file=sys.stderr)
             record(str(vault_path), "exec", args.gate, serial, ok=False, detail=";".join(missing))
@@ -365,6 +368,19 @@ def main(argv: list[str]) -> int:
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))
+
+    if args.command == "salt":
+        try:
+            info = salt_show(str(vault_path))
+        except (SaltMissing, SaltMismatch) as exc:
+            print(f"problema con la sal: {exc}", file=sys.stderr)
+            return 1
+        print(f"sal del cofre ({info['bytes']} bytes): {info['sal_base64']}")
+        print(f"  fichero:      {info['fichero']}")
+        print(f"  dentro del cofre: {'si' if info['dentro_del_cofre'] else 'no'}")
+        print("Guarda esa cadena en un sitio resistente. Sin ella, el cofre no se")
+        print("puede reabrir aunque conserves el pendrive.")
+        return 0
 
     if args.command == "gui":
         from cofre.gui import main as gui_main
@@ -475,7 +491,7 @@ def main(argv: list[str]) -> int:
                 return 1
 
         if args.command == "init":
-            vault.init(session)
+            vault.init(session, salt=_salt_for(str(vault_path)))
             print("cofre inicializado en", args.vault)
             name = None
         elif args.command == "add":

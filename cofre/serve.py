@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from cofre.paths import default_vault
 from cofre.audit import record
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, resolve_session_key
@@ -230,21 +231,31 @@ def allowed_origins_for(manifest_path: Path | None = None) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Arranca solo el puente, sin GUI. Util para depurar con curl."""
+    """Arranca solo el puente, sin GUI. Util para depurar con curl.
+
+    H6: antes se leian a mano solo --port y --vault; --gate y --stick se
+    ignoraban y el puente sempre usaba 'usb' con el pendrive que encontrara.
+    """
+    import argparse
     import sys
     argv = list(sys.argv[1:] if argv is None else argv)
-    vault = os.environ.get("COFRE_VAULT",
-                           str(Path.home() / "AI" / "cofre" / "cofre.json"))
-    port = DEFAULT_PORT
-    if "--port" in argv:
-        port = int(argv[argv.index("--port") + 1])
+    ap = argparse.ArgumentParser(description="puente loopback del cofre para el navegador")
+    ap.add_argument("--vault", default=str(default_vault()))
+    ap.add_argument("--gate", default="usb", choices=["pin", "hid", "usb", "usb-pin"])
+    ap.add_argument("--stick", help="ruta explicita del COFRE.KEY del pendrive")
+    ap.add_argument("--allow-new-stick", action="store_true")
+    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    args = ap.parse_args(argv)
+
     origins = allowed_origins_for()
     if not origins:
         print("sin origenes autorizados: falta 'key' en extension/manifest.json")
         print("ejecuta: python tools/install_extension.py")
         return 1
-    server = SecretServer(vault, origins, port=port)
+    server = SecretServer(args.vault, origins, gate=args.gate, stick=args.stick,
+                          port=args.port)
     print(f"escuchando en {server.origin}")
+    print(f"cofre: {args.vault}  gate: {args.gate}  stick: {args.stick or 'auto'}")
     print(f"origenes permitidos: {', '.join(origins)}")
     print("Ctrl+C para parar")
     try:

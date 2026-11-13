@@ -11,30 +11,30 @@ Su utilidad es de deteccion y depuracion.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
-LOG_NAME = ".cofre-access.log"
-OLD_NAME = ".cofre-access.log.old"
+from cofre.paths import atomic_write, default_vault, log_path, old_log_path
+
 MAX_LINES = 500
 OLD_MAX_LINES = 2000
 
 
-def log_path(vault_path: str | Path) -> Path:
-    return Path(vault_path).parent / LOG_NAME
-
-
 def _prune(path: Path, max_lines: int) -> None:
+    """Recortar el log sin dejar ficheros a medias (H7).
+
+    Primero se escribe el historial viejo y solo después se reescribe el log
+    activo: si hay un corte de luz entre medias, las líneas no se pierden.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     if len(lines) <= max_lines:
         return
     overflow = lines[:-max_lines]
-    old = path.with_suffix(".log.old") if path.name.endswith(".log") else Path(str(path) + ".old")
+    old = old_log_path(path)
     prev = old.read_text(encoding="utf-8").splitlines() if old.exists() else []
     merged = (prev + overflow)[-OLD_MAX_LINES:]
-    old.write_text("\n".join(merged) + "\n", encoding="utf-8")
-    path.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
+    atomic_write(old, "\n".join(merged) + "\n")
+    atomic_write(path, "\n".join(lines[-max_lines:]) + "\n")
 
 
 def record(vault_path: str | Path, command: str, gate: str,
@@ -113,4 +113,4 @@ def stats(vault_path: str | Path) -> dict:
 
 
 def vault_from_env() -> Path:
-    return Path(os.environ.get("COFRE_VAULT", Path.home() / "AI" / "cofre" / "cofre.json"))
+    return default_vault()

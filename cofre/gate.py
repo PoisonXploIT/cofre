@@ -20,11 +20,13 @@ Nivel de seguridad de cada gate:
 
 from __future__ import annotations
 
-import hashlib
 import os
 import sys
+from pathlib import Path
 
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+from cofre.salt import SaltMismatch, SaltMissing, get_salt
 
 
 def _scrypt(secret: str, salt: bytes) -> bytes:
@@ -67,12 +69,15 @@ def pin_session_key(pin: str, salt: bytes) -> bytes:
 
 
 def _salt_for(vault_path: str) -> bytes:
-    marker = os.path.join(os.path.dirname(vault_path) or ".", ".cofre-salt")
-    if os.path.exists(marker):
-        return open(marker, "rb").read()
-    salt = os.urandom(16)
-    open(marker, "wb").write(salt)
-    return salt
+    """H5 y H9: una sola ruta para sacar la sal, y nunca se inventa en silencio.
+
+    Se crea solo si el cofre aun no existe (init). Si el cofre existe y la sal
+    no esta, se aborta: regenerarla deja el cofre cerrado para siempre.
+    """
+    try:
+        return get_salt(vault_path, create=not Path(vault_path).exists())
+    except (SaltMissing, SaltMismatch) as exc:
+        raise GateUnavailable(str(exc)) from exc
 
 
 def usb_session_key(vault_path: str, pin: str = "", stick: str | None = None,
@@ -84,11 +89,12 @@ def usb_session_key(vault_path: str, pin: str = "", stick: str | None = None,
     El serial del volumen debe estar registrado (.cofre-sticks.json); una copia
     del fichero en otro pendrive no vale.
     """
-    from cofre.usb import StickNotFound, StickNotRegistered, find_stick, usb_session_key as _usb_key
+    from cofre.usb import (StickNotFound, StickNotRegistered, RegistryCorrupt,
+                           find_stick, usb_session_key as _usb_key)
 
     try:
         path, serial = find_stick([stick] if stick else None, vault_path, allow_new)
-    except (StickNotFound, StickNotRegistered) as exc:
+    except (StickNotFound, StickNotRegistered, RegistryCorrupt) as exc:
         raise GateUnavailable(str(exc)) from exc
     return _usb_key(path, _salt_for(vault_path), pin), serial
 
@@ -125,11 +131,5 @@ def resolve_session_key(mode: str, vault_path: str, nonce: bytes | None = None,
             raise GateUnavailable("usb-pin necesita un PIN: escribelo en el campo PIN y pulsa Reconectar")
         return usb_session_key(vault_path, pin=pin, stick=stick, allow_new=allow_new)
     if mode == "pin":
-        marker = os.path.join(os.path.dirname(vault_path) or ".", ".cofre-salt")
-        if os.path.exists(marker):
-            salt = open(marker, "rb").read()
-        else:
-            salt = os.urandom(16)
-            open(marker, "wb").write(salt)
-        return pin_session_key(read_pin(), salt), None
+        return pin_session_key(read_pin(), _salt_for(vault_path)), None
     raise ValueError(f"modo de gate desconocido: {mode}")

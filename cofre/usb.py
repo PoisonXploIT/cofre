@@ -30,16 +30,17 @@ from __future__ import annotations
 
 import ctypes
 import json
-import os
 import secrets
 import string
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+from cofre.paths import REGISTRY_NAME, atomic_write, default_vault
+
 KEY_FILENAME = "COFRE.KEY"
-REGISTRY_NAME = ".cofre-sticks.json"
 
 
 class StickNotFound(RuntimeError):
@@ -48,6 +49,14 @@ class StickNotFound(RuntimeError):
 
 class StickNotRegistered(RuntimeError):
     """Hay un COFRE.KEY, pero su volumen no está en la lista autorizada."""
+
+
+class RegistryCorrupt(RuntimeError):
+    """El fichero de pendrives autorizados existe pero no se puede leer.
+
+    H13: antes esto se traducía silenciosamente en "registro vacío", y un
+    registro vacío autoriza cualquier pendrive con COFRE.KEY. Un JSON roto no
+    puede ser una puerta abierta."""""
 
 
 def drive_letters() -> list[str]:
@@ -85,21 +94,35 @@ def registry_path(vault_path: str | Path) -> Path:
     return Path(vault_path).parent / REGISTRY_NAME
 
 
-def load_registry(vault_path: str | Path) -> dict:
+def load_registry(vault_path: str | Path, strict: bool = True) -> dict:
+    """Leer la lista de pendrives autorizados.
+
+      - fichero inexistente  -> registro vacío (es la primera vez)
+      - fichero corrupto     -> RegistryCorrupt si strict; vacío si no
+    """
     p = registry_path(vault_path)
     if not p.exists():
         return {"sticks": {}}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        if strict:
+            raise RegistryCorrupt(
+                f"{p} esta corrupto y no se puede leer ({exc}). "
+                "No se autoriza ningun pendrive hasta arreglarlo: borralo y "
+                "registra de nuevo con 'python -m cofre.cli stick-register E:\\COFRE.KEY'"
+            ) from exc
         return {"sticks": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("sticks"), dict):
+        if strict:
+            raise RegistryCorrupt(f"{p} no tiene la forma esperada ({'sticks': {...}})")
+        return {"sticks": {}}
+    return data
 
 
 def save_registry(vault_path: str | Path, reg: dict) -> Path:
-    p = registry_path(vault_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(reg, indent=2), encoding="utf-8")
-    return p
+    # H7: escritura atómica. Un corte de luz no puede dejar el registro a medias.
+    return atomic_write(registry_path(vault_path), json.dumps(reg, indent=2))
 
 
 def register_stick(vault_path: str | Path, serial: int, drive: str = "",
@@ -169,10 +192,12 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
                allow_new: bool = False) -> tuple[str, int | None]:
     """Devuelve (ruta, serial) del pendrive autorizado.
 
-    Reglas:
-      - si el registro esta vacio (primera vez), se autoriza todo y se anotan
-        los seriales encontrados, avisando por stderr;
-      - si hay registro, solo pasa un serial registrado, salvo allow_new.
+    Reglas (H13 corregida el 2026-11-13):
+      - no hay registro: no se autoriza NINGUNO salvo que se diga explicitamente
+        (--allow-new-stick o stick-register). Antes se autorizaban todos los
+        volúmenes con COFRE.KEY y se registraban solos;
+      - registro corrupto: fallo cerrado, no vacío;
+      - con registro, solo pasa un serial registrado, salvo allow_new.
     """
     cands = _candidates(extra_paths)
     if not cands:
@@ -182,18 +207,30 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
         )
 
     if vault_path is None:
-        vault_path = Path(os.environ.get("COFRE_VAULT", Path.home() / "AI" / "cofre" / "cofre.json"))
+        vault_path = default_vault()
 
-    reg = load_registry(vault_path)
+    reg = load_registry(vault_path)  # lanza RegistryCorrupt si esta roto
     if not reg.get("sticks"):
+        if not allow_new:
+            seen = ", ".join(str(s) for _p, s, _l in cands if s is not None) or "ninguno"
+            raise StickNotRegistered(
+                f"no hay ningun pendrive autorizado en {registry_path(vault_path)}. "
+                f"Se han encontrado COFRE.KEY en estos volumenes: {seen}. "
+                "No se autorizan por defecto. Registra el tuyo: "
+                "python -m cofre.cli stick-register E:\\COFRE.KEY  (o "
+                "--allow-new-stick para aceptarlo y registrarlo ahora)"
+            )
+        registered = []
         for path, serial, label in cands:
-            if serial is not None:
-                register_stick(vault_path, serial, str(Path(path).parent))
+            if serial is None:
+                continue
+            register_stick(vault_path, serial, str(Path(path).parent))
+            registered.append(serial)
         print(
-            "aviso: registro de pendrives vacio; se autorizan los seriales "
-            "encontrados. A partir de ahora una copia del fichero en otro "
-            "pendrive no desbloqueara.",
-            file=__import__("sys").stderr,
+            f"aviso: el registro estaba vacio; se autorizan y registran los "
+            f"seriales {', '.join(map(str, registered))} por usar --allow-new-stick. "
+            "Una copia del fichero en otro pendrive ya no desbloqueara.",
+            file=sys.stderr,
         )
         return cands[0][0], cands[0][1]
 
@@ -202,12 +239,15 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
             return path, serial
 
     if allow_new:
+        serial = cands[0][1]
+        if serial is not None:
+            register_stick(vault_path, serial, str(Path(cands[0][0]).parent))
         print(
-            "aviso: se acepta un pendrive no registrado (--allow-new-stick). "
-            "Registrarlo con 'stick-register' para el uso normal.",
-            file=__import__("sys").stderr,
+            "aviso: se acepta un pendrive no registrado (--allow-new-stick) y se "
+            "registra para el uso normal.",
+            file=sys.stderr,
         )
-        return cands[0][0], cands[0][1]
+        return cands[0][0], serial
 
     seen = ", ".join(str(s) for _p, s, _l in cands)
     authorized = ", ".join(sorted(load_registry(vault_path).get("sticks", {})))

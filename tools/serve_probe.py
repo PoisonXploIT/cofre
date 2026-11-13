@@ -60,8 +60,19 @@ def main() -> int:
     vault_path = TMP / "v.json"
     vault = Vault(vault_path)
 
-    session, _serial = resolve_session_key("usb", str(vault_path), stick=str(keyfile))
-    vault.init(session)
+    # H13: con el registro vacio ya no se autoriza nada por defecto.
+    try:
+        resolve_session_key("usb", str(vault_path), stick=str(keyfile))
+        print("FALLO  H13: un registro vacio autorizo un pendrive sin registrar")
+        failures_hint = True
+    except Exception as exc:
+        print("OK    H13: registro vacio -> no se autoriza ningun pendrive")
+        print("       ", str(exc)[:90])
+        failures_hint = False
+
+    session, _serial = resolve_session_key("usb", str(vault_path), stick=str(keyfile),
+                                            allow_new=True)
+    vault.init(session, salt=__import__("cofre.salt", fromlist=["get_salt"]).get_salt(str(vault_path), create=True))
     vault.add(session, "TAVILY_API_KEY", "valor-secreto-de-prueba", ["google"])
     vault.add(session, "GMAIL_PASSWORD", "otra-clave", ["correo"])
 
