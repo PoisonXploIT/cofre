@@ -209,9 +209,6 @@ class CofreGUI:
         self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
                                      bg=PANEL2, font=self.f_sub)
         self.status_label.pack(side="left", padx=(8, 12), pady=6)
-        self.browser_btn = self._btn(top, "Navegador: off",
-                                      lambda _e: self.toggle_browser())
-        self.browser_btn.pack(side="right", padx=(0, 8))
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
         self._btn(top, "Abrir", self.unlock, accent=True).pack(side="right", padx=(0, 8))
 
