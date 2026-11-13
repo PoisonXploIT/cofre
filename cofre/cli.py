@@ -114,7 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--force", action="store_true", help="sobrescribir el destino")
 
     sub.add_parser("shell")
-    sub.add_parser("gui", help="ventana grafica (Tkinter, standalone)")
+    gp = with_common(sub.add_parser("gui", help="ventana grafica (Tkinter, standalone)"))
+    gp.add_argument("--selftest", action="store_true",
+                    help="construir la ventana, comprobarla y salir (sin mostrar)")
     with_common(sub.add_parser("stick-list"))
     return p
 
@@ -325,7 +327,8 @@ def main(argv: list[str]) -> int:
         from cofre.gui import main as gui_main
         return gui_main(["--vault", str(vault_path), "--gate", args.gate] +
                         (["--stick", args.stick] if args.stick else []) +
-                        (["--allow-new-stick"] if args.allow_new_stick else []))
+                        (["--allow-new-stick"] if args.allow_new_stick else []) +
+                        (["--selftest"] if getattr(args, "selftest", False) else []))
 
     if args.command == "shell":
         return cmd_shell(str(vault_path), args.gate, args.stick, args.allow_new_stick)
