@@ -32,20 +32,33 @@ from cofre.audit import record, tail
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
+from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
+                         enable_dpi_awareness)
 from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters,
                        find_stick, load_registry, read_key, register_stick,
                        revoke_stick, volume_serial)
 
-BG = "#0d1117"
-PANEL = "#141a22"
-PANEL2 = "#1b232e"
-INPUT = "#232c38"
-FG = "#e6edf3"
-MUT = "#94a2b1"
-ACC = "#3f8f74"
-ACC2 = "#275746"
-WARN = "#d0755c"
-LINE = "#2b3542"
+# Nombres cortos sobre los tokens de cofre/theme.py. Un color que no este en
+# COLORS no se usa en esta interfaz.
+BG = COLORS["bg"]
+PANEL = COLORS["surface"]
+PANEL2 = COLORS["card"]
+INPUT = COLORS["input"]
+FG = COLORS["text"]
+MUT = COLORS["muted"]
+FAINT = COLORS["faint"]
+DIS = COLORS["disabled"]
+ACC = COLORS["accent"]
+ONACC = COLORS["on_accent"]
+ACC2 = COLORS["card"]
+WARN = COLORS["warn"]
+OK = COLORS["ok"]
+DANGER = COLORS["danger"]
+LINE = COLORS["border"]
+LINE2 = COLORS["border_strong"]
+
+XS, SM, MD, LG, XL, XXL = (SPACE["xs"], SPACE["sm"], SPACE["md"],
+                           SPACE["lg"], SPACE["xl"], SPACE["xxl"])
 
 MASK = "*" * 18
 REVEAL_MS = 15000
@@ -73,27 +86,41 @@ class CofreGUI:
         self.root.title("COFRE - boveda de secretos")
         self.root.configure(bg=BG)
         self.root.geometry("980x620+30+30")
-        self.root.minsize(820, 540)
+        # Medido el 2026-11-10: por debajo de 920 px los botones de la fila 2
+        # (Renombrar, Borrar) quedan por debajo de su ancho y se recorta el
+        # texto. La Fase B (layout responsivo) bajara este minimo.
+        self.root.minsize(920, 560)
 
-        self.f_title = tkfont.Font(family="Segoe UI", size=17, weight="bold")
-        self.f_h2 = tkfont.Font(family="Segoe UI", size=13, weight="bold")
-        self.f_sub = tkfont.Font(family="Segoe UI", size=10)
-        self.f_body = tkfont.Font(family="Segoe UI", size=11)
-        self.f_mono = tkfont.Font(family="Consolas", size=11)
-        self.f_small = tkfont.Font(family="Segoe UI", size=9)
+        f = build_fonts(self.root)
+        self.f_title = f["display"]
+        self.f_h2 = f["title"]
+        self.f_sub = f["label"]
+        self.f_body = f["body"]
+        self.f_mono = f["mono"]
+        self.f_small = f["meta"]
+        self.f_icon = f["icon"]
 
     # ---------- piezas de estilo ----------
 
-    def _btn(self, parent, text, command, accent=False):
+    def _btn(self, parent, text, command, accent=False, danger=False):
         """Boton plano: Tk tiene un aspecto de los 90; un frame con etiqueta
         dentro queda mas limpio y permite hover. Admite estado deshabilitado:
-        un boton apagado no responde ni al raton ni al hover."""
-        bg = ACC2 if accent else PANEL2
+        un boton apagado no responde ni al raton ni al hover.
+
+        Regla de la casa (2026-11-10): el hover NO cambia el fondo. Solo sube
+        el borde. El acento se reserva a la accion primaria.
+        """
+        if accent:
+            bg, fg, hover_fg = ACC, ONACC, ONACC
+        elif danger:
+            bg, fg, hover_fg = PANEL2, DANGER, DANGER
+        else:
+            bg, fg, hover_fg = PANEL2, FG, ACC
         frame = tk.Frame(parent, bg=LINE, highlightthickness=1)
         inner = tk.Frame(frame, bg=bg)
-        lab = tk.Label(inner, text=text, fg=FG, font=self.f_body, bg=bg)
+        lab = tk.Label(inner, text=text, fg=fg, font=self.f_body, bg=bg)
         inner.pack(fill="both", expand=True, padx=1, pady=1)
-        lab.pack(fill="both", expand=True, padx=13, pady=8)
+        lab.pack(fill="both", expand=True, padx=12, pady=8)
         frame.label = lab
         frame._enabled = True
         frame._bg = bg
@@ -106,27 +133,26 @@ class CofreGUI:
         def hover(_e):
             if not frame._enabled:
                 return
-            for f in (frame, inner, lab):
-                f.configure(bg=ACC)
-            lab.configure(fg=BG)
+            frame.configure(bg=LINE2)
+            lab.configure(fg=hover_fg)
 
         def unhover(_e):
             if not frame._enabled:
                 return
             frame.configure(bg=LINE)
-            inner.configure(bg=bg)
-            lab.configure(bg=bg, fg=FG)
+            lab.configure(fg=fg)
 
         def set_enabled(on: bool):
             frame._enabled = on
             if on:
                 frame.configure(bg=LINE)
                 inner.configure(bg=bg)
-                lab.configure(bg=bg, fg=FG)
+                lab.configure(bg=bg, fg=fg)
             else:
                 frame.configure(bg=LINE)
                 inner.configure(bg=PANEL)
-                lab.configure(bg=PANEL, fg="#4a5563")
+                lab.configure(bg=PANEL, fg=DIS)
+
 
         frame.set_enabled = set_enabled
         frame.bind("<Enter>", hover)
@@ -149,31 +175,31 @@ class CofreGUI:
         tk.Frame(header, bg=ACC, height=3).pack(fill="x")
 
         top = tk.Frame(header, bg=PANEL)
-        top.pack(fill="x", padx=18, pady=13)
+        top.pack(fill="x", padx=16, pady=12)
         tk.Label(top, text="COFRE", fg=FG, font=self.f_title, bg=PANEL).pack(side="left")
-        tk.Label(top, text="  boveda local  |  la llave vive en el pendrive",
-                 fg=MUT, font=self.f_sub, bg=PANEL).pack(side="left")
+        tk.Label(top, text="  boveda local", fg=MUT, font=self.f_sub,
+                 bg=PANEL).pack(side="left")
 
         self.status_var = tk.StringVar(value="pendrive no detectado")
         self.status_label = tk.Label(top, textvariable=self.status_var, fg=WARN,
-                                     bg=PANEL2, font=self.f_sub, padx=10, pady=6)
+                                     bg=PANEL2, font=self.f_sub, padx=8, pady=4)
         self.status_label.pack(side="right")
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
-        self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 10))
+        self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 8))
 
         # ---------- cuerpo ----------
         body = tk.Frame(self.root, bg=BG)
-        body.pack(fill="both", expand=True, padx=18, pady=16)
+        body.pack(fill="both", expand=True, padx=16, pady=16)
 
         # izquierda: pendrives, lista, ayuda
-        left = tk.Frame(body, bg=PANEL, width=340)
+        left = tk.Frame(body, bg=PANEL, width=300)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
         sticks_box = tk.Frame(left, bg=PANEL2)
-        sticks_box.pack(fill="x", padx=14, pady=(12, 4))
+        sticks_box.pack(fill="x", padx=12, pady=(12, 4))
         tk.Label(sticks_box, text="Pendrives que abren este cofre",
-                 fg=FG, font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 2))
+                 fg=FG, font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 4))
         self.stick_rows = []
         self.stick_revokes = []
         for _ in range(3):
@@ -188,23 +214,24 @@ class CofreGUI:
             self.stick_revokes.append(btn)
         tk.Label(sticks_box, text="Basta con conectar UNO cualquiera. No hace falta "
                                  "conectar los dos.", fg=MUT, font=self.f_small,
-                 bg=PANEL2).pack(anchor="w", pady=(4, 6))
+                 bg=PANEL2).pack(anchor="w", pady=(4, 4))
 
         tk.Label(left, text="Secretos", fg=FG, font=self.f_sub, bg=PANEL).pack(
-            anchor="w", padx=14, pady=(12, 6))
+            anchor="w", padx=12, pady=(12, 4))
         self.query_var = tk.StringVar()
         self.query_entry = self._entry(left, self.query_var)
-        self.query_entry.pack(fill="x", padx=14, pady=6)
-        tk.Label(left, text="buscar", fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w", padx=14)
+        self.query_entry.configure(width=1)
+        self.query_entry.pack(fill="x", padx=12, pady=4)
+        tk.Label(left, text="buscar", fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w", padx=12)
         self.list_frame = tk.Frame(left, bg=PANEL)
-        self.list_frame.pack(fill="both", expand=True, padx=14)
+        self.list_frame.pack(fill="both", expand=True, padx=12)
         self.count_var = tk.StringVar(value="0 entradas")
         tk.Label(left, textvariable=self.count_var, fg=MUT, font=self.f_small,
-                 bg=PANEL).pack(anchor="w", padx=14, pady=(10, 8))
+                 bg=PANEL).pack(anchor="w", padx=12, pady=(8, 8))
 
         self.help_box = tk.Frame(left, bg=PANEL2)
         tk.Label(self.help_box, text="Como funciona (F1 para ocultar)", fg=FG,
-                 font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 2))
+                 font=self.f_sub, bg=PANEL2).pack(anchor="w", pady=(4, 4))
         for line in (
             "El pendrive guarda la llave (32 bytes en COFRE.KEY). Sin el pendrive, "
             "cofre.json es ruido: no se descifra.",
@@ -216,35 +243,68 @@ class CofreGUI:
         ):
             tk.Label(self.help_box, text=line, fg=MUT, font=self.f_small, bg=PANEL2,
                      anchor="w").pack(fill="x")
-        self.help_box.pack(fill="x", padx=14, pady=(8, 12))
+        self.help_box.pack(fill="x", padx=12, pady=(8, 12))
 
         # derecha: wizard + detalle + alta
-        right = tk.Frame(body, bg=PANEL2)
-        right.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        # Columna derecha desplazable: medido el 2026-11-10, el formulario de
+        # alta no cabia a 620 px de alto y sus campos quedaban con ancho 1.
+        right_outer = tk.Frame(body, bg=PANEL2)
+        right_outer.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        self.canvas = tk.Canvas(right_outer, bg=PANEL2, highlightthickness=0, bd=0)
+        self.vbar = tk.Scrollbar(right_outer, orient="vertical",
+                                 command=self.canvas.yview,
+                                 width=SIZES["scrollbar"], bg=PANEL, troughcolor=BG,
+                                 activebackground=LINE2, relief="flat", bd=0,
+                                 highlightthickness=0)
+        self.canvas.configure(yscrollcommand=self.vbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.vbar.pack(side="right", fill="y")
+        right = tk.Frame(self.canvas, bg=PANEL2)
+        self._right_win = self.canvas.create_window((0, 0), window=right, anchor="nw")
+
+        def _sync_scroll(_e=None):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self.canvas.itemconfigure(self._right_win, width=self.canvas.winfo_width())
+
+        right.bind("<Configure>", _sync_scroll)
+        self.canvas.bind("<Configure>", _sync_scroll)
+
+        def _wheel(e):
+            if self.canvas.bbox("all") is None:
+                return
+            first, last = self.canvas.yview()
+            if first <= 0.0 and last >= 1.0:
+                return
+            self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        self.canvas.bind_all("<MouseWheel>", _wheel)
 
         self.wizard = tk.Frame(right, bg=PANEL)
         tk.Label(self.wizard, text="Puesta en marcha", fg=FG, font=self.f_h2,
-                 bg=PANEL).pack(anchor="w", padx=16, pady=(14, 4))
+                 bg=PANEL).pack(anchor="w", padx=16, pady=(12, 4))
         self.wizard_msg = tk.StringVar(value="")
         tk.Label(self.wizard, textvariable=self.wizard_msg, fg=MUT, font=self.f_sub,
                  bg=PANEL).pack(anchor="w", padx=16, pady=(0, 8))
         self.dest_var = tk.StringVar(value="F:\\")
         wrow = tk.Frame(self.wizard, bg=PANEL)
-        wrow.pack(fill="x", padx=16, pady=6)
-        tk.Label(wrow, text="unidad destino", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left")
+        wrow.pack(fill="x", padx=16, pady=(4, 4))
+        tk.Label(wrow, text="unidad destino", fg=MUT, font=self.f_small,
+                 bg=PANEL).pack(side="left")
         dent = self._entry(wrow, self.dest_var, mono=True)
         dent.configure(width=6)
-        dent.pack(side="left", padx=6)
-        self._btn(wrow, "Crear llave en esa unidad",
-                  lambda e: self.wizard_create_key(event=e)).pack(side="left", padx=6)
-        self._btn(wrow, "Inicializar cofre",
-                  lambda e: self.wizard_init(event=e), accent=True).pack(side="left", padx=6)
-        self._btn(wrow, "Copiar la llave a esa unidad (reserva)",
-                  lambda e: self.wizard_backup(event=e)).pack(side="left", padx=6)
+        dent.pack(side="left", padx=4)
+        self._btn(wrow, "Crear llave", lambda e: self.wizard_create_key(event=e)).pack(
+            side="left", padx=4)
+        wrow2 = tk.Frame(self.wizard, bg=PANEL)
+        wrow2.pack(fill="x", padx=16, pady=(0, 8))
+        self._btn(wrow2, "Inicializar cofre", lambda e: self.wizard_init(event=e),
+                  accent=True).pack(side="left", padx=4)
+        self._btn(wrow2, "Copiar la llave (reserva)",
+                  lambda e: self.wizard_backup(event=e)).pack(side="left", padx=4)
 
         self.detail_name = tk.Label(right, text="sin seleccion", fg=FG,
                                     font=self.f_h2, bg=PANEL2)
-        self.detail_name.pack(anchor="w", padx=16, pady=(14, 2))
+        self.detail_name.pack(anchor="w", padx=16, pady=(12, 4))
         self.meta_var = tk.StringVar(value="selecciona un secreto de la lista")
         tk.Label(right, textvariable=self.meta_var, fg=MUT, font=self.f_sub,
                  bg=PANEL2).pack(anchor="w", padx=16, pady=(0, 8))
@@ -257,39 +317,47 @@ class CofreGUI:
         self.value_box.insert("1.0", MASK)
         self.value_box.configure(fg=MUT)
 
+        # Dos filas, no una. Regla medida: con etiquetas largas, nueve botones
+        # en una fila no caben ni a 980 px (los ultimos quedaban con ancho 1).
+        # Fila 1: acciones sobre el valor. Fila 2: acciones sobre la entrada.
         row = tk.Frame(right, bg=PANEL2)
-        row.pack(fill="x", padx=16, pady=6)
+        row.pack(fill="x", padx=16, pady=(4, 4))
         self._ver_targets = set()
         self.action_btns = []
         ver = self._btn(row, "Ver", self.reveal, accent=True)
-        ver.pack(side="left", padx=8)
+        ver.pack(side="left", padx=SM)
         self._ver_frame = ver
-        for w in (ver, *ver.winfo_children(), *[c for w in ver.winfo_children() for c in w.winfo_children()]):
+        for w in (ver, *ver.winfo_children(),
+                  *[c for w in ver.winfo_children() for c in w.winfo_children()]):
             self._ver_targets.add(w)
         self.action_btns.append(ver)
         for b in (self._btn(row, "Ocultar", self.hide),
-                  self._btn(row, "Copiar el valor", self.copy_to_clipboard),
-                  self._btn(row, "Copiar el nombre", self.copy_name),
-                  self._btn(row, "Copiar comando exec", self.copy_exec_command)):
-            b.pack(side="left", padx=8)
+                  self._btn(row, "Copiar valor", self.copy_to_clipboard)):
+            b.pack(side="left", padx=SM)
             self.action_btns.append(b)
         self.sticky_btn = self._btn(row, "Fijar", self.toggle_sticky)
-        self.sticky_btn.pack(side="left", padx=8)
+        self.sticky_btn.pack(side="left", padx=SM)
         self.action_btns.append(self.sticky_btn)
-        self.edit_btn = self._btn(row, "Editar valor", self.edit_selected)
-        self.edit_btn.pack(side="left", padx=8)
-        self.action_btns.append(self.edit_btn)
-        self.rename_btn = self._btn(row, "Renombrar", self.rename_selected)
-        self.rename_btn.pack(side="left", padx=8)
-        self.action_btns.append(self.rename_btn)
-        self.del_btn = self._btn(row, "Borrar", self.delete_selected)
-        self.del_btn.pack(side="left", padx=8)
+
+        self.del_btn = self._btn(row, "Borrar", self.delete_selected, danger=True)
+        self.del_btn.pack(side="right", padx=SM)
         self.action_btns.append(self.del_btn)
+
+        row2 = tk.Frame(right, bg=PANEL2)
+        row2.pack(fill="x", padx=16, pady=(0, 8))
+        for b in (self._btn(row2, "Copiar nombre", self.copy_name),
+                  self._btn(row2, "Comando exec", self.copy_exec_command),
+                  self._btn(row2, "Editar", self.edit_selected),
+                  self._btn(row2, "Renombrar", self.rename_selected)):
+            b.pack(side="left", padx=SM)
+            self.action_btns.append(b)
+        self.edit_btn = self.action_btns[6]
+        self.rename_btn = self.action_btns[7]
 
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
         add = tk.Frame(right, bg=PANEL)
-        add.pack(fill="x", padx=16, pady=6)
+        add.pack(fill="x", padx=16, pady=4)
         tk.Label(add, text="Guardar un secreto nuevo (si el nombre ya existe, "
                             "se actualiza su valor)", fg=FG, font=self.f_sub,
                  bg=PANEL).pack(anchor="w", pady=(8, 4))
@@ -305,7 +373,7 @@ class CofreGUI:
         tk.Label(langrow, text="lista", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left")
         for code in ("es", "en"):
             self._btn(langrow, code, lambda c=code: self.set_lang(c)).pack(side="left", padx=4)
-        tk.Label(langrow, text="palabras", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left", padx=(10, 4))
+        tk.Label(langrow, text="palabras", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left", padx=(8, 4))
         wentry = self._entry(langrow, self.words_var)
         wentry.configure(width=4)
         wentry.pack(side="left")
@@ -314,31 +382,41 @@ class CofreGUI:
         self.tags_var = tk.StringVar(value="")
         tk.Label(add, text="tags (opcional, separados por coma). Ej: google, trabajo",
                  fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
-        self._entry(add, self.tags_var).pack(fill="x", pady=(2, 4))
+        tags_entry = self._entry(add, self.tags_var)
+        tags_entry.configure(width=1)
+        tags_entry.pack(fill="x", pady=(4, 4))
         self.name_entry = self._entry(add, self.name_var)
-        self.name_entry.pack(fill="x", pady=(2, 6))
+        self.name_entry.configure(width=1)
+        self.name_entry.pack(fill="x", pady=(4, 4))
         tk.Label(add, text="valor: la contraseña, la clave API o el token",
                  fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
         self.val_entry = self._entry(add, self.val_var, mono=True, show="*")
-        self.val_entry.pack(fill="x", pady=(2, 6))
+        self.val_entry.configure(width=1)
+        self.val_entry.pack(fill="x", pady=(4, 4))
         self.strength_var = tk.StringVar(value="fuerza: sin valor")
         tk.Label(add, textvariable=self.strength_var, fg=MUT, font=self.f_small,
                  bg=PANEL).pack(anchor="w")
         self.val_entry.bind("<Key>", self._update_strength)
         self.name_entry.bind("<Return>", lambda _e: self.add_secret())
         self.val_entry.bind("<Return>", lambda _e: self.add_secret())
+        # Generadores en su propia fila y "Mostrar al teclear" + Guardar en otra:
+        # medido el 2026-11-10, cinco botones en una fila dejaban "Guardar" con
+        # ancho 1 (invisible) incluso a 980 px.
         genrow = tk.Frame(add, bg=PANEL)
-        genrow.pack(fill="x", pady=10)
-        self._btn(genrow, "Generar para maquina (384 bits)",
-                  lambda e: self.generate("machine", event=e)).pack(side="left", padx=8)
+        genrow.pack(fill="x", pady=(8, 4))
+        self._btn(genrow, "Para maquina (384 bits)",
+                  lambda e: self.generate("machine", event=e)).pack(side="left", padx=SM)
         self._btn(genrow, "4 palabras",
-                  lambda e: self.generate("words", 4, event=e)).pack(side="left", padx=8)
+                  lambda e: self.generate("words", 4, event=e)).pack(side="left", padx=SM)
         self._btn(genrow, "6 palabras",
-                  lambda e: self.generate("words", 6, event=e)).pack(side="left", padx=8)
-        self.show_val_btn = self._btn(genrow, "Mostrar al teclear",
+                  lambda e: self.generate("words", 6, event=e)).pack(side="left", padx=SM)
+
+        saverow = tk.Frame(add, bg=PANEL)
+        saverow.pack(fill="x", pady=(0, 8))
+        self.show_val_btn = self._btn(saverow, "Mostrar al teclear",
                                       lambda e: self.toggle_show_value(event=e))
-        self.show_val_btn.pack(side="left", padx=8)
-        self._btn(genrow, "Guardar", self.add_secret, accent=True).pack(side="right")
+        self.show_val_btn.pack(side="left", padx=SM)
+        self._btn(saverow, "Guardar", self.add_secret, accent=True).pack(side="right", padx=SM)
         self.entropy_var = tk.StringVar(value="")
         self.set_lang("es")
         tk.Label(add, textvariable=self.entropy_var, fg=MUT, font=self.f_small,
@@ -347,19 +425,20 @@ class CofreGUI:
                             "Guardar para que quede dentro del cofre.", fg=MUT,
                  font=self.f_small, bg=PANEL).pack(anchor="w", pady=(4, 0))
 
-        pinrow = tk.Frame(right, bg=PANEL)
-        pinrow.pack(fill="x", padx=16, pady=(6, 4))
-        tk.Label(pinrow, text="PIN (solo si el gate es usb-pin)", fg=MUT, font=self.f_sub,
+        self.pinrow = tk.Frame(right, bg=PANEL)
+        tk.Label(self.pinrow, text="PIN del cofre", fg=MUT, font=self.f_sub,
                  bg=PANEL).pack(side="left")
-        self._entry(pinrow, self.pin_var, show="*").pack(side="left", fill="x", expand=True, padx=8)
+        pin_entry = self._entry(self.pinrow, self.pin_var, show="*")
+        pin_entry.configure(width=1)
+        pin_entry.pack(side="left", fill="x", expand=True, padx=8)
+        if self.gate == "usb-pin":
+            self.pinrow.pack(fill="x", padx=16, pady=(4, 4))
 
         logbox = tk.Frame(right, bg=PANEL)
-        logbox.pack(fill="x", padx=16, pady=(12, 6))
-        tk.Label(logbox, text="Actividad reciente", fg=MUT, font=self.f_sub, bg=PANEL).pack(
-            anchor="w", pady=(6, 2))
+        logbox.pack(fill="x", padx=16, pady=(8, 16))
         self.log_labels = []
-        for _ in range(4):
-            lab = tk.Label(logbox, text="", fg=MUT, font=self.f_small, bg=PANEL, anchor="w")
+        for _ in range(3):
+            lab = tk.Label(logbox, text="", fg=FAINT, font=self.f_small, bg=PANEL, anchor="w")
             lab.pack(fill="x")
             self.log_labels.append(lab)
         self.refresh_log()
@@ -373,7 +452,7 @@ class CofreGUI:
                   "Sin pendrive el cofre no se abre. Cada accion queda en "
                   ".cofre-access.log (el nombre, nunca el valor).")
         tk.Label(foot, textvariable=self.foot_var, fg=MUT, font=self.f_small,
-                 bg=PANEL, anchor="w").pack(fill="x", padx=18, pady=10)
+                 bg=PANEL, anchor="w").pack(fill="x", padx=16, pady=8)
 
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
         self.root.bind("<Control-l>", lambda _e: self.lock())
@@ -542,7 +621,7 @@ class CofreGUI:
             inner.pack(fill="both", expand=True, padx=1, pady=1)
             lab = tk.Label(inner, text=n, fg=FG, font=self.f_body, bg=ACC2 if sel else PANEL,
                            anchor="w")
-            lab.pack(fill="x", padx=12, pady=9)
+            lab.pack(fill="x", padx=12, pady=8)
             lab.bind("<Button-1>", lambda _e, name=n: self.select(name))
             outer.bind("<Button-1>", lambda _e, name=n: self.select(name))
 
@@ -565,12 +644,12 @@ class CofreGUI:
             self.wizard_msg.set(
                 "No hay COFRE.KEY en ningun volumen. Conecta el pendrive y "
                 "pulsa 'Crear llave' (se escriben 32 bytes aleatorios en el USB).")
-            self.wizard.pack(fill="x", padx=16, pady=(12, 6), before=self.detail_name)
+            self.wizard.pack(fill="x", padx=16, pady=(12, 4), before=self.detail_name)
         elif st == "key-no-vault":
             self.wizard_msg.set(
                 f"La llave esta en {', '.join(drives)} pero el cofre no esta "
                 "inicializado. Pulsa 'Inicializar cofre'.")
-            self.wizard.pack(fill="x", padx=16, pady=(12, 6), before=self.detail_name)
+            self.wizard.pack(fill="x", padx=16, pady=(12, 4), before=self.detail_name)
         else:
             self.wizard.pack_forget()
 
@@ -683,7 +762,7 @@ class CofreGUI:
         if self.help_box.winfo_ismapped():
             self.help_box.pack_forget()
         else:
-            self.help_box.pack(fill="x", padx=14, pady=(8, 12))
+            self.help_box.pack(fill="x", padx=12, pady=(8, 12))
 
     def revoke_from_gui(self, lab) -> None:
         serial = lab.cget("text").split("serial ")[1].split(" ")[0] if "serial " in lab.cget("text") else None
@@ -1030,14 +1109,19 @@ def parse_args(argv: list[str]) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # Antes de crear Tk: sin esto Windows escala la ventana como una imagen y
+    # el texto sale borroso a 125 % o 150 %.
+    dpi = enable_dpi_awareness()
     cfg = parse_args(argv)
     app = CofreGUI(cfg["vault"], cfg["gate"], cfg["stick"], cfg["allow_new"])
+    dpi["scaling"] = apply_tk_scaling(app.root, dpi["dpi"])
     app.build()
     if "--selftest" in argv:
         app.root.update_idletasks()
         app.root.update()
         print("gui construida sin error; entradas:", len(app.vault.names()))
         print("geometria:", app.root.winfo_geometry())
+        print(f"dpi: modo={dpi['mode']} {dpi['dpi']} ppp, tk scaling={dpi['scaling']:.3f}")
         app.root.destroy()
         return 0
     app.root.mainloop()
