@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="secreto a pasar como variable de entorno al comando")
     sx.add_argument("cmd", nargs="+", help="comando a ejecutar, p. ej: python script.py")
 
+    sk = with_common(sub.add_parser(
+        "check", help="comprobar que existen unos secretos, SIN mostrar su valor"))
+    sk.add_argument("--name", action="append", default=[],
+                    help="nombre a comprobar (repetible)")
+
     sg2 = with_common(sub.add_parser("gen"))
     sg2.add_argument("--machine", action="store_true")
     sg2.add_argument("--words", type=int, default=5)
@@ -293,6 +298,37 @@ def main(argv: list[str]) -> int:
             return 0
         print("ese serial no esta registrado")
         return 1
+
+    if args.command == "check":
+        if not vault.load().get("wrapper"):
+            print("el cofre no esta inicializado", file=sys.stderr)
+            return 1
+        try:
+            session, serial = resolve_session_key(args.gate, str(vault_path),
+                                                 stick=args.stick,
+                                                 allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            record(str(vault_path), "check", args.gate, None, ok=False, detail=str(exc))
+            print("gate no disponible:", exc, file=sys.stderr)
+            return 1
+        try:
+            vault.unlock(session)
+        except Exception:
+            print("la clave de sesion no corresponde a este cofre", file=sys.stderr)
+            return 1
+        existing = set(vault.names())
+        missing = []
+        for n in args.name:
+            if n in existing:
+                print(f"OK    {n}")
+            else:
+                missing.append(n)
+                print(f"FALTA {n}")
+        if not args.name:
+            print(f"{len(existing)} secreto(s) en el cofre")
+        record(str(vault_path), "check", args.gate, serial,
+               name=f"{len(args.name)} nombres", ok=not missing)
+        return 0 if not missing else 1
 
     if args.command == "exec":
         import subprocess

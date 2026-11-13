@@ -198,9 +198,16 @@ class CofreGUI:
                  bg=PANEL).pack(side="left")
 
         self.status_var = tk.StringVar(value="pendrive no detectado")
-        self.status_label = tk.Label(top, textvariable=self.status_var, fg=WARN,
-                                     bg=PANEL2, font=self.f_sub, padx=8, pady=4)
-        self.status_label.pack(side="right")
+        pill = tk.Frame(top, bg=PANEL2, highlightthickness=1, highlightbackground=LINE)
+        pill.pack(side="right", padx=(0, 8))
+        self.pill_dot = tk.Canvas(pill, width=10, height=10, bg=PANEL2,
+                                  highlightthickness=0, bd=0)
+        self.pill_dot.pack(side="left", padx=(12, 0))
+        self._dot = self.pill_dot.create_oval(2, 2, 9, 9, fill=WARN, outline="")
+        self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
+                                     bg=PANEL2, font=self.f_sub)
+        self.status_label.pack(side="left", padx=(8, 12), pady=6)
+        self._btn(top, "Guia", self.open_guide).pack(side="right", padx=(0, 8))
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
         self._btn(top, "Reconectar", self.unlock).pack(side="right", padx=(0, 8))
 
@@ -488,8 +495,11 @@ class CofreGUI:
 
     def set_status(self, text, warn=False):
         self.status_var.set(text)
-        self.status_label.configure(fg=WARN if warn else FG,
-                                    bg=PANEL2)
+        self.status_label.configure(fg=FG)
+        try:
+            self.pill_dot.itemconfigure(self._dot, fill=WARN if warn else OK)
+        except Exception:
+            pass
 
     def refresh_log(self):
         from cofre.audit import tail_human
@@ -628,19 +638,65 @@ class CofreGUI:
         self._refresh_actions()
         self.count_var.set(f"{len(names)} entrada(s)")
         if not names:
-            tk.Label(self.list_frame, text="no hay secretos (o ninguno coincide)",
-                     fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w", pady=8)
+            empty = tk.Frame(self.list_frame, bg=PANEL)
+            empty.pack(fill="x", pady=LG)
+            tk.Label(empty, text="Todavia no hay secretos" if not self.vault.names()
+                     else "Ninguno coincide con la busqueda",
+                     fg=MUT, font=self.f_sub, bg=PANEL, anchor="w").pack(fill="x")
+            tk.Label(empty, text="El nombre es como lo llamaras luego: TAVILY_API_KEY, "
+                                 "GMAIL_PASSWORD...",
+                     fg=FAINT, font=self.f_small, bg=PANEL, anchor="w",
+                     wraplength=250, justify="left").pack(fill="x", pady=(XS, SM))
+            if not self.vault.names():
+                self._btn(empty, "Guardar el primero", self._focus_new,
+                          accent=True).pack(anchor="w")
             return
         for n in names:
             sel = (n == self.selected)
-            outer = tk.Frame(self.list_frame, bg=ACC if sel else LINE, highlightthickness=1)
-            inner = tk.Frame(outer, bg=ACC2 if sel else PANEL)
-            inner.pack(fill="both", expand=True, padx=1, pady=1)
-            lab = tk.Label(inner, text=n, fg=FG, font=self.f_body, bg=ACC2 if sel else PANEL,
-                           anchor="w")
-            lab.pack(fill="x", padx=12, pady=8)
-            lab.bind("<Button-1>", lambda _e, name=n: self.select(name))
-            outer.bind("<Button-1>", lambda _e, name=n: self.select(name))
+            rowbg = PANEL2 if sel else PANEL
+            outer = tk.Frame(self.list_frame, bg=rowbg)
+            outer.pack(fill="x", pady=1)
+            bar = tk.Frame(outer, bg=ACC if sel else rowbg, width=3)
+            bar.pack(side="left", fill="y")
+            lab = tk.Label(outer, text=n, fg=FG, font=self.f_body, bg=rowbg,
+                           anchor="w", height=1)
+            lab.pack(side="left", fill="x", expand=True, padx=(SM, SM), pady=SM)
+            kind = tk.Label(outer, text=self._kind_of(n), fg=FAINT, font=self.f_small,
+                            bg=rowbg)
+            kind.pack(side="right", padx=(0, SM))
+
+            def _hover(_e, w=(outer, lab, kind)):
+                if n == self.selected:
+                    return
+                for x in w:
+                    x.configure(bg=LINE)
+            def _unhover(_e, w=(outer, lab, kind)):
+                if n == self.selected:
+                    return
+                for x in w:
+                    x.configure(bg=PANEL)
+            for widget in (outer, lab, kind):
+                widget.bind("<Button-1>", lambda _e, name=n: self.select(name))
+                widget.bind("<Enter>", _hover)
+                widget.bind("<Leave>", _unhover)
+
+    def _kind_of(self, name: str) -> str:
+        """Etiqueta corta a la derecha de la fila, sin llamar al cifrado."""
+        tags = self.vault.meta(name).get("tags", [])
+        if tags:
+            return tags[0]
+        low = name.lower()
+        if any(k in low for k in ("api", "key", "token", "secret", "hec")):
+            return "clave"
+        if any(k in low for k in ("pass", "pwd", "contras")):
+            return "contrasena"
+        return ""
+
+    def _focus_new(self, event=None):
+        self.name_entry.focus_set()
+        self.name_entry.icursor("end")
+        self.canvas.yview_moveto(1.0)
+        self.set_foot("escribe el nombre (p. ej. TAVILY_API_KEY), el valor, y pulsa Guardar")
 
     def _key_drives(self) -> set[str]:
         return {d for d in drive_letters() if (Path(d) / KEY_FILENAME).is_file()}
@@ -774,6 +830,129 @@ class CofreGUI:
         except ValueError:
             i = 0
         self.select(names[(i + delta) % len(names)])
+
+    # ---------- guia de uso ----------
+
+    GUIDE_TITLE = "Como se usa el cofre, paso a paso"
+
+    GUIDE = [
+        ("1. Conecta el pendrive", [
+            "Enchufa cualquiera de los dos: E: (principal) o F: (reserva).",
+            "Solo hace falta uno. No los dos.",
+            "El pendrive es la llave: sin el, el cofre no se abre.",
+        ]),
+        ("2. Abre el cofre", [
+            "Doble click en el icono COFRE del escritorio.",
+            "Arriba a la derecha tiene que poner 'abierto' con el punto verde.",
+            "Si pone 'cerrado', enchufa el pendrive y pulsa Reconectar.",
+        ]),
+        ("3. Guardar una clave", [
+            "Nombre: como la vas a llamar. Sin espacios. Ej: TAVILY_API_KEY",
+            "Valor: la clave tal cual. Puedes pegarla o generarla con un boton.",
+            "Tags: opcional, para agrupar. Ej: google, trabajo",
+            "Pulsa Guardar. Aparece en la lista de la izquierda.",
+        ]),
+        ("4. Usarla en una web", [
+            "Selecciona el secreto en la lista.",
+            "Pulsa 'Copiar valor' y pega en la web (Ctrl+V).",
+            "El portapapeles se vacia solo en 30 segundos.",
+            "Para verla en pantalla: boton Ver (se oculta a los 15 s).",
+        ]),
+        ("5. Usarla en un programa", [
+            "Pulsa 'Comando exec' y pega en la terminal.",
+            "Queda asi: run.cmd exec --name TAVILY_API_KEY -- python script.py",
+            "La clave va dentro de ese proceso, no a ningun fichero.",
+            "Cuando el proceso termina, la clave desaparece con el.",
+        ]),
+        ("6. Terminar", [
+            "Pulsa Bloquear: la llave se borra de la memoria.",
+            "O quita el pendrive: el cofre se bloquea solo.",
+            "Cerrar la ventana tambien bloquea.",
+        ]),
+        ("Si algo va mal", [
+            "'cerrado': el pendrive no esta puesto o no es de este cofre.",
+            "'cofre no inicializado': falta crearlo (panel Puesta en marcha).",
+            "'serial no registrado': ese pendrive no es de este cofre.",
+            "'la clave no corresponde': pendrive de otro cofre o PIN mal.",
+            "Si no abre y no dice nada: usa el acceso COFRE (diagnostico).",
+        ]),
+    ]
+
+    def open_guide(self, event=None) -> None:
+        """Guia de uso paginada: un paso por pantalla, texto grande, sin tecnicismos."""
+        win = tk.Toplevel(self.root)
+        win.title("COFRE - guia de uso")
+        win.configure(bg=BG)
+        win.geometry("620x520+140+90")
+        win.transient(self.root)
+        win.minsize(520, 420)
+
+        head = tk.Frame(win, bg=PANEL)
+        head.pack(fill="x")
+        tk.Frame(head, bg=ACC, height=3).pack(fill="x")
+        step_var = tk.StringVar()
+        tk.Label(head, text=self.GUIDE_TITLE, fg=FG, font=self.f_h2,
+                 bg=PANEL).pack(anchor="w", padx=LG, pady=(MD, 0))
+        tk.Label(head, textvariable=step_var, fg=MUT, font=self.f_small,
+                 bg=PANEL).pack(anchor="w", padx=LG, pady=(0, MD))
+
+        card = tk.Frame(win, bg=PANEL2, highlightthickness=1, highlightbackground=LINE)
+        card.pack(fill="both", expand=True, padx=LG, pady=LG)
+        title_lbl = tk.Label(card, text="", fg=FG, font=self.f_h2, bg=PANEL2,
+                             anchor="w", justify="left", wraplength=500)
+        title_lbl.pack(fill="x", padx=LG, pady=(LG, MD))
+        lines_box = tk.Frame(card, bg=PANEL2)
+        lines_box.pack(fill="both", expand=True, padx=LG)
+
+        state = {"i": 0}
+
+        def render() -> None:
+            for w in lines_box.winfo_children():
+                w.destroy()
+            title, lines = self.GUIDE[state["i"]]
+            title_lbl.configure(text=title)
+            step_var.set(f"paso {state['i'] + 1} de {len(self.GUIDE)}")
+            for line in lines:
+                row = tk.Frame(lines_box, bg=PANEL2)
+                row.pack(fill="x", pady=XS)
+                tk.Frame(row, bg=ACC, width=3, height=16).pack(side="left", pady=4)
+                tk.Label(row, text=line, fg=FG, font=self.f_body, bg=PANEL2,
+                         anchor="w", justify="left", wraplength=480).pack(
+                    side="left", fill="x", padx=(MD, 0))
+            prev_btn.set_enabled(state["i"] > 0)
+            next_btn.label.configure(text="Cerrar" if state["i"] == len(self.GUIDE) - 1
+                                     else "Siguiente")
+            dots.delete("all")
+            for k in range(len(self.GUIDE)):
+                color = ACC if k == state["i"] else LINE2
+                dots.create_oval(4 + k * 14, 4, 12 + k * 14, 12, fill=color, outline="")
+
+        def go(delta: int):
+            nxt = state["i"] + delta
+            if nxt < 0:
+                return
+            if nxt >= len(self.GUIDE):
+                win.destroy()
+                return
+            state["i"] = nxt
+            render()
+
+        foot = tk.Frame(win, bg=PANEL)
+        foot.pack(fill="x")
+        next_btn = self._btn(foot, "Siguiente", lambda _e: go(1), accent=True)
+        next_btn.pack(side="right", padx=(SM, LG), pady=SM)
+        prev_btn = self._btn(foot, "Anterior", lambda _e: go(-1))
+        prev_btn.pack(side="right", padx=SM, pady=SM)
+        dots = tk.Canvas(foot, bg=PANEL, width=14 * len(self.GUIDE) + 8, height=16,
+                         highlightthickness=0, bd=0)
+        dots.pack(side="left", padx=LG)
+
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.bind("<Right>", lambda _e: go(1))
+        win.bind("<Left>", lambda _e: go(-1))
+        render()
+        win.focus_set()
+        return win
 
     def toggle_help(self) -> None:
         if self.help_box.winfo_ismapped():
