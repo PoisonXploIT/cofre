@@ -84,6 +84,7 @@ class CofreGUI:
 
         self.root = root or tk.Tk()
         self.root.title("COFRE - boveda de secretos")
+        self._set_icon()
         self.root.configure(bg=BG)
         self.root.geometry("980x620+30+30")
         # Medido el 2026-11-10: por debajo de 920 px los botones de la fila 2
@@ -101,6 +102,22 @@ class CofreGUI:
         self.f_icon = f["icon"]
 
     # ---------- piezas de estilo ----------
+
+    def _set_icon(self) -> None:
+        """Icono de la ventana y de la barra de tareas. Si falta el .ico, la
+        ventana funciona igual: no es un requisito."""
+        for candidate in (Path(__file__).resolve().parent.parent / "assets" / "cofre.ico",
+                          Path(__file__).resolve().parent / "assets" / "cofre.ico"):
+            if candidate.is_file():
+                try:
+                    # las dos formas: una para esta ventana, otra para las que
+                    # se abran despues (hojas modales de la fase C)
+                    self.root.iconbitmap(str(candidate))
+                    self.root.iconbitmap(default=str(candidate))
+                except Exception:
+                    pass
+                return
+
 
     def _btn(self, parent, text, command, accent=False, danger=False):
         """Boton plano: Tk tiene un aspecto de los 90; un frame con etiqueta
