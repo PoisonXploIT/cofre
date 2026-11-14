@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; width: 360px; font: 12px/1.5 "Segoe UI", sans-serif;
+           background: #080B0F; color: #E9EEF5; }
+    h1 { font-size: 12px; margin: 10px 12px 4px; letter-spacing: .04em; }
+    p  { margin: 0 12px 8px; color: #98A5B6; font-size: 11px; }
+    .line { padding: 6px 10px; margin: 6px 12px; border: 1px solid #334258;
+            border-radius: 6px; background: #11161E; }
+    .ok   { border-color: #3E9C7A; }
+    .bad  { border-color: #D9A44F; }
+    pre   { margin: 0; font: 11px/1.4 "Consolas", monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>SONDA H23 - mensajería nativa</h1>
+  <p>Intenta lanzar cuatro host distintos. El resultado dice si Chrome/Brave puede
+     ejecutarlo y si responde al protocolo stdio.</p>
+  <div id="out"><div class="line">Pulsa "Probar" para ejecutar la prueba.</div></div>
+  <button id="run" style="margin:0 12px 12px;padding:6px 10px;border:1px solid #334258;
+                          background:#1F2836;color:#E9EEF5;border-radius:6px;cursor:pointer">
+    Probar
+  </button>
+  <script>
+    const NAMES = ["bat", "cmd", "python", "py"];
+    const out = document.getElementById("out");
+
+    async function probe(name) {
+      try {
+        const r = await chrome.runtime.sendNativeMessage("com.cofre." + name, { ping: 1 });
+        return { name, ok: true, reply: r };
+      } catch (e) {
+        return { name, ok: false, error: String(e) };
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", async () => {
+      out.innerHTML = "";
+      for (const n of NAMES) {
+        const r = await probe(n);
+        const div = document.createElement("div");
+        div.className = "line " + (r.ok ? "ok" : "bad");
+        const text = r.ok
+          ? "OK    " + n + "  el navegador LO LANZA y responde: " + JSON.stringify(r.reply)
+          : "FALLO " + n + "  " + r.error;
+        const pre = document.createElement("pre");
+        pre.textContent = text;
+        div.appendChild(pre);
+        out.appendChild(div);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "COFRE NM probe (sonda H23)",
+  "version": "1.0.0",
+  "description": "Sonda local: prueba si el navegador puede lanzar un host de mensajeria nativa .bat/.cmd/.exe",
+  "permissions": [
+    "nativeMessaging"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sonda H23"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzf4lK0tEsOUZEPVe4Oa32ViiVwggfnYUYYLVAslWMgTFWagsn5qXYsD2IwMVhN8Kuyb0HOYRR6Xmjok60LRV4b+9d+t0PFzjjYDU11GqHnLMfzfrbh/++DPkJN9TSSGsjlUeqJxU619ywmnm50pcD/6NnR1iiXPlFK4PqyqYIylWiPsd1vnDG430210JjcLx7l675YbFbL61Y+EkeY7Fw/bsz6ZU8eSUTAeyS0EHLKoynhdJYfEYqW6TQq0tOJ31jXfgIvhl1OGW6BWP0LAY6rJlMemT4uBIPj+uwmpoJBn6ewL58ct9ybC3Tlr+VRZWHhd9vqN4dz4jjUn7/pEtOwIDAQAB"
+}

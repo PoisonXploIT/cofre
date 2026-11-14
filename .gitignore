@@ -12,3 +12,6 @@ extension/.extension-key.pem
 
 # Regla de la casa: la documentacion va al vault, no al repo.
 /*.md
+
+# Clave de la sonda de mensajeria nativa (no se versiona)
+tools/nm_probe/.probe-key.pem
