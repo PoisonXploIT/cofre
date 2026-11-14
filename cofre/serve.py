@@ -108,6 +108,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._reject(400, "cuerpo invalido")
             return
         name = str(payload.get("name", "")).strip()
+        domain = str(payload.get("domain", "")).strip().lower()
         if not name:
             self._reject(400, "falta el nombre")
             return
@@ -133,8 +134,9 @@ class _Handler(BaseHTTPRequestHandler):
                    name=name, ok=False, detail=type(exc).__name__)
             self._reject(409, "el pendrive no corresponde a este cofre")
             return
+        # H16/H17: queda constancia del dominio donde se relleno, no del valor.
         record(self.server.vault_path, "browser-get", self.server.gate, serial,
-               name=name, ok=True)
+               name=name, ok=True, detail=f"dominio={domain or 'sin dominio'}")
         self._send(200, {"ok": True, "name": name, "value": value})
 
     # ---------- vistas ----------

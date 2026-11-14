@@ -1,0 +1,10 @@
+{
+  "note": "Dominios donde la extension puede rellenar. El host de la pestana debe coincidir o ser subdominio. Si no esta, pide confirmacion explicita. Edita esta lista a mano.",
+  "updated": "2026-11-14",
+  "domains": [
+    "github.com",
+    "cloudflare.com",
+    "google.com",
+    "gmail.com"
+  ]
+}

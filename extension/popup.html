@@ -10,7 +10,7 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; width: 320px; background: var(--bg); color: var(--text);
+      margin: 0; width: 340px; background: var(--bg); color: var(--text);
       font: 12px/1.45 "Segoe UI Variable Text", "Segoe UI", sans-serif;
     }
     header {
@@ -22,6 +22,14 @@
     .dot.on { background: var(--accent); }
     header b { font-size: 12px; letter-spacing: .04em; }
     #state { margin-left: auto; color: var(--muted); font-size: 11px; }
+    .bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; background: var(--card);
+      border-bottom: 1px solid var(--border); font-size: 11px;
+    }
+    #host { color: var(--muted); font-weight: 600; }
+    #host.ok { color: var(--accent); }
+    #allownote { color: var(--faint); margin-left: auto; }
     #search {
       width: 100%; padding: 7px 9px; margin: 8px 0 4px;
       background: var(--card); color: var(--text);
@@ -41,12 +49,15 @@
       border-radius: 5px; padding: 2px 6px; font-size: 10px; cursor: pointer;
     }
     .row .fill:hover { border-color: var(--accent); color: var(--text); }
+    .options {
+      display: flex; gap: 8px; align-items: center;
+      padding: 6px 12px 0; color: var(--muted); font-size: 11px;
+    }
     footer {
       padding: 8px 12px; border-top: 1px solid var(--border);
       background: var(--surface); color: var(--faint); font-size: 10px;
     }
     .empty { color: var(--muted); padding: 14px 4px; }
-    .hint { color: var(--faint); font-size: 10px; padding: 2px 4px 6px; }
   </style>
 </head>
 <body>
@@ -55,8 +66,15 @@
     <b>COFRE</b>
     <span id="state">comprobando...</span>
   </header>
+  <div class="bar">
+    <span id="host">sin pestana</span>
+    <span id="allownote"></span>
+  </div>
   <main>
     <input id="search" type="text" placeholder="buscar secreto" autocomplete="off">
+    <div class="options">
+      <label><input type="checkbox" id="focused"> Rellenar el campo enfocado</label>
+    </div>
     <div id="list"></div>
   </main>
   <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto.</footer>

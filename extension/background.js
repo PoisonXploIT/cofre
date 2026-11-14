@@ -29,7 +29,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === "get") {
-    call("/get", { method: "POST", body: JSON.stringify({ name: msg.name }) })
+    // El dominio se manda solo para el registro de accesos: sirve para saber
+    // donde se relleno, no para nada mas.
+    call("/get", { method: "POST", body: JSON.stringify({ name: msg.name, domain: msg.domain || "" }) })
       .then(sendResponse)
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
