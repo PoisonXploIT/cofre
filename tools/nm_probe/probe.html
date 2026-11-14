@@ -27,10 +27,21 @@
     const NAMES = ["bat", "cmd", "python", "py"];
     const out = document.getElementById("out");
 
+    const TIMEOUT = 5000;   // Chrome/Brave no tienen temporizador: si el host no responde, la promesa cuelga
+
+    function timeout(ms, name) {
+      return new Promise((resolve) =>
+        setTimeout(() => resolve({ name, ok: false, error: "sin respuesta en " + ms + " ms (el proceso se colga)" }), ms));
+    }
+
     async function probe(name) {
       try {
-        const r = await chrome.runtime.sendNativeMessage("com.cofre." + name, { ping: 1 });
-        return { name, ok: true, reply: r };
+        const r = await Promise.race([
+          chrome.runtime.sendNativeMessage("com.cofre." + name, { ping: 1 })
+            .then((r) => ({ name, ok: true, reply: r })),
+          timeout(TIMEOUT, name),
+        ]);
+        return r;
       } catch (e) {
         return { name, ok: false, error: String(e) };
       }
