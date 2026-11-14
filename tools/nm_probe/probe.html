@@ -20,50 +20,10 @@
 <body>
   <h1>SONDA H23 - mensajería nativa</h1>
   <p>Comprueba si el navegador puede lanzar un host de mensajería nativa escrito como
-     <code>.bat</code>, <code>.cmd</code>, <code>python.exe</code> o <code>.py</code>.</p>
+     <code>.bat</code>, <code>.cmd</code>, <code>python.exe</code> o <code>.py</code>.
+     La logica está en probe.js porque MV3 no permite scripts inline.</p>
   <button id="run">Volver a probar</button>
   <div id="out"><div class="line">Ejecutando la prueba...</div></div>
-  <script>
-    const NAMES = ["bat", "cmd", "python", "py"];
-    const out = document.getElementById("out");
-
-    const TIMEOUT = 5000;   // Chrome/Brave no tienen temporizador: si el host no responde, la promesa cuelga
-
-    function timeout(ms, name) {
-      return new Promise((resolve) =>
-        setTimeout(() => resolve({ name, ok: false, error: "sin respuesta en " + ms + " ms (el proceso se colga)" }), ms));
-    }
-
-    async function probe(name) {
-      try {
-        const r = await Promise.race([
-          chrome.runtime.sendNativeMessage("com.cofre." + name, { ping: 1 })
-            .then((r) => ({ name, ok: true, reply: r })),
-          timeout(TIMEOUT, name),
-        ]);
-        return r;
-      } catch (e) {
-        return { name, ok: false, error: String(e) };
-      }
-    }
-
-    async function run() {
-      out.innerHTML = "";
-      for (const n of NAMES) {
-        const r = await probe(n);
-        const div = document.createElement("div");
-        div.className = "line " + (r.ok ? "ok" : "bad");
-        const pre = document.createElement("pre");
-        pre.textContent = r.ok
-          ? "OK    " + n + "  el navegador LO LANZA y responde: " + JSON.stringify(r.reply)
-          : "FALLO " + n + "  " + r.error;
-        div.appendChild(pre);
-        out.appendChild(div);
-      }
-    }
-
-    document.getElementById("run").addEventListener("click", run);
-    run();
-  </script>
+  <script src="probe.js"></script>
 </body>
 </html>
