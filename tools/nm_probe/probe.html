@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Sonda H23 - mensajeria nativa</title>
+  <style>
+    body { margin: 24px; font: 13px/1.5 "Segoe UI", sans-serif;
+           background: #080B0F; color: #E9EEF5; }
+    h1 { font-size: 14px; margin: 0 0 6px; letter-spacing: .04em; }
+    p  { margin: 0 0 12px; color: #98A5B6; font-size: 12px; }
+    .line { padding: 8px 12px; margin: 8px 0; border: 1px solid #334258;
+            border-radius: 8px; background: #11161E; }
+    .ok  { border-color: #3E9C7A; }
+    .bad { border-color: #D9A44F; }
+    pre  { margin: 0; font: 12px/1.4 "Consolas", monospace; white-space: pre-wrap; }
+    button { padding: 8px 12px; border: 1px solid #334258; background: #1F2836;
+             color: #E9EEF5; border-radius: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>SONDA H23 - mensajería nativa</h1>
+  <p>Comprueba si el navegador puede lanzar un host de mensajería nativa escrito como
+     <code>.bat</code>, <code>.cmd</code>, <code>python.exe</code> o <code>.py</code>.</p>
+  <button id="run">Volver a probar</button>
+  <div id="out"><div class="line">Ejecutando la prueba...</div></div>
+  <script>
+    const NAMES = ["bat", "cmd", "python", "py"];
+    const out = document.getElementById("out");
+
+    async function probe(name) {
+      try {
+        const r = await chrome.runtime.sendNativeMessage("com.cofre." + name, { ping: 1 });
+        return { name, ok: true, reply: r };
+      } catch (e) {
+        return { name, ok: false, error: String(e) };
+      }
+    }
+
+    async function run() {
+      out.innerHTML = "";
+      for (const n of NAMES) {
+        const r = await probe(n);
+        const div = document.createElement("div");
+        div.className = "line " + (r.ok ? "ok" : "bad");
+        const pre = document.createElement("pre");
+        pre.textContent = r.ok
+          ? "OK    " + n + "  el navegador LO LANZA y responde: " + JSON.stringify(r.reply)
+          : "FALLO " + n + "  " + r.error;
+        div.appendChild(pre);
+        out.appendChild(div);
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", run);
+    run();
+  </script>
+</body>
+</html>
