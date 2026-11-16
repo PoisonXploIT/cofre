@@ -23,6 +23,12 @@ def _domain(payload: dict) -> str:
 
 def dispatch(app, message: dict) -> dict:
     """Ejecuta una peticion del navegador. `app` es la CofreGUI."""
+    try:
+        # los dominios o los secretos pueden haberse cambiado desde la CLI
+        # mientras la GUI estaba abierta: se relee antes de decidir nada
+        app.vault.refresh()
+    except Exception:
+        pass
     tipo = str(message.get("type", "")).strip()
 
     if tipo == "status":

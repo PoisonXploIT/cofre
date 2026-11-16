@@ -77,6 +77,11 @@ class Vault:
             self._v2 = V2Store(self.path, material=self._material)
         return self._v2
 
+    def refresh(self) -> None:
+        """Releer el cofre de disco si esta en v2 (la GUI lo tiene cacheado)."""
+        if self.is_v2():
+            self._v2store().refresh()
+
     def is_v2(self) -> bool:
         try:
             return self.load().get("format") == 2

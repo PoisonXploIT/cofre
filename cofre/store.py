@@ -105,6 +105,11 @@ class V2Store:
     def load(self) -> dict:
         return self._data
 
+    def refresh(self) -> None:
+        """Releer el fichero. La GUI mantiene el cofre en memoria y un cambio
+        hecho desde la CLI (asignar dominios, anadir un secreto) no se veria."""
+        self._data = self._vault.load()
+
     def save(self, data: dict | None = None) -> None:
         self._data = data or self._data
         self._vault.save(self._data)
