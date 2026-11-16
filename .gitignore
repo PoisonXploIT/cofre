@@ -15,3 +15,6 @@ extension/.extension-key.pem
 
 # Clave de la sonda de mensajeria nativa (no se versiona)
 tools/nm_probe/.probe-key.pem
+
+# Manifests de host generados por install_hosts.py (se regeneran; no se versionan)
+tools/nm_probe/com.cofre.*.json

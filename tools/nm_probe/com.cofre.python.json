@@ -1,9 +1,0 @@
-{
-  "name": "com.cofre.python",
-  "description": "Sonda H23: python.exe directo (sin script)",
-  "path": "C:\\Users\\Sammi\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://fjmjgjigdghjocghonmgfhcjmgliefog/"
-  ]
-}
