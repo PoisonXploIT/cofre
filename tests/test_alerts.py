@@ -55,6 +55,13 @@ class TestRules(unittest.TestCase):
         alertas = evaluate(eventos, {"odd_from": 1, "odd_to": 6}, self.state)
         self.assertTrue(any(a.rule == "hora-rara" for a in alertas))
 
+    def test_reanclaje_avisa_media(self):
+        eventos = [ev(1, "reanchor", self.ahora, detail="prueba")]
+        alertas = evaluate(eventos, {}, self.state)
+        media = [a for a in alertas if a.rule == "reanclaje"]
+        self.assertTrue(media)
+        self.assertEqual(media[0].severity, "media")
+
     def test_puente_con_origen_rechazado(self):
         eventos = [ev(1, "bridge-reject", self.ahora, ok=False, detail="origen no autorizado")]
         alertas = evaluate(eventos, {}, self.state)

@@ -185,6 +185,15 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
                                      int(ev.get("seq", 0))))
             break
 
+    # re-anclaje: mueve el punto de exigencia de firma; siempre se avisa
+    for ev in nuevos:
+        if ev.get("ev") in ("reanchor", "fin-de-pruebas"):
+            encontradas.append(Alert("reanclaje", "media",
+                                     f"log re-anclado en la linea {ev.get('seq')} "
+                                     f"({ev.get('detail') or 'sin motivo escrito'})",
+                                     int(ev.get("seq", 0))))
+            break
+
     # log manipulado: un evento que exige cofre abierto y va sin firma
     for ev in nuevos:
         if ev.get("ev") == "audit-verify" and not ev.get("ok"):

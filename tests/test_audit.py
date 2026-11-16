@@ -87,6 +87,88 @@ class TestAuditChain(unittest.TestCase):
         self.assertIn("github.com", crudo)
 
 
+class TestFirmaExigible(unittest.TestCase):
+    """La firma solo se exige a eventos que no pueden ocurrir con el cofre cerrado."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-firma-"))
+        self.vault = self.tmp / "cofre.json"
+        audit.set_key(secrets.token_bytes(32))
+
+    def tearDown(self):
+        audit.clear_key()
+
+    def test_alerta_de_fallos_sin_firma_no_es_manipulacion(self):
+        # tres aperturas fallidas ocurren con el cofre cerrado, y su alerta
+        # tambien: no puede marcarse como manipulacion
+        audit.clear_key()
+        for _ in range(3):
+            audit.record(self.vault, "gui-gate", "usb", ok=False, detail="sin pendrive")
+        audit.record(self.vault, "alert", "usb", name="fallos-apertura", ok=False,
+                     detail="media: 3 fallos de apertura seguidos")
+        audit.set_key(secrets.token_bytes(32))
+        ok, detalle = audit.verify(self.vault)
+        self.assertTrue(ok, detalle)
+        self.assertIn("sin firma", detalle)
+
+    def test_evento_privilegiado_sin_firma_tras_ancla(self):
+        audit.record(self.vault, "reanchor", "usb", ok=True, detail="prueba")
+        texto = audit_path(self.vault).read_text(encoding="utf-8")
+        # se anade a mano un browser-get sin firma y con prev correcto
+        import hashlib
+        ultima = texto.splitlines()[-1]
+        falso = json.dumps({"seq": 2, "ev": "browser-get", "tok": "x",
+                            "prev": hashlib.sha256(ultima.encode()).hexdigest(),
+                            "mac": None}, sort_keys=True, separators=(",", ":"))
+        contenido = texto + falso + "\n"
+        audit_path(self.vault).write_text(contenido, encoding="utf-8")
+        ok, detalle = audit.verify(self.vault)
+        self.assertFalse(ok)
+        self.assertIn("anadida a mano", detalle)
+
+    def test_restaurar_copia_antigua_avisa_pero_no_falla(self):
+        from cofre.v2 import VaultV2, new_usb_slot
+        from cofre.store import open_any
+
+        vp = self.tmp / "cofre.json"
+        master = secrets.token_bytes(32)
+        VaultV2(vp).create(master, new_usb_slot(master, secrets.token_bytes(32), 1, "E", ""))
+        store = open_any(vp)
+        store._data = store._vault.load()
+        store.master = master
+        audit.set_key(master)
+        audit.record(vp, "get", "usb", 1, name="A")
+        audit.stamp(store, master)
+        # el log sigue creciendo despues del checkpoint (como tras restaurar)
+        audit.record(vp, "get", "usb", 1, name="B")
+        store.refresh()
+        ok, detalle = audit.check_checkpoint(store, master)
+        self.assertTrue(ok, detalle)
+        self.assertIn("por delante del checkpoint", detalle)
+
+    def test_checkpoint_por_detras_del_log_si_falla(self):
+        from cofre.v2 import VaultV2, new_usb_slot
+        from cofre.store import open_any
+
+        vp = self.tmp / "cofre2.json"
+        master = secrets.token_bytes(32)
+        VaultV2(vp).create(master, new_usb_slot(master, secrets.token_bytes(32), 1, "E", ""))
+        store = open_any(vp)
+        store._data = store._vault.load()
+        store.master = master
+        audit.set_key(master)
+        for i in range(3):
+            audit.record(vp, "get", "usb", 1, name=f"S{i}")
+        audit.stamp(store, master)
+        lineas = audit_path(vp).read_text(encoding="utf-8").splitlines()
+        recortado = "\n".join(lineas[:-1]) + "\n"
+        audit_path(vp).write_text(recortado, encoding="utf-8")
+        ok, detalle = audit.check_checkpoint(store, master)
+        self.assertFalse(ok)
+        self.assertIn("faltan lineas", detalle)
+
+
 class TestCheckpoint(unittest.TestCase):
     def test_checkpoint_detecta_lineas_borradas(self):
         from cofre.crypto import Vault

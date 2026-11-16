@@ -113,6 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--lines", type=int, default=20)
     sl.add_argument("verify", nargs="?", choices=["verify"],
                     help="comprobar la cadena y la firma del log")
+    sl.add_argument("--reanchor", action="store_true",
+                    help="mover el punto de exigencia de firma (solo el usuario)")
+    sl.add_argument("--reseal", action="store_true",
+                    help="volver a sellar el checkpoint tras restaurar una copia")
+    sl.add_argument("--motivo", default="", help="por que se re-ancla o se resella")
+    sl.add_argument("--si", action="store_true", help="confirmar sin preguntar")
     sl.add_argument("--stats", action="store_true", help="totales, fallos y pendrives usados")
 
     ss = with_common(sub.add_parser("stick-init"))
@@ -359,8 +365,41 @@ def main(argv: list[str]) -> int:
                 else:
                     _set_key(store.master)
                 bind_store(store)
+                from cofre.audit import reseal_if_needed
+                if reseal_if_needed(store, store.master):
+                    print("aviso: el log iba por delante del checkpoint; resellado "
+                          "con un evento 'restore' firmado")
         except Exception:
             pass
+        if args.reanchor:
+            # Re-anclar tapa lineas anteriores: solo lo hace el usuario, a mano y
+            # con confirmacion. Nunca como parte de un arreglo de codigo.
+            if not args.motivo.strip():
+                print("hace falta --motivo: por que se re-ancla", file=sys.stderr)
+                return 1
+            if not args.si:
+                print("Esto mueve el punto desde el que se exige firma.")
+                print("Las lineas anteriores quedaran exentas y el aviso saldra en log verify.")
+                print(f"Motivo: {args.motivo}")
+                respuesta = input("Escribe REANCLAR para confirmar: ").strip()
+                if respuesta != "REANCLAR":
+                    print("cancelado")
+                    return 1
+            record(str(vault_path), "reanchor", args.gate, None, ok=True,
+                   actor="gui", detail=args.motivo[:150])
+            from cofre.audit import stamp_vault
+            stamp_vault(vault)
+            print("re-anclado. Ejecuta 'log verify' para ver el aviso.")
+            return 0
+
+        if args.reseal:
+            record(str(vault_path), "restore", args.gate, None, ok=True,
+                   actor="gui", detail=(args.motivo or "checkpoint resellado tras restaurar")[:150])
+            from cofre.audit import stamp_vault
+            stamp_vault(vault)
+            print("checkpoint resellado con un evento firmado")
+            return 0
+
         if getattr(args, "verify", None) == "verify":
             from cofre.audit import check_checkpoint, legacy_report, verify as verify_log
             ok_legacy, txt_legacy = legacy_report(str(vault_path))

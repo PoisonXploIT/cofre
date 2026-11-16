@@ -46,7 +46,7 @@ MAX_LINES = 5000
 PRIVILEGED = {
     "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
     "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
-    "stick-add-v2", "audit-verify", "alert", "fin-de-pruebas",
+    "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -406,8 +406,19 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         prev = _line_hash(texto)
         seq_esperado += 1
     detalle = f"{len(lineas)} lineas, cadena intacta"
-    if antes_de_uso:
-        detalle += f", uso real desde la linea {antes_de_uso}"
+    anclas = []
+    for texto in lineas:
+        try:
+            ev = json.loads(texto)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("ev") in ("fin-de-pruebas", "reanchor") and ev.get("mac"):
+            anclas.append(int(ev.get("seq", 0)))
+    if anclas:
+        detalle += f", re-anclado en la linea {max(anclas)}"
+        if len(anclas) > 1:
+            exentas = f"1-{max(anclas) - 1}"
+            detalle += f" (lineas {exentas} exentas de firma)"
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle
@@ -454,6 +465,25 @@ def stamp_vault(vault) -> None:
         pass
 
 
+def reseal_if_needed(store, master: bytes) -> bool:
+    """Si el log va por delante del checkpoint (copia restaurada), resellarlo con
+    un evento firmado 'restore'. Devuelve True si hizo algo."""
+    try:
+        idx = store.index(store._data, master)
+        guardado = (idx.get("settings") or {}).get("audit") or {}
+        if not guardado:
+            return False
+        seq, _hash, _ = _last_line(audit_path(store.path))
+        if seq <= int(guardado.get("seq", 0)):
+            return False
+        record(store.path, "restore", "-", None, ok=True, actor="gui",
+               detail=("checkpoint resellado: el log iba por delante "
+                       f"({seq} > {guardado.get('seq')}), tipico tras restaurar una copia"))
+        return True
+    except Exception:
+        return False
+
+
 def verify_vault(vault) -> tuple[bool, str]:
     """verify + checkpoint. Acepta tanto el objeto Vault de la aplicacion como
     un V2Store (que es lo que sabe leer el checkpoint)."""
@@ -487,9 +517,15 @@ def check_checkpoint(store, master: bytes) -> tuple[bool, str]:
     seq, hash_ultima, _ = _last_line(p)
     if not p.exists() or seq == 0:
         return False, "el log no existe pero el checkpoint dice que habia eventos"
-    if int(guardado.get("seq", -1)) != seq:
-        return False, (f"el log tiene {seq} eventos y el checkpoint {guardado.get('seq')}: "
+    guardado_seq = int(guardado.get("seq", -1))
+    if seq < guardado_seq:
+        return False, (f"el log tiene {seq} eventos y el checkpoint {guardado_seq}: "
                        "faltan lineas al final")
+    if seq > guardado_seq:
+        # tipico tras restaurar una copia antigua del cofre: el log va por delante.
+        # No es manipulacion; se avisa y se puede resellar con un evento firmado.
+        return True, (f"aviso: el log va por delante del checkpoint ({seq} > {guardado_seq}); "
+                      "normal si se ha restaurado una copia. Usa 'log reseal' para sellarlo")
     if guardado.get("hash") != hash_ultima:
         return False, "la ultima linea no coincide con el checkpoint"
     return True, f"{seq} eventos, checkpoint OK"

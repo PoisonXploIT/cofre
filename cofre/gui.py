@@ -663,10 +663,13 @@ class CofreGUI:
             stamp_vault(self.vault)
         except Exception:
             pass
-        audit_clear_key()
         # los permisos de 5 minutos (2.4) no sobreviven al bloqueo, por el
         # motivo que sea: a mano, por inactividad o por suspension
         self.confirm_grants.clear()
+        # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
+        # existe si el cofre estaba abierto
+        record(self.vault_path, "lock", self.gate, None, ok=True)
+        audit_clear_key()
         self.session = None
         self.serial = None
         self.selected = None
@@ -679,7 +682,6 @@ class CofreGUI:
         self.refresh_list()
         self.refresh_wizard()
         self.set_status("bloqueado  |  la llave ya no esta en memoria", warn=True)
-        record(self.vault_path, "lock", self.gate, None, ok=True)
 
     def refresh_list(self):
         for w in self.list_frame.winfo_children():
