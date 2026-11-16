@@ -44,6 +44,10 @@ from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, material_for, resolve_session_key, _salt_for
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
+from cofre.usb import (KEY_FILENAME, StickNotFound, StickNotRegistered, key_drives,
+                       copy_key_to, create_key_on, find_stick, keys_to_try,
+                       load_registry, read_key, register_stick, revoke_stick,
+                       set_role, usb_session_key, volume_serial)
 from cofre.salt import SaltMismatch, SaltMissing, show as salt_show
 
 DEFAULT_VAULT = default_vault()
@@ -168,7 +172,6 @@ def read_secret(prompt: str) -> str:
 
 
 def cmd_stick_list(vault: str) -> int:
-    from cofre.usb import key_drives, load_registry, volume_serial
 
     reg = load_registry(vault)
     sticks = reg.get("sticks", {})
@@ -192,8 +195,6 @@ def cmd_stick_list(vault: str) -> int:
 def cmd_stick_verify(vault_path: str) -> int:
     """Probar todas las llaves conectadas (R2): cada pendrive autorizado que
     este puesto tiene que abrir de verdad el cofre."""
-    from cofre.usb import (KEY_FILENAME, keys_to_try, load_registry, read_key,
-                           usb_session_key, volume_serial)
 
     vault = Vault(Path(vault_path))
     if not vault.is_v2() and not vault.load().get("wrapper"):
@@ -339,7 +340,6 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "stick-role":
-        from cofre.usb import set_role
         entry = set_role(str(vault_path), args.serial, args.role)
         if not entry:
             print(f"serial {args.serial} no esta registrado (run.cmd stick-list)")
@@ -349,7 +349,6 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "stick-revoke":
-        from cofre.usb import load_registry, revoke_stick
         reg = load_registry(str(vault_path))
         if len(reg.get("sticks", {})) <= 1:
             print("No se puede revocar el unico pendrive registrado: perderias el cofre.")
@@ -432,7 +431,6 @@ def main(argv: list[str]) -> int:
     if args.command == "migrate":
         from cofre.hosts import load as load_hosts
         from cofre.v2.migrate import MigrateError, migrate
-        from cofre.usb import find_stick, read_key, StickNotFound, StickNotRegistered
         path = Path(vault_path)
         data = vault.load()
         if data.get("format") == 2:
@@ -468,7 +466,6 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "stick-add-v2":
-        from cofre.usb import read_key, volume_serial, create_key_on, register_stick
         from cofre.v2.slots import new_usb_slot, open_with_stick, SlotError
         from cofre.v2.vault import VaultV2
 
@@ -592,7 +589,6 @@ def main(argv: list[str]) -> int:
         return cmd_shell(str(vault_path), args.gate, args.stick, args.allow_new_stick)
 
     if args.command == "stick-init":
-        from cofre.usb import create_key_on, register_stick, volume_serial
         target = Path(args.path)
         if target.exists() and not args.force:
             print("ya existe %s: no se sobrescribe (usa --force)" % target)
@@ -611,7 +607,6 @@ def main(argv: list[str]) -> int:
         # R2 (2026-11-16): registrar un serial sin comprobar la llave crea falsos
         # sobres de recuperacion. Antes de autorizar nada, la llave de ese
         # pendrive tiene que abrir ESTE cofre. Se comprueba aqui, no de memoria.
-        from cofre.usb import read_key, register_stick, volume_serial, usb_session_key
         target = Path(args.path)
         if not target.is_file():
             print("no existe %s" % target)
@@ -663,8 +658,6 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "stick-copy":
-        from cofre.usb import (copy_key_to, find_stick, read_key, register_stick,
-                               volume_serial, StickNotFound, StickNotRegistered)
         target = Path(args.dest)
         if target.exists() and not args.force:
             print("ya existe %s: usa --force para sobrescribir" % target)
