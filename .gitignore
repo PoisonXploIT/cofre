@@ -29,3 +29,8 @@ nmhost/com.cofre.host.json
 
 # auditoria: log apartado al anclar y checkpoints de pruebas
 .cofre-audit-antes-de-anclar.jsonl
+
+# logs de auditoria y archivos: estado local, nunca al repo
+.cofre-audit*.jsonl
+.cofre-access*.log
+.cofre-access*.log.old
