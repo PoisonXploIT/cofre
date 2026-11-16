@@ -5,13 +5,12 @@
 //     ejecuta en la pestana activa cuando pulsas "Rellenar";
 //   - no se escribe en "el campo enfocado" de cualquier pagina: se busca un
 //     campo de contrasena, o uno cuyo nombre/etiqueta hable de clave o token;
-//   - el dominio tiene que estar en allowed-domains.json. Si no esta, hace
-//     falta un segundo click de confirmacion (defensa contra phishing).
+//   - R1 (2026-11-16): el dominio NO se decide aqui. El puente rechaza el
+//     relleno si el host de la pestana no esta asignado a ESE secreto. No hay
+//     segundo click de confirmacion: eso es lo que hace la victima de un phishing.
 
 const $ = (id) => document.getElementById(id);
 let items = [];
-let allow = [];
-let armed = null;      // nombre del secreto awaits second click
 let tab = null;
 
 function send(msg) {
@@ -27,26 +26,6 @@ function hostOf(url) {
   }
 }
 
-function registrable(host) {
-  // "dash.cloudflare.com" -> "cloudflare.com" para la comprobacion
-  const parts = host.split(".");
-  for (let i = 0; i < parts.length - 1; i++) {
-    const candidate = parts.slice(i).join(".");
-    if (allow.includes(candidate)) return candidate;
-  }
-  return null;
-}
-
-async function loadAllow() {
-  try {
-    const res = await fetch(chrome.runtime.getURL("allowed-domains.json"));
-    const data = await res.json();
-    allow = (data.domains || []).map((d) => String(d).toLowerCase());
-  } catch (e) {
-    allow = [];
-  }
-}
-
 async function currentTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   return t || null;
@@ -56,11 +35,10 @@ async function refresh() {
   tab = await currentTab();
   const host = hostOf(tab?.url || "");
   $("host").textContent = host || "sin pestana";
-  const allowed = registrable(host);
-  $("host").classList.toggle("ok", !!allowed);
-  $("allownote").textContent = allowed
-    ? `dominio autorizado (${allowed})`
-    : host ? "dominio no autorizado: hara falta confirmacion" : "abre una pagina primero";
+  $("host").classList.toggle("ok", false);
+  $("allownote").textContent = host
+    ? "el cofre decide si este sitio vale para el secreto"
+    : "abre una pagina primero";
 
   const st = await send({ type: "status" });
   const open = st.ok && st.open;
@@ -98,7 +76,7 @@ function render() {
     kind.textContent = (item.tags && item.tags[0]) || "";
     const btn = document.createElement("button");
     btn.className = "fill";
-    btn.textContent = armed === item.name ? "Confirmar" : "Rellenar";
+    btn.textContent = "Rellenar";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       fill(item.name);
@@ -175,22 +153,16 @@ async function fill(name) {
     return;
   }
   const host = hostOf(tab.url || "");
-  const allowed = registrable(host);
-  if (!allowed) {
-    if (armed !== name) {
-      armed = name;
-      render();
-      $("foot").textContent = `Cuidado: ${host} no esta en la lista de dominios autorizados. ` +
-        "Pulsa Confirmar solo si confias en esta pagina (el riesgo es un sitio de phishing).";
-      return;
-    }
-    armed = null;
-  }
+  // R1: no hay confirmacion en la extension. El servidor rechaza el dominio que
+  // no este asignado a ESE secreto. Autorizar es cosa de la GUI/CLI, no del aviso.
 
   $("foot").textContent = "pidiendo el valor...";
   const res = await send({ type: "get", name, domain: host });
   if (!res.ok) {
-    $("foot").textContent = res.error || "no se pudo leer";
+    const motivo = String(res.error || "no se pudo leer");
+    $("foot").textContent = motivo.includes("no esta asignado") || motivo.includes("no tiene ningun sitio")
+      ? motivo + ". Asignalo en COFRE con: host-assign " + name + " " + host
+      : motivo;
     return;
   }
   try {
@@ -218,5 +190,5 @@ $("search").addEventListener("keydown", (e) => {
     if (first) first.click();
   }
 });
-loadAllow().then(refresh);
+refresh();
 $("search").focus();

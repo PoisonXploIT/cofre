@@ -69,17 +69,29 @@ def main() -> int:
           not app._confirm_delete and app._confirm_revoke is None and calls["close"] == 0,
           f"cierres: {calls['close']}")
 
-    # 4. Escape con el cofre abierto: bloquea, no cierra.
-    # Ojo con el orden real: si la ayuda esta desplegada, Escape la oculta
-    # primero. Aqui se cierra la ayuda para probar la rama del bloqueo.
+    # 4. Escape con el cofre abierto: NO bloquea y NO cierra (R7, 2026-11-16).
+    # Bloquear es solo Ctrl+L.
     if app.help_box.winfo_ismapped():
         app.help_box.pack_forget()
         app.root.update_idletasks()
     app.session = b"x" * 32
     app._on_escape(None)
-    check("H4 Escape bloquea en lugar de cerrar",
-          calls["close"] == 0 and calls["lock"] == 1,
+    check("R7 Escape no bloquea ni cierra",
+          calls["close"] == 0 and calls["lock"] == 0,
           f"lock={calls['lock']} close={calls['close']}")
+
+    # 4b. Ctrl+L si bloquea
+    app.lock()
+    check("R7 Ctrl+L bloquea", calls["lock"] == 1, f"lock={calls['lock']}")
+
+    # 4c. Enter copia el seleccionado
+    calls["copy"] = 0
+    app.selected = "EJEMPLO"
+    app.session = b"x" * 32
+    app.list_frame.focus_set()
+    app.root.update()
+    app._on_enter(None)
+    check("R7 Enter copia el seleccionado", calls["copy"] == 1, f"copy={calls['copy']}")
 
     # 5. Escape con el cofre cerrado: no hace nada destructivo
     calls["lock"] = 0

@@ -128,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
     gp.add_argument("--selftest", action="store_true",
                     help="construir la ventana, comprobarla y salir (sin mostrar)")
     with_common(sub.add_parser("stick-list"))
+    with_common(sub.add_parser("stick-verify",
+                               help="comprobar que cada pendrive conectado abre el cofre"))
+    ha = with_common(sub.add_parser("host-assign",
+                                    help="asignar los dominios donde se puede rellenar un secreto"))
+    ha.add_argument("name", help="nombre del secreto, p. ej. GITHUB_TOKEN")
+    ha.add_argument("hosts", nargs="+", help="dominios: github.com  *.ejemplo.com")
+    hh = with_common(sub.add_parser("host-list", help="dominios asignados a cada secreto"))
+    hh.add_argument("name", nargs="?", help="solo ese secreto")
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
     return p
 
@@ -173,6 +181,47 @@ def cmd_stick_list(vault: str) -> int:
         print(f"  serial {serial}  {info.get('drive','')}  {info.get('role','?')}  "
               f"{info.get('label') or ''}  [{mark}]  registrado {info.get('registered','')}")
     return 0
+
+
+def cmd_stick_verify(vault_path: str) -> int:
+    """Probar todas las llaves conectadas (R2): cada pendrive autorizado que
+    este puesto tiene que abrir de verdad el cofre."""
+    from cofre.usb import (KEY_FILENAME, keys_to_try, load_registry, read_key,
+                           usb_session_key, volume_serial)
+
+    vault = Vault(Path(vault_path))
+    if not vault.load().get("wrapper"):
+        print("el cofre no esta inicializado")
+        return 1
+    reg = load_registry(vault_path)
+    authorized = set(reg.get("sticks", {}))
+    drives = keys_to_try()
+    if not drives:
+        print("no hay ningun pendrive con %s conectado" % KEY_FILENAME)
+        return 1
+
+    ok, bad = 0, 0
+    for path in drives:
+        drive = _drive_of(path)
+        serial = volume_serial(drive)
+        etiqueta = f"{drive} serial {serial}"
+        if str(serial) not in authorized:
+            print(f"AVISO  {etiqueta}: no esta autorizado (no se prueba)")
+            continue
+        try:
+            read_key(path)
+            session = usb_session_key(path, _salt_for(vault_path))
+            vault.unlock(session)
+            print(f"OK     {etiqueta}: abre el cofre")
+            ok += 1
+        except Exception as exc:
+            print(f"FALLO  {etiqueta}: NO abre el cofre ({type(exc).__name__})")
+            bad += 1
+    print("")
+    print(f"{ok} llave(s) buena(s), {bad} llave(s) inservible(s)")
+    record(vault_path, "stick-verify", "usb", None,
+           name=f"{ok} ok / {bad} fallo", ok=bad == 0)
+    return 0 if bad == 0 else 1
 
 
 def cmd_shell(vault_path: str, gate: str, stick: str | None, allow_new: bool) -> int:
@@ -368,6 +417,39 @@ def main(argv: list[str]) -> int:
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))
 
+    if args.command == "stick-verify":
+        return cmd_stick_verify(str(vault_path))
+
+    if args.command in ("host-assign", "host-list"):
+        from cofre.hosts import HostsError, assign, clean_host, load
+        try:
+            if args.command == "host-assign":
+                if not vault.load().get("wrapper"):
+                    print("el cofre no esta inicializado", file=sys.stderr)
+                    return 1
+                if args.name not in vault.names():
+                    print(f"no existe el secreto '{args.name}'", file=sys.stderr)
+                    return 1
+                mapping = assign(str(vault_path), args.name, args.hosts)
+                print(f"{args.name}: {', '.join(mapping.get(args.name, []))}")
+                record(str(vault_path), "host-assign", args.gate, None,
+                       name=args.name, ok=True,
+                       detail=",".join(mapping.get(args.name, [])))
+                return 0
+            mapping = load(str(vault_path))
+            if args.name:
+                print(f"{args.name}: {', '.join(mapping.get(args.name, [])) or '(sin asignar)'}")
+                return 0
+            if not mapping:
+                print("ningun secreto tiene dominios asignados")
+                return 0
+            for nombre in sorted(mapping):
+                print(f"  {nombre:28} {', '.join(mapping[nombre])}")
+            return 0
+        except HostsError as exc:
+            print(f"dominio invalido: {exc}", file=sys.stderr)
+            return 1
+
     if args.command == "salt":
         try:
             info = salt_show(str(vault_path))
@@ -408,20 +490,37 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "stick-register":
-        from cofre.usb import read_key, register_stick, volume_serial
+        # R2 (2026-11-16): registrar un serial sin comprobar la llave crea falsos
+        # sobres de recuperacion. Antes de autorizar nada, la llave de ese
+        # pendrive tiene que abrir ESTE cofre. Se comprueba aqui, no de memoria.
+        from cofre.usb import read_key, register_stick, volume_serial, usb_session_key
         target = Path(args.path)
         if not target.is_file():
             print("no existe %s" % target)
             return 1
         try:
-            read_key(str(target))
+            key = read_key(str(target))
         except ValueError as exc:
             print(exc)
             return 1
+        if not vault.load().get("wrapper"):
+            print("el cofre no esta inicializado: primero init y rellena secretos")
+            return 1
+        try:
+            session = usb_session_key(str(target), _salt_for(str(vault_path)))
+            vault.unlock(session)
+        except Exception:
+            print("esta llave NO abre este cofre. No se registra el serial.")
+            print("Si el pendrive esta vacio o tiene la llave de otro cofre, lo correcto es:")
+            print("  python -m cofre.cli stick-copy %s" % args.path)
+            record(str(vault_path), "stick-register", args.gate, None, ok=False,
+                   detail="la llave no abre el cofre")
+            return 1
+        del key
         drive = _drive_of(str(target))
         serial = volume_serial(drive)
         register_stick(str(vault_path), serial, drive)
-        print(f"serial {serial} ({drive}) autorizado como pendrive del cofre")
+        print(f"llave comprobada: abre el cofre. serial {serial} ({drive}) autorizado")
         record(str(vault_path), "stick-register", args.gate, serial, ok=True)
         return 0
 

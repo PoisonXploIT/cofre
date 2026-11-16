@@ -12,7 +12,9 @@ import puppeteer from "file:///C:/Users/Sammi/.pi/agent/skills/browser-tools/nod
 const REPO = path.dirname(path.dirname(process.argv[2] || "tools/extension_fill_test.mjs"));
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(REPO, "extension/manifest.json"), "utf-8"));
 const POPUP = fs.readFileSync(path.join(REPO, "extension/popup.js"), "utf-8");
-const ALLOW = JSON.parse(fs.readFileSync(path.join(REPO, "extension/allowed-domains.json"), "utf-8"));
+// R1 (2026-11-16): la lista de dominios ya no vive en la extension. La decide
+// el puente, por secreto. Aqui solo se comprueba que la extension no la usa.
+const ALLOW = { domains: [] };
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -29,8 +31,9 @@ check("ningun match con comodin", wildcards.length === 0, wildcards.join(", "));
 check("host_permissions solo loopback",
   (MANIFEST.host_permissions || []).every((h) => h.includes("127.0.0.1")),
   (MANIFEST.host_permissions || []).join(", "));
-check("lista de dominios validada", Array.isArray(ALLOW.domains) && ALLOW.domains.length > 0,
-  ALLOW.domains?.join(", "));
+check("la extension no lleva lista de dominios",
+  !fs.existsSync(path.join(REPO, "extension/allowed-domains.json")),
+  "la lista vive junto al cofre, por secreto (.cofre-hosts.json)");
 check("la logica de relleno esta en popup.js", POPUP.includes("function cofreFill"), "");
 check("no se rellena el enfocado por defecto",
   POPUP.includes("allowFocused && focused"), "el modo 'campo enfocado' es explicito");
@@ -51,7 +54,7 @@ function extract(name) {
 }
 
 const cofreFillSrc = extract("cofreFill");
-const registrableSrc = extract("registrable");
+const registrableSrc = "function registrable() { return null; }";
 
 const FIXTURE = `data:text/html,` + encodeURIComponent(`<!doctype html><body>
   <form id="login">
@@ -119,9 +122,9 @@ check("un campo generico sin etiqueta de clave NO se rellena",
   out.r3.reason || "relleno un campo que no deberia");
 check("con 'campo enfocado' explicito si rellena",
   out.r4.filled === 1 && out.note4 === "SECRETO4", out.note4 || "");
-check("dominio no autorizado detectado", out.allow.plain === null, "example.com no esta en la lista");
-check("subdominio autorizado reconocido", out.allow.sub === "cloudflare.com", "dash.cloudflare.com");
-check("phishing tipo github.com.evil.co no pasa", out.allow.evil === null, out.allow.evil || "rechazado");
+check("sin lista local no hay decision en la extension",
+  out.allow.plain === null && out.allow.evil === null,
+  "el rechazo lo hace el puente, no el popup");
 
 await page.close();
 const failed = results.filter((r) => !r.ok);

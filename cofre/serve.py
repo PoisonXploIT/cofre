@@ -120,6 +120,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._reject(409, f"pendrive no disponible: {exc}")
             return
         vault = Vault(Path(self.server.vault_path))
+
+        # R1 (2026-11-16): el dominio se comprueba AQUI, contra los dominios
+        # asignados a ESE secreto. Sin asignacion no se rellena en ningun sitio,
+        # y un dominio que no coincide se rechaza sin preguntar. La extension no
+        # decide nada: solo informa del host de la pestana.
+        from cofre.hosts import HostsError, allows
+        try:
+            permitido, motivo = allows(self.server.vault_path, name, domain)
+        except HostsError as exc:
+            record(self.server.vault_path, "browser-get", self.server.gate, serial,
+                   name=name, ok=False, detail="hosts ilegible")
+            self._reject(409, f"no se pueden leer los dominios asignados: {exc}")
+            return
+        if not permitido:
+            record(self.server.vault_path, "browser-get", self.server.gate, serial,
+                   name=name, ok=False,
+                   detail=f"dominio rechazado: {domain or 'sin dominio'}")
+            self._reject(403, motivo)
+            return
+
         try:
             value = vault.get(session, name)
         except KeyError:

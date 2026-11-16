@@ -23,6 +23,7 @@ SALT_NAME = ".cofre-salt"
 LOG_NAME = ".cofre-access.log"
 OLD_LOG_NAME = ".cofre-access.log.old"
 REGISTRY_NAME = ".cofre-sticks.json"
+HOSTS_NAME = ".cofre-hosts.json"
 
 
 def default_vault() -> Path:
@@ -41,6 +42,11 @@ def atomic_write(path: str | Path, data: str | bytes) -> Path:
         tmp.write_text(data, encoding="utf-8")
     os.replace(tmp, p)
     return p
+
+
+def hosts_path(vault_path: str | Path) -> Path:
+    """Dominios asignados a cada secreto. Vive junto al cofre, no en la extension."""
+    return Path(vault_path).parent / HOSTS_NAME
 
 
 def log_path(vault_path: str | Path) -> Path:

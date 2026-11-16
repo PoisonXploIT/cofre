@@ -104,14 +104,32 @@ def key_drives(timeout: float = 1.5) -> list[str]:
                 found.append(drive)
         except OSError:
             pass
+        finally:
+            _PENDING.pop(drive, None)
 
     for drive in candidates:
+        # R6: si ya hay un sondeo pendiente de esta letra, el volumen sigue sin
+        # responder. No se lanza otro: se acumularia un hilo colgado por cada
+        # vuelta del sondeo de la GUI (cada 2 s). Un solo pendiente por unidad.
+        if drive in _PENDING:
+            continue
         thread = threading.Thread(target=probe, args=(drive,), daemon=True)
+        _PENDING[drive] = thread
         thread.start()
-        thread.join(timeout)
-        # Si sigue vivo, el volumen no responde: se abandona el hilo (daemon)
-        # y se sigue con el resto en vez de congelar la ventana.
+
+    for drive in candidates:
+        thread = _PENDING.get(drive)
+        if thread is not None:
+            thread.join(timeout)      # plazo acotado; si sigue vivo, se ignora
     return sorted(set(found))
+
+
+_PENDING: dict[str, "object"] = {}
+
+
+def keys_to_try() -> list[str]:
+    """Rutas a COFRE.KEY de todos los pendrives conectados (para stick-verify)."""
+    return [str(Path(d) / KEY_FILENAME) for d in key_drives()]
 
 
 def volume_serial(drive: str) -> int | None:

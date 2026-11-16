@@ -103,15 +103,43 @@ def main() -> int:
     check("/list devuelve nombres", names == ["GMAIL_PASSWORD", "TAVILY_API_KEY"], names)
     check("/list no trae valores", "value" not in json.dumps(data))
 
-    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY"})
-    check("/get devuelve el valor", code == 200
-          and data.get("value") == "valor-secreto-de-prueba")
+    # R1 (2026-11-16): el dominio se comprueba por secreto.
+    from cofre.hosts import assign
+    assign(str(vault_path), "TAVILY_API_KEY", ["tavily.com"])
+    assign(str(vault_path), "GMAIL_PASSWORD", ["mail.google.com"])
 
-    code, data = call(base, "/get", good, {"name": "NO_EXISTE"})
-    check("/get de algo inexistente da 404", code == 404, f"({code})")
+    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY", "domain": "tavily.com"})
+    check("R1 /get en su dominio devuelve el valor", code == 200
+          and data.get("value") == "valor-secreto-de-prueba", f"({code})")
+
+    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY", "domain": "app.tavily.com"})
+    check("R1 subdominio asignado tambien vale", code == 200, f"({code})")
+
+    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY", "domain": "github.com"})
+    check("R1 otro dominio se rechaza sin preguntar", code == 403, f"({code}) {data.get('error','')}")
+
+    code, data = call(base, "/get", good,
+                      {"name": "TAVILY_API_KEY", "domain": "tavily.com.evil.co"})
+    check("R1 phishing tavily.com.evil.co rechazado", code == 403, f"({code})")
+
+    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY"})
+    check("R1 sin dominio informado se rechaza", code == 403, f"({code})")
+
+    code, data = call(base, "/get", good, {"name": "GMAIL_PASSWORD", "domain": "tavily.com"})
+    check("R1 el token de uno no vale para el dominio de otro", code == 403, f"({code})")
+
+    # El orden es a proposito: primero el dominio, despues la existencia. Asi
+    # no se puede usar el puente para averiguar que nombres hay en el cofre.
+    code, data = call(base, "/get", good, {"name": "NO_EXISTE", "domain": "tavily.com"})
+    check("nombre sin asignar se rechaza sin revelar si existe", code == 403, f"({code})")
+
+    assign(str(vault_path), "NO_EXISTE", ["tavily.com"])
+    code, data = call(base, "/get", good, {"name": "NO_EXISTE", "domain": "tavily.com"})
+    check("/get de algo asignado pero inexistente da 404", code == 404, f"({code})")
 
     keyfile.unlink()
-    code, data = call(base, "/get", good, {"name": "TAVILY_API_KEY"})
+    code, data = call(base, "/get", good,
+                      {"name": "TAVILY_API_KEY", "domain": "tavily.com"})
     # Al borrar la llave del cofre de prueba, find_stick puede encontrar los
     # pendrives reales de la maquina y entonces el descifrado falla: eso es un
     # 409 de autorizacion, no un valor filtrado. Lo importante es que NO

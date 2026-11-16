@@ -506,6 +506,7 @@ class CofreGUI:
         # H3: Ctrl+C solo copia el secreto cuando NO estas tecleando en un
         # campo. Si el foco esta en un Entry/Text, ese Ctrl+C es el normal.
         self.root.bind("<Control-c>", self._on_copy_shortcut)
+        self.root.bind("<Return>", self._on_enter)
         self.root.bind("<Prior>", lambda _e: self.move_selection(-1))
         self.root.bind("<Next>", lambda _e: self.move_selection(1))
         self.root.bind("<F1>", lambda _e: self.toggle_help())
@@ -699,9 +700,17 @@ class CofreGUI:
                 for x in w:
                     x.configure(bg=PANEL)
             for widget in (outer, lab, kind):
-                widget.bind("<Button-1>", lambda _e, name=n: self.select(name))
+                widget.bind("<Button-1>", lambda _e, name=n: self._click_row(name))
                 widget.bind("<Enter>", _hover)
                 widget.bind("<Leave>", _unhover)
+
+    def _click_row(self, name: str) -> None:
+        """Seleccionar con el raton y dejar el foco donde Ctrl+C si copia."""
+        self.select(name)
+        try:
+            self.list_frame.focus_set()
+        except Exception:
+            pass
 
     def _kind_of(self, name: str) -> str:
         """Etiqueta corta a la derecha de la fila, sin llamar al cifrado."""
@@ -801,12 +810,22 @@ class CofreGUI:
         if getattr(self, "help_box", None) is not None and self.help_box.winfo_ismapped():
             self.toggle_help()
             return
-        if self.session:
-            self.lock()
-            self.set_foot("bloqueado con Escape. La ventana sigue abierta: "
-                          "Ctrl+L o Reconectar para volver a abrir")
+        # R7 (2026-11-16): Escape no bloquea nunca. Bloquear es Ctrl+L y solo
+        # Ctrl+L; un Escape que cambia de efecto segun el momento es impredecible.
+        self.set_foot("Escape no bloquea ni cierra. Bloquear: Ctrl+L. Salir: Ctrl+Q")
+
+    def _on_enter(self, event=None) -> None:
+        """Enter copia el secreto seleccionado (plan 6.4). No hace nada si el
+        foco esta en un campo de texto: ahi Enter es del formulario."""
+        focused = None
+        try:
+            focused = self.root.focus_get()
+        except Exception:
+            focused = None
+        if focused is not None and focused.winfo_class() in ("Entry", "Text", "TEntry", "TText"):
             return
-        self.set_foot("Escape no cierra la ventana. Usa la X, o Ctrl+Q para salir")
+        if self.selected and self.session:
+            self.copy_to_clipboard()
 
     def _on_copy_shortcut(self, event=None) -> None:
         focused = None
