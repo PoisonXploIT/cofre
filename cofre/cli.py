@@ -412,7 +412,16 @@ def main(argv: list[str]) -> int:
             return 1
         env = dict(os.environ)
         missing = []
+        from cofre.policy import allowed as policy_allowed
         for name in args.name:
+            meta = dict(vault.meta(name) or {})
+            meta.setdefault("name", name)
+            permitido, motivo = policy_allowed(meta, "exec")
+            if not permitido:
+                print(f"politica: {motivo}", file=sys.stderr)
+                record(str(vault_path), "exec", args.gate, serial, name=name,
+                       ok=False, detail="politica: exec")
+                return 1
             try:
                 env[name] = vault.get(session, name)
             except (KeyError, ValueError) as exc:  # VaultError no existe: era NameError

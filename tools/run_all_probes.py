@@ -24,6 +24,7 @@ PROBES = [
     ("stick_register", [sys.executable, "tools/stick_register_probe.py"], False),
     ("pipe", [sys.executable, "tools/pipe_probe.py"], False),
     ("pipe_server", [sys.executable, "tools/pipe_server_probe.py"], False),
+    ("confirm", [sys.executable, "tools/confirm_probe.py"], False),
     ("serve", [sys.executable, "tools/serve_probe.py"], False),
     ("extension", ["node", "tools/extension_fill_test.mjs"], True),
 ]

@@ -81,6 +81,9 @@ class CofreGUI:
         self.needs_init = False
         self.bridge = None
         self.bridge_ctl = None
+        self.session_obj = None
+        self.confirm_queue = None
+        self.confirm_grants: dict[tuple[str, str], float] = {}
         self.browser_on = False
         self.clipboard_ttl = 30
         self._clip_id = None
@@ -511,6 +514,9 @@ class CofreGUI:
         self.root.bind("<Prior>", lambda _e: self.move_selection(-1))
         self.root.bind("<Next>", lambda _e: self.move_selection(1))
         self.root.bind("<F1>", lambda _e: self.toggle_help())
+        from cofre.gui_confirm import ConfirmQueue
+        self.confirm_queue = ConfirmQueue(self.root)
+        self.root.after(200, self._pump_confirm)
         self.refresh_wizard()
         self.unlock()
         self._key_cache = self._key_drives()
@@ -613,6 +619,10 @@ class CofreGUI:
             self.refresh_wizard()
             self.refresh_list()
             return False
+
+        # 2.1: sesion con inactividad y tiempo maximo
+        from cofre.session import Session
+        self.session_obj = Session(self._session_settings())
 
         used = next((s for s in self.stick_report()
                      if s["serial"] == str(self.serial)), None)
@@ -1003,7 +1013,52 @@ class CofreGUI:
         self.refresh_sticks()
         return True
 
+    def _session_settings(self) -> dict:
+        try:
+            idx = self.vault._v2store()._vault.index(self.vault._v2store()._data,
+                                                     self.vault._v2store().master)                 if self.vault.is_v2() and self.vault._v2store().master else {}
+            return dict(idx.get("settings", {}))
+        except Exception:
+            return {}
+
+    def request_confirm(self, who: str, what: str) -> str:
+        """Pregunta a la persona (2.4). Se llama desde el hilo del puente."""
+        if not self.confirm_queue:
+            return "deny"
+        clave = (self.selected or what, who.split(" - ")[0])
+        hasta = self.confirm_grants.get(clave)
+        if hasta and hasta > __import__("time").time():
+            return "grant"
+        resultado = self.confirm_queue.ask(who, what)
+        if resultado == "grant":
+            self.confirm_grants[clave] = __import__("time").time() + 300
+        return resultado
+
+    def _pump_confirm(self) -> None:
+        if not self.confirm_queue:
+            return
+        try:
+            if self.confirm_queue.poll():
+                self.root.after(10, self._pump_confirm)
+                return
+        except Exception:
+            pass
+        self.root.after(200, self._pump_confirm)
+
+    def _check_session(self) -> None:
+        """2.1: bloquear si la sesion caduca."""
+        if not self.session or not self.session_obj:
+            return
+        motivo = self.session_obj.check()
+        if motivo:
+            texto = self.session_obj.describe(motivo)
+            self.session_obj = None
+            self.lock()
+            self.set_foot(texto)
+            record(self.vault_path, "lock", self.gate, None, ok=True, detail=motivo)
+
     def _poll(self) -> None:
+        self._check_session()
         drives = self._key_drives()
         if drives != self._key_cache:
             self._key_cache = drives
@@ -1295,6 +1350,9 @@ class CofreGUI:
         self.selected = name
         self.refresh_list()
         self.detail_name.configure(text=name)
+        if self.session_obj:
+            self.session_obj.touch()
+
         used = next((s for s in self.stick_report()
                      if s["serial"] == str(self.serial)), None)
         which = f"{used['drive']} ({used['role']})" if used else str(self.serial)

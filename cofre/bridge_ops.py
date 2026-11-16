@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from cofre.audit import record
 from cofre.hosts import HostsError, allows, host_matches
+from cofre.policy import allowed as policy_allowed, needs_confirm
 
 
 def _domain(payload: dict) -> str:
@@ -73,6 +74,23 @@ def dispatch(app, message: dict) -> dict:
             record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
                    ok=False, detail=f"dominio rechazado: {domain or 'sin dominio'}")
             return {"ok": False, "error": motivo}
+        # 2.3: la politica del secreto decide si puede salir por el navegador
+        meta = dict(app.vault.meta(nombre) or {})
+        meta.setdefault("name", nombre)
+        permitido_pol, motivo_pol = policy_allowed(meta, "browser")
+        if not permitido_pol:
+            record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
+                   ok=False, detail="politica: navegador")
+            return {"ok": False, "error": motivo_pol}
+
+        # 2.4: si el secreto es sensible, confirmacion en pantalla
+        if needs_confirm(meta):
+            otorgado = app.request_confirm(f"Navegador - {domain or 'sin dominio'}", nombre)
+            if otorgado == "deny":
+                record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
+                       ok=False, detail="confirmacion denegada")
+                return {"ok": False, "error": "confirmacion denegada en COFRE"}
+
         try:
             valor = app.vault.get(app.session, nombre)
         except KeyError:
