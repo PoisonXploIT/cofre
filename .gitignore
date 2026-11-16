@@ -26,3 +26,6 @@ backups/
 .cofre-hosts.json.importado
 
 nmhost/com.cofre.host.json
+
+# auditoria: log apartado al anclar y checkpoints de pruebas
+.cofre-audit-antes-de-anclar.jsonl

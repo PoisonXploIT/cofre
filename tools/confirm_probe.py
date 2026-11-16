@@ -48,19 +48,27 @@ def main() -> int:
     check("2. se cierra solo y deniega", resultado == "deny",
           f"{resultado} tras {time.time() - inicio:.1f}s")
 
-    # 3: pulsar "Permitir una vez" desde el propio bucle
-    dlg2 = ConfirmDialog(root, "Tu - Copiar", "SIMULACRO_RESTAURA", timeout_ms=5000)
+    # 3: el retardo de 700 ms impide autorizar con un clic que iba a otra parte
+    dlg2 = ConfirmDialog(root, "Tu - Copiar", "SIMULACRO_RESTAURA", timeout_ms=4000)
+    check("3. Permitir empieza deshabilitado",
+          str(dlg2.b_once.cget("state")) == "disabled"
+          and str(dlg2.b_grant.cget("state")) == "disabled",
+          f"once={dlg2.b_once.cget('state')} grant={dlg2.b_grant.cget('state')}")
 
-    def pulsar():
-        for w in dlg2.win.winfo_children():
-            if isinstance(w, tk.Frame):
-                for b in w.winfo_children():
-                    if isinstance(b, tk.Button) and "una vez" in b.cget("text"):
-                        b.invoke()
-                        return
+    def pulsar(objetivo):
+        def _p():
+            for w in dlg2.win.winfo_children():
+                if isinstance(w, tk.Frame):
+                    for b in w.winfo_children():
+                        if isinstance(b, tk.Button) and "una vez" in str(b.cget("text")):
+                            b.invoke()
+                            return
+        return _p
 
-    dlg2.win.after(300, pulsar)
-    check("3. 'Permitir una vez' responde once", dlg2.wait() == "once", "")
+    dlg2.win.after(200, pulsar("once"))     # demasiado pronto: no debe hacer nada
+    dlg2.win.after(900, pulsar("once"))     # ya habilitado
+    check("3b. el clic temprano no autoriza y el tardio si",
+          dlg2.wait() == "once", "respuesta once tras el segundo clic")
 
     # 4: la cola despierta al que pide desde otro hilo
     cola = ConfirmQueue(root)

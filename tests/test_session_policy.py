@@ -89,10 +89,14 @@ class TestPolicy(unittest.TestCase):
         self.assertTrue(allowed(meta, "browser")[0])
 
     def test_canary_no_sale_por_ningun_sitio(self):
-        meta = {"type": "canary"}
+        # un senuelo no se entrega nunca, ni siquiera confirmando: pedirlo tiene
+        # que disparar alerta, no un dialogo
+        meta = {"type": "canary", "name": "AWS_PROD_KEY"}
         for canal in ("browser", "exec", "clipboard", "reveal"):
-            self.assertFalse(allowed(meta, canal)[0], canal)
-        self.assertTrue(needs_confirm(meta))
+            ok, motivo = allowed(meta, canal)
+            self.assertFalse(ok, canal)
+            self.assertIn("senuelo", motivo)
+        self.assertFalse(needs_confirm(meta))
 
     def test_canal_invalido(self):
         self.assertFalse(allowed({"type": "api_key"}, "pantalla")[0])
@@ -107,6 +111,34 @@ class TestPolicy(unittest.TestCase):
         meta = {"type": "api_key"}
         effective(meta)
         self.assertNotIn("policy", meta)
+
+
+class TestPermisosTemporales(unittest.TestCase):
+    """2.4: 'Permitir 5 minutos' no sobrevive a un bloqueo."""
+
+    def test_se_borran_al_bloquear(self):
+        sys.path.insert(0, str(REPO))
+        import tkinter as tk
+        from cofre.gui import CofreGUI
+
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("sin pantalla para Tk")
+        root.withdraw()
+        try:
+            app = CofreGUI(str(REPO / "cofre.json"), "usb")
+            app.build()          # sin widgets, lock() no tiene donde escribir
+            app.confirm_grants[("CLOUDFLARE_DNS_TOKEN", "Navegador")] = 10 ** 12
+            self.assertTrue(app.confirm_grants)
+            app.lock()
+            self.assertFalse(app.confirm_grants,
+                             "los permisos de 5 minutos siguen vivos tras bloquear")
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

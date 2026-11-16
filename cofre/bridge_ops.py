@@ -79,8 +79,16 @@ def dispatch(app, message: dict) -> dict:
         meta.setdefault("name", nombre)
         permitido_pol, motivo_pol = policy_allowed(meta, "browser")
         if not permitido_pol:
-            record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
-                   ok=False, detail="politica: navegador")
+            if str(meta.get("type") or "") == "canary":
+                record(app.vault_path, "canary-access", app.gate, app.serial,
+                       name=nombre, ok=False, detail=f"canal=browser:{domain}")
+                try:
+                    app._canary_alert(nombre, f"navegador:{domain}")
+                except Exception:
+                    pass
+            else:
+                record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
+                       ok=False, detail="politica: navegador")
             return {"ok": False, "error": motivo_pol}
 
         # 2.4: si el secreto es sensible, confirmacion en pantalla
@@ -103,6 +111,8 @@ def dispatch(app, message: dict) -> dict:
             return {"ok": False, "error": "el pendrive no corresponde a este cofre"}
         record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
                ok=True, detail=f"dominio={domain or 'sin dominio'}")
+        from cofre.audit import stamp_vault
+        stamp_vault(app.vault)
         return {"ok": True, "name": nombre, "value": valor}
 
     return {"ok": False, "error": f"tipo desconocido: {tipo or '(vacio)'}"}

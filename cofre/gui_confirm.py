@@ -26,6 +26,7 @@ PAD = SPACE["lg"]
 
 TIMEOUT_MS = 20_000
 GRANT_MS = 5 * 60 * 1000
+ARM_MS = 700        # retardo antes de poder pulsar Permitir
 
 
 class ConfirmDialog:
@@ -57,8 +58,15 @@ class ConfirmDialog:
         fila = tk.Frame(self.win, bg=BG)
         fila.pack(fill="x", padx=PAD, pady=(0, 14))
         self._btn(fila, "Denegar", "deny", WARN).pack(side="left")
-        self._btn(fila, "Permitir 5 minutos", "grant", MUT).pack(side="right")
-        self._btn(fila, "Permitir una vez", "once", ACC).pack(side="right", padx=8)
+        self.b_grant = self._btn(fila, "Permitir 5 minutos", "grant", MUT)
+        self.b_grant.pack(side="right")
+        self.b_once = self._btn(fila, "Permitir una vez", "once", ACC)
+        self.b_once.pack(side="right", padx=8)
+        # como los navegadores: Permitir no esta activo al abrir. Un clic o un
+        # Enter que iba a otra ventana no puede autorizar nada.
+        for b in (self.b_once, self.b_grant):
+            b.configure(state="disabled", fg=MUT)
+        self.win.after(ARM_MS, self._arm)
 
         self._after = self.win.after(timeout_ms, lambda: self._close("deny"))
         self.win.protocol("WM_DELETE_WINDOW", lambda: self._close("deny"))
@@ -76,6 +84,13 @@ class ConfirmDialog:
                       activeforeground=color, relief="flat", bd=0,
                       padx=12, pady=6, cursor="hand2", highlightthickness=0)
         return b
+
+    def _arm(self) -> None:
+        try:
+            self.b_once.configure(state="normal", fg=ACC)
+            self.b_grant.configure(state="normal", fg=MUT)
+        except Exception:
+            pass
 
     def _center(self, root) -> None:
         self.win.update_idletasks()

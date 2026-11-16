@@ -39,7 +39,8 @@ import secrets
 import sys
 from pathlib import Path
 
-from cofre.audit import record, tail
+from cofre.audit import clear_key as audit_clear_key
+from cofre.audit import record, set_key as audit_set_key, tail
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, material_for, resolve_session_key, _salt_for
 from cofre.gen import entropy, human_password, machine_password
@@ -109,6 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     with_common(sub.add_parser("probe"))
     sl = with_common(sub.add_parser("log"))
     sl.add_argument("--lines", type=int, default=20)
+    sl.add_argument("verify", nargs="?", choices=["verify"],
+                    help="comprobar la cadena y la firma del log")
     sl.add_argument("--stats", action="store_true", help="totales, fallos y pendrives usados")
 
     ss = with_common(sub.add_parser("stick-init"))
@@ -338,6 +341,26 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "log":
+        if getattr(args, "verify", None) == "verify":
+            from cofre.audit import check_checkpoint, legacy_report, verify as verify_log
+            ok_legacy, txt_legacy = legacy_report(str(vault_path))
+            print(("OK   " if ok_legacy else "FALLO") + "  historico v1: " + txt_legacy)
+            ok, detalle = verify_log(str(vault_path))
+            if ok and vault.is_v2():
+                material = material_for(args.gate, str(vault_path), args.stick,
+                                        args.allow_new_stick)
+                vault.bind_material(material)
+                store = vault._v2store() if vault.is_v2() else None
+                if store is not None and store.master is not None:
+                    ok2, detalle2 = check_checkpoint(store, store.master)
+                    if not ok2:
+                        ok, detalle = ok2, detalle2
+                    else:
+                        detalle += "; " + detalle2
+            print(("OK   " if ok else "FALLO") + "  v2: " + detalle)
+            record(str(vault_path), "audit-verify", args.gate, None, ok=ok,
+                   detail=detalle[:160])
+            return 0 if (ok and ok_legacy) else 1
         for line in tail(vault_path, args.lines):
             print(line)
         return 0
@@ -740,6 +763,17 @@ def main(argv: list[str]) -> int:
                        detail="sesion invalida")
                 return 1
 
+        try:
+            audit_set_key(vault.unlock(session))
+            try:
+                if vault.is_v2():
+                    from cofre.audit import bind_store
+                    bind_store(vault._v2store())
+            except Exception:
+                pass
+        except Exception:
+            audit_clear_key()
+
         if args.command == "init":
             vault.init(session, salt=_salt_for(str(vault_path)))
             print("cofre inicializado en", args.vault)
@@ -773,6 +807,8 @@ def main(argv: list[str]) -> int:
                 print(f"{n}={vault.get(session, n)}")
             name = f"{len(vault.names())} entradas"
         record(str(vault_path), args.command, args.gate, serial, name=name, ok=True)
+        from cofre.audit import stamp_vault
+        stamp_vault(vault)
     except Exception as exc:
         record(str(vault_path), args.command, args.gate, serial, name=None, ok=False, detail=str(exc))
         raise

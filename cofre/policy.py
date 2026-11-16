@@ -31,7 +31,9 @@ def _defaults(meta: dict) -> dict:
     tipo = str(meta.get("type") or "api_key")
     tags = [str(t).lower() for t in meta.get("tags", [])]
     if tipo == "canary":
-        return {"confirm": True, "browser": False, "exec": False,
+        # un senuelo no se entrega NUNCA, ni siquiera confirmando: si alguien lo
+        # pide, lo que toca es alertar, no preguntar
+        return {"confirm": False, "browser": False, "exec": False,
                 "clipboard": False, "reveal": False}
     if tipo == "private_key" or "admin" in tags:
         return {"confirm": True, "browser": False, "exec": False,
@@ -64,6 +66,9 @@ def allowed(meta: dict, channel: str) -> tuple[bool, str]:
     if channel not in CHANNELS:
         return False, f"canal desconocido: {channel}"
     pol = effective(meta)
+    if str(meta.get("type") or "") == "canary":
+        nombre = meta.get("name") or "este secreto"
+        return False, f"'{nombre}' es un senuelo: no se entrega por ningun canal"
     if not pol.get(channel, False):
         nombre = meta.get("name") or "este secreto"
         if channel == "browser":

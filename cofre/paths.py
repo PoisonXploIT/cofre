@@ -57,3 +57,12 @@ def old_log_path(log: str | Path) -> Path:
     """Ruta del historial rotado, a partir del propio fichero de log."""
     p = Path(log)
     return p.with_name(p.name + ".old")
+
+
+AUDIT_NAME = ".cofre-audit.jsonl"
+LEGACY_LOG_NAME = ".cofre-access.log"
+
+
+def audit_path(vault_path: str | Path) -> Path:
+    """Log encadenado con HMAC (paso 3.1)."""
+    return Path(vault_path).parent / AUDIT_NAME

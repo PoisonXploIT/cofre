@@ -105,6 +105,12 @@ class V2Store:
     def load(self) -> dict:
         return self._data
 
+    def index(self, data: dict, master: bytes) -> dict:
+        return self._vault.index(data, master)
+
+    def _write_index(self, data: dict, master: bytes, idx: dict) -> None:
+        self._vault._write_index(data, master, idx)
+
     def refresh(self) -> None:
         """Releer el fichero. La GUI mantiene el cofre en memoria y un cambio
         hecho desde la CLI (asignar dominios, anadir un secreto) no se veria."""

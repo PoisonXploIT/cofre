@@ -28,7 +28,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 
-from cofre.audit import record, tail
+from cofre.audit import clear_key as audit_clear_key
+from cofre.audit import record, set_key as audit_set_key, tail
 from cofre.crypto import Vault
 from cofre.gate import GateUnavailable, material_for, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
@@ -482,7 +483,7 @@ class CofreGUI:
         self.foot_var = tk.StringVar(
             value="El pendrive GUARDA la clave (32 bytes en COFRE.KEY), no la deriva. "
                   "Sin pendrive el cofre no se abre. Cada accion queda en "
-                  ".cofre-access.log (el nombre, nunca el valor).")
+                  ".cofre-audit.jsonl, firmado (el nombre, nunca el valor).")
         footrow = tk.Frame(foot, bg=PANEL)
         footrow.pack(fill="x", padx=16, pady=6)
         tk.Label(footrow, textvariable=self.foot_var, fg=MUT, font=self.f_small,
@@ -624,6 +625,25 @@ class CofreGUI:
         from cofre.session import Session
         self.session_obj = Session(self._session_settings())
 
+        # 3.1: con la clave en memoria, el log va firmado; y al abrir se
+        # comprueba que nadie lo ha tocado
+        try:
+            audit_set_key(self.vault.unlock(self.session))
+            try:
+                if self.vault.is_v2():
+                    from cofre.audit import bind_store
+                    bind_store(self.vault._v2store())
+            except Exception:
+                pass
+            from cofre.audit import verify_vault
+            _ok, _det = verify_vault(self.vault)
+            if not _ok:
+                self.set_foot(f"AVISO: el registro de accesos no cuadra: {_det}")
+                record(self.vault_path, "audit-verify", self.gate, self.serial,
+                       ok=False, detail=_det[:150])
+        except Exception:
+            audit_clear_key()
+
         used = next((s for s in self.stick_report()
                      if s["serial"] == str(self.serial)), None)
         which = f"{used['drive']} ({used['role']})" if used else str(self.serial)
@@ -637,6 +657,15 @@ class CofreGUI:
     def lock(self, event=None):
         """Bloquear: se tira la clave de sesion de la RAM. Hace falta el
         pendrive otra vez para abrir."""
+        try:
+            from cofre.audit import stamp_vault
+            stamp_vault(self.vault)
+        except Exception:
+            pass
+        audit_clear_key()
+        # los permisos de 5 minutos (2.4) no sobreviven al bloqueo, por el
+        # motivo que sea: a mano, por inactividad o por suspension
+        self.confirm_grants.clear()
         self.session = None
         self.serial = None
         self.selected = None
@@ -1295,6 +1324,9 @@ class CofreGUI:
         if not self.selected or not self.session:
             self.set_foot("no hay seleccion")
             return
+        if self._is_canary(self.selected):
+            self._canary_alert(self.selected, "copiar")
+            return
         if not new:
             self.set_foot("escribe el nombre nuevo en el campo nombre y pulsa Renombrar")
             return
@@ -1430,6 +1462,32 @@ class CofreGUI:
         self.reveal_id = None
         self.set_foot("valor oculto")
 
+    def _is_canary(self, name: str | None) -> bool:
+        if not name:
+            return False
+        try:
+            return str(self.vault.meta(name).get("type") or "") == "canary"
+        except Exception:
+            return False
+
+    def _canary_alert(self, name: str, canal: str) -> None:
+        """3.2: leer un senuelo es lo mas grave que puede pasar aqui."""
+        record(self.vault_path, "canary-access", self.gate, self.serial,
+               name=name, ok=False, detail=f"canal={canal}")
+        self.set_status("ALERTA: alguien ha pedido un senuelo", warn=True)
+        self.set_foot(f"ALERTA: '{name}' es un senuelo. No se entrega. "
+                      f"Canal: {canal}. Queda anotado.")
+        try:
+            import ctypes
+            texto = ("Alguien ha pedido el senuelo '" + str(name) + "' por el canal "
+                     + str(canal) + ".\n\nNo se ha entregado nada. "
+                     "Revisa el registro de accesos.")
+            ctypes.windll.user32.MessageBoxW(
+                None, texto, "COFRE - senuelo solicitado",
+                0x00040000 | 0x00000030)
+        except Exception:
+            pass
+
     def copy_to_clipboard(self, event=None):
         if not self.selected or not self.session:
             self.set_foot("no hay seleccion")
@@ -1471,6 +1529,9 @@ class CofreGUI:
                          "cualquier proceso de la sesion puede leerlo.")
 
     def toggle_show_value(self, event=None):
+        if self._is_canary(self.selected):
+            self._canary_alert(self.selected, "ver")
+            return
         visible = self.val_entry.cget("show") == ""
         # Ojo: configure(show=None) NO cambia nada en tkinter (None = "no tocar");
         # para mostrar el texto hay que pasar cadena vacia.
@@ -1573,7 +1634,16 @@ class CofreGUI:
 
     def show_log(self, lines: int = 4):
         entries = tail(self.vault_path, lines)
-        self.set_foot("ultimo registro: " + " | ".join(entries[-3:]) if entries else "sin registros")
+        texto = " | ".join(entries[-3:]) if entries else "sin registros"
+        try:
+            from cofre.audit import legacy_files
+            viejos = [p for p in legacy_files(self.vault_path)
+                      if p.name.startswith(".cofre-access-v1-")]
+            if viejos:
+                texto += f"  ||  historico v1 (sin verificar): {viejos[0].name}"
+        except Exception:
+            pass
+        self.set_foot("ultimo registro: " + texto)
 
 
 def parse_args(argv: list[str]) -> dict:
