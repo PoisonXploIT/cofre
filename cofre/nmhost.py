@@ -36,6 +36,9 @@ MAX_MESSAGE = 1 << 20          # 1 MiB
 CONNECT_TIMEOUT_MS = 3000
 REPLY_TIMEOUT_MS = 3000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TOKEN_QUERY = 0x0008
+TokenUser = 1
+ProcessCommandLineInformation = 60
 
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -145,6 +148,83 @@ def expected_server_image() -> str:
     return os.environ.get("COFRE_GUI_EXE", "").strip().lower()
 
 
+ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                      ctypes.POINTER(wintypes.HANDLE)]
+advapi32.ConvertSidToStringSidW.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)]
+kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+
+
+def _sid_string(sid_ptr) -> str:
+    out = wintypes.LPWSTR()
+    if not advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(out)):
+        return ""
+    try:
+        return out.value or ""
+    finally:
+        kernel32.LocalFree(out)
+
+
+def sid_of_process(pid: int) -> str:
+    """SID del usuario dueno del proceso."""
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(handle, TOKEN_QUERY, ctypes.byref(token)):
+            return ""
+        try:
+            size = wintypes.DWORD(0)
+            advapi32.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
+            buf = ctypes.create_string_buffer(size.value)
+            if not advapi32.GetTokenInformation(token, TokenUser, buf, size.value,
+                                                ctypes.byref(size)):
+                return ""
+            # TOKEN_USER empieza con SID_AND_ATTRIBUTES { PSID Sid; DWORD Attributes; }
+            sid_ptr = ctypes.cast(buf, ctypes.POINTER(wintypes.LPVOID)).contents
+            return _sid_string(sid_ptr)
+        finally:
+            kernel32.CloseHandle(token)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def current_sid() -> str:
+    return sid_of_process(os.getpid())
+
+
+def command_line_of(pid: int) -> str:
+    """Linea de comandos del proceso (NtQueryInformationProcess, clase 60).
+
+    Es falsificable por quien controla el proceso, pero para un servidor de
+    tuberia que se hace pasar por COFRE sube el liston: tendria que ponerse
+    -m cofre en su propia linea de comandos.
+    """
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        buf = ctypes.create_string_buffer(4096)
+        needed = wintypes.ULONG(0)
+        status = ntdll.NtQueryInformationProcess(
+            handle, ProcessCommandLineInformation, buf, len(buf),
+            ctypes.byref(needed))
+        if status != 0:
+            return ""
+        # UNICODE_STRING { USHORT len; USHORT max; PWSTR buffer }
+        length = ctypes.cast(buf, ctypes.POINTER(wintypes.USHORT))[0]
+        ptr = ctypes.cast(ctypes.byref(buf, 8), ctypes.POINTER(wintypes.LPWSTR))[0]
+        if not ptr or not length:
+            return ""
+        return ctypes.wstring_at(ptr, length // 2)
+    except Exception:
+        return ""
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def image_path_of(pid: int) -> str:
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
@@ -159,19 +239,70 @@ def image_path_of(pid: int) -> str:
         kernel32.CloseHandle(handle)
 
 
+def _same_path(a: str, b: str) -> bool:
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    except Exception:
+        return False
+
+
+def cmdline_ok(cmd: str) -> bool:
+    """La linea de comandos tiene que parecer la de COFRE.
+
+    Se busca la forma explicita (-m cofre...) y no la simple aparicion de la
+    palabra, que en esta maquina esta en la propia ruta del repositorio.
+    """
+    bajo = cmd.lower().replace("\\", "/")
+    if "-m cofre" in bajo:
+        return True
+    return "/cofre/cofre/" in bajo or "cofre\\" in cmd.lower()
+
+
 def server_is_trusted(handle) -> tuple[bool, str]:
+    """R5: cuatro comprobaciones sobre el servidor de la tuberia.
+
+    1. PID: GetNamedPipeServerProcessId y abrirlo con derechos limitados.
+    2. Ejecutable: QueryFullProcessImageNameW, rutas normalizadas.
+    3. Usuario: el SID del token tiene que ser el mismo que el nuestro.
+    4. Linea de comandos: debe contener "-m cofre" (o el ejecutable esperado).
+       Es falsificable, pero sube el liston.
+
+    LIMITE CONOCIDO: la GUI y un script corren con el mismo python.exe. Si solo
+    falla la linea de comandos se corta, pero un impostor que se ponga "-m cofre"
+    en su propia linea de comandos es indistinguible. El riesgo es bajo porque
+    los secretos van de la GUI al host, no al reves: un servidor falso puede
+    aprender en que sitio estas o colar un valor, nunca recibir un secreto.
+    """
     pid = wintypes.DWORD(0)
     if not kernel32.GetNamedPipeServerProcessId(handle, ctypes.byref(pid)):
         return False, "no se pudo identificar el servidor"
+    server_pid = int(pid.value)
+
     info = read_pipe_info() or {}
     declared = info.get("pid")
-    if declared and int(declared) != int(pid.value):
-        return False, f"el servidor (pid {pid.value}) no es el que declaro la GUI ({declared})"
-    image = image_path_of(pid.value)
+    if declared and int(declared) != server_pid:
+        return False, f"el servidor (pid {server_pid}) no es el que declaro la GUI ({declared})"
+
+    image = image_path_of(server_pid)
+    if not image:
+        return False, f"no se pudo leer el ejecutable del servidor (pid {server_pid})"
+
     expected = expected_server_image()
-    if expected and os.path.normcase(image) != os.path.normcase(expected):
-        return False, f"ejecutable del servidor inesperado: {image or 'desconocido'}"
-    return True, f"pid {pid.value}"
+    if expected and not _same_path(image, expected):
+        return False, f"ejecutable del servidor inesperado: {image}"
+
+    sid = sid_of_process(server_pid)
+    mine = current_sid()
+    if not sid or not mine or sid != mine:
+        return False, f"el servidor es de otro usuario ({sid or 'desconocido'})"
+
+    if os.environ.get("COFRE_NM_TEST_SKIP_CMDLINE") == "1":
+        return True, f"pid {server_pid} (linea de comandos no comprobada: modo prueba)"
+
+    cmd = command_line_of(server_pid)
+    if cmd and not cmdline_ok(cmd):
+        return False, "la linea de comandos del servidor no parece de COFRE"
+    return True, f"pid {server_pid} ({os.path.basename(image)})"
 
 
 def wait_for_data(handle, timeout_ms: int) -> int:

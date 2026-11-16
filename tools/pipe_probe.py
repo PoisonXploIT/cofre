@@ -127,7 +127,8 @@ class FakeServer(threading.Thread):
 
 
 def run_host(message: dict | bytes, pipe_info: dict | None,
-             gui_exe: str = "", raw_message: bool = False) -> dict:
+             gui_exe: str = "", raw_message: bool = False,
+             skip_cmdline: bool = False) -> dict:
     """Ejecuta nmhost como lo haria el navegador y devuelve su respuesta."""
     env = dict(os.environ)
     env["COFRE_PIPE_INFO"] = str(PIPE_INFO)
@@ -136,6 +137,13 @@ def run_host(message: dict | bytes, pipe_info: dict | None,
         env["COFRE_GUI_EXE"] = gui_exe
     else:
         env.pop("COFRE_GUI_EXE", None)
+    # El servidor de prueba es este mismo proceso: su linea de comandos no dice
+    # "-m cofre". Para probar el transporte se salta ESA comprobacion (y solo
+    # esa); el caso 8 comprueba que sin el permiso se corta.
+    if skip_cmdline:
+        env["COFRE_NM_TEST_SKIP_CMDLINE"] = "1"
+    else:
+        env.pop("COFRE_NM_TEST_SKIP_CMDLINE", None)
 
     if pipe_info is None:
         PIPE_INFO.unlink(missing_ok=True)
@@ -181,7 +189,7 @@ def main() -> int:
     trusted = FakeServer(rf"\\.\pipe\{name}", {"ok": True, "open": True, "count": 3})
     trusted.start()
     r = run_host({"type": "status"}, {"pipe": name, "pid": os.getpid()},
-                 gui_exe=sys.executable)
+                 gui_exe=sys.executable, skip_cmdline=True)
     trusted.join(timeout=5)
     check("4. reenvia y devuelve la respuesta",
           r.get("ok") is True and r.get("count") == 3
@@ -193,7 +201,7 @@ def main() -> int:
     fake = FakeServer(rf"\\.\pipe\{name}", struct.pack("<I", 0xFFFFFF00), raw_reply=True)
     fake.start()
     r = run_host({"type": "status"}, {"pipe": name, "pid": os.getpid()},
-                 gui_exe=sys.executable)
+                 gui_exe=sys.executable, skip_cmdline=True)
     check("5. respuesta gigante rechazada",
           r.get("error") == "respuesta demasiado grande", str(r))
 
@@ -202,6 +210,39 @@ def main() -> int:
     r = run_host(oversized, None, raw_message=True)
     check("6. peticion gigante rechazada",
           r.get("error") == "mensaje ilegible", str(r))
+
+    # 8. R5: servidor falso con el mismo python.exe y su propio PID declarado.
+    #    Con la ruta del ejecutable esperada puesta a algo que no existe, tiene
+    #    que cortar por el ejecutable. Y se deja documentado el limite: si el
+    #    impostor usa el mismo python.exe y se pone "-m cofre" en su linea de
+    #    comandos, no se puede distinguir.
+    name = f"cofre-{secrets.token_hex(8)}"
+    impostor = FakeServer(rf"\\.\pipe\{name}", {"ok": True, "value": "FALSO"})
+    impostor.start()
+    r = run_host({"type": "status"}, {"pipe": name, "pid": os.getpid()},
+                 gui_exe=str(Path(sys.executable).with_name("no-existe.exe")))
+    check("8. servidor con ejecutable inesperado se corta",
+          r.get("error") == "servidor de tuberia no fiable", str(r))
+    check("8b. y no devuelve ningun valor", "value" not in str(r), str(r)[:70])
+
+    # 8c. mismo python.exe y mismo PID declarado, pero sin "-m cofre" en su
+    # linea de comandos: se corta por la linea de comandos. Con "-m cofre" el
+    # impostor seria indistinguible; es el limite conocido de R5.
+    name = f"cofre-{secrets.token_hex(8)}"
+    impostor = FakeServer(rf"\\.\pipe\{name}", {"ok": True, "value": "FALSO"})
+    impostor.start()
+    r = run_host({"type": "status"}, {"pipe": name, "pid": os.getpid()},
+                 gui_exe=sys.executable)
+    check("8c. linea de comandos que no es de COFRE se corta",
+          r.get("error") == "servidor de tuberia no fiable", str(r))
+
+    # 9. el predicado de la linea de comandos, en aislamiento
+    sys.path.insert(0, str(REPO))
+    from cofre.nmhost import cmdline_ok
+    check("9. '-m cofre' cuenta como servidor de COFRE",
+          cmdline_ok(r"python.exe -m cofre.pipe_server"), "")
+    check("9b. un script suelto no cuenta",
+          not cmdline_ok(r"C:/temp/malo.py"), "")
 
     logtxt = LOG_PATH.read_text(encoding="utf-8") if LOG_PATH.exists() else ""
     check("7. el log no contiene valores", "secreto" not in logtxt.lower(),
