@@ -1,10 +1,21 @@
-"""Escribe los manifests de host de mensajeria nativa para la sonda H23.
+"""Instala los hosts de mensajeria nativa de la sonda H23 (Windows).
 
-Los coloca en las rutas que busca Chromium en Windows (Chrome y Brave) y usa
-el ID determinista de la extension de prueba (el mismo que da su campo 'key').
+Lo que se aprendio el 2026-11-16 probandolo en Brave:
+
+  1. En Windows el host NO se descubre por carpetas: se descubre por el REGISTRO.
+     Las carpetas `nativeMessaging` son cosa de Linux y macOS.
+  2. Brave lee `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts` (la clave de
+     Chrome). Tambien se escribe la de Brave y la de Chromium por si acaso.
+  3. El valor que importa es el PREDETERMINADO (sin nombre) de la subclave que se
+     llama igual que el host. Un valor con nombre no sirve.
+  4. El 'path' del manifest debe ser ABSOLUTO. Con ruta relativa: "host not found".
+  5. El manifest DEBE llevar el campo "description". Sin el, Brave responde
+     "Specified native messaging host not found" aunque todo lo demas este bien.
+  6. allowed_origins necesita la barra final: chrome-extension://<id>/
+  7. Sin BOM.
 
   python tools/nm_probe/install_hosts.py
-  python tools/nm_probe/install_hosts.py --show
+  python tools/nm_probe/uninstall_hosts.py
 """
 
 from __future__ import annotations
@@ -15,23 +26,22 @@ import json
 import os
 import sys
 from pathlib import Path
+import winreg
 
 HERE = Path(__file__).resolve().parent
-LOCALAPPDATA = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
 PY = sys.executable
 
-CANDIDATES = [
-    LOCALAPPDATA / "Google" / "Chrome" / "Application" / "Chrome",
-    LOCALAPPDATA / "BraveSoftware" / "Brave-Browser" / "Application" / "Brave",
-    LOCALAPPDATA / "BraveSoftware" / "Brave-Browser",
-    LOCALAPPDATA,
+ROOTS = [
+    r"Software\Google\Chrome\NativeMessagingHosts",
+    r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+    r"Software\Chromium\NativeMessagingHosts",
 ]
 
 HOSTS = {
-    "bat": HERE / "host.bat",
-    "cmd": HERE / "host.cmd",
-    "python": Path(PY),
-    "py": HERE / "host.py",
+    "bat": (HERE / "host.bat", "Sonda H23: envoltorio .bat -> python host.py"),
+    "cmd": (HERE / "host.cmd", "Sonda H23: envoltorio .cmd -> python host.py"),
+    "python": (Path(PY), "Sonda H23: python.exe directo (sin script)"),
+    "py": (HERE / "host.py", "Sonda H23: script .py (no es ejecutable Win32)"),
 }
 
 
@@ -43,31 +53,26 @@ def ext_id() -> str:
 
 
 def main() -> int:
-    if not (HERE / "manifest.json").exists():
-        print("Primero hay que generar el manifest de la prueba. Ejecuta el probe o crea manifest.json a mano.")
-        return 1
     ident = ext_id()
-    origin = f"chrome-extension://{ident}"
-    written = []
-    for base in CANDIDATES:
-        d = base / "nativeMessaging"
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            continue
-        for name, path in HOSTS.items():
-            f = d / f"com.cofre.{name}.json"
-            f.write_text(json.dumps({
-                "name": f"com.cofre.{name}",
-                "path": str(path),
-                "type": "stdio",
-                "allowed_origins": [origin],
-            }, indent=2), encoding="utf-8")
-            written.append(str(f))
-    print("id de la extension de prueba:", ident)
-    print("origen autorizado:", origin)
-    for w in written:
-        print("  host escrito:", w)
+    origin = f"chrome-extension://{ident}/"
+    print("extension de prueba:", ident)
+    print("origen autorizado:  ", origin)
+    for name, (path, desc) in HOSTS.items():
+        host = f"com.cofre.{name}"
+        manifest = HERE / f"{host}.json"
+        manifest.write_text(json.dumps({
+            "name": host,
+            "description": desc,
+            "path": str(path),          # absoluta: obligatorio
+            "type": "stdio",
+            "allowed_origins": [origin],
+        }, indent=2), encoding="utf-8")   # sin BOM
+        for root in ROOTS:
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, rf"{root}\{host}",
+                                    0, winreg.KEY_SET_VALUE) as k:
+                winreg.SetValueEx(k, "", 0, winreg.REG_SZ, str(manifest))
+        print(f"  {host:18} -> {path}")
+    print("\nListo. Recarga la extension en el navegador y abre probe.html.")
     return 0
 
 

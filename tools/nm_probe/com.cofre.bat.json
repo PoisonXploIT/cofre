@@ -1,0 +1,9 @@
+{
+  "name": "com.cofre.bat",
+  "description": "Sonda H23: envoltorio .bat -> python host.py",
+  "path": "C:\\Users\\Sammi\\AI\\cofre\\tools\\nm_probe\\host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://fjmjgjigdghjocghonmgfhcjmgliefog/"
+  ]
+}
