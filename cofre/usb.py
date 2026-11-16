@@ -64,6 +64,56 @@ def drive_letters() -> list[str]:
     return [f"{c}:\\" for c in string.ascii_uppercase if mask & (1 << (ord(c) - 65))]
 
 
+DRIVE_UNKNOWN = 0
+DRIVE_NO_ROOT_DIR = 1
+DRIVE_REMOVABLE = 2
+DRIVE_FIXED = 3
+DRIVE_REMOTE = 4
+DRIVE_CDROM = 5
+
+
+def drive_kind(drive: str) -> int:
+    """GetDriveTypeW. No toca el disco: responde al instante incluso si el
+    volumen esta muerto o desconectado."""
+    return int(ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(drive)))
+
+
+def key_drives(timeout: float = 1.5) -> list[str]:
+    r"""Volumenes que tienen COFRE.KEY, sin poder colgar la aplicacion.
+
+    Un volumen removible a medio quitar deja la letra asignada pero bloquea
+    cualquier acceso a disco: `Path(drive).is_file()` se queda esperando para
+    siempre y la ventana se queda en blanco. Paso exactamente eso el
+    2026-11-16 con E:, y hubo que matar la GUI a mano.
+
+    Solucion: se mira el tipo de unidad (instantaneo), se descartan las que no
+    pueden tener ficheros (sin raiz, desconocidas, de red) y el resto se
+    sondea en un hilo con plazo. Si un volumen no contesta a tiempo, se ignora
+    a efectos de esta llamada: la GUI sigue viva y el siguiente sondeo
+    (cada 2 s) lo vuelve a intentar.
+    """
+    import threading
+
+    candidates = [d for d in drive_letters()
+                  if drive_kind(d) in (DRIVE_REMOVABLE, DRIVE_FIXED)]
+    found: list[str] = []
+
+    def probe(drive: str) -> None:
+        try:
+            if (Path(drive) / KEY_FILENAME).is_file():
+                found.append(drive)
+        except OSError:
+            pass
+
+    for drive in candidates:
+        thread = threading.Thread(target=probe, args=(drive,), daemon=True)
+        thread.start()
+        thread.join(timeout)
+        # Si sigue vivo, el volumen no responde: se abandona el hilo (daemon)
+        # y se sigue con el resto en vez de congelar la ventana.
+    return sorted(set(found))
+
+
 def volume_serial(drive: str) -> int | None:
     buf = ctypes.create_string_buffer(64)
     serial = ctypes.c_ulong(0)
@@ -181,7 +231,7 @@ def _candidates(extra_paths: list[str] | None) -> list[tuple[str, int | None, st
         if p.is_file():
             drive = str(p.resolve())[:3]  # "C:\" etc.
             out.append((str(p), volume_serial(drive), volume_label(drive)))
-    for drive in drive_letters():
+    for drive in key_drives():
         p = Path(drive) / KEY_FILENAME
         if p.is_file():
             out.append((str(p), volume_serial(drive), volume_label(drive)))

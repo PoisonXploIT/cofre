@@ -35,7 +35,7 @@ from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
                          enable_dpi_awareness)
-from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters,
+from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters, key_drives,
                        find_stick, load_registry, read_key, register_stick,
                        revoke_stick, volume_serial)
 
@@ -540,11 +540,10 @@ class CofreGUI:
         sticks = list(reg.get("sticks", {}).values())
         sticks.sort(key=lambda s: s.get("registered", ""))
         present = {}
-        for drive in drive_letters():
-            if (Path(drive) / KEY_FILENAME).is_file():
-                serial = volume_serial(drive)
-                if serial is not None:
-                    present[str(serial)] = drive
+        for drive in key_drives():
+            serial = volume_serial(drive)
+            if serial is not None:
+                present[str(serial)] = drive
         out = []
         for i, s in enumerate(sticks):
             serial = str(s.get("serial"))
@@ -830,7 +829,10 @@ class CofreGUI:
         self.root.destroy()
 
     def _key_drives(self) -> set[str]:
-        return {d for d in drive_letters() if (Path(d) / KEY_FILENAME).is_file()}
+        # usb.key_drives acota cada volumen con un plazo: un pendrive a medio
+        # quitar bloquea is_file() para siempre y deja la ventana en blanco
+        # (paso el 2026-11-16 con E:).
+        return set(key_drives())
 
     def state(self) -> str:
         if self.session and self.vault.load().get("wrapper"):

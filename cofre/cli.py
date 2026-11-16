@@ -154,7 +154,7 @@ def read_secret(prompt: str) -> str:
 
 
 def cmd_stick_list(vault: str) -> int:
-    from cofre.usb import drive_letters, load_registry, volume_serial, KEY_FILENAME
+    from cofre.usb import key_drives, load_registry, volume_serial
 
     reg = load_registry(vault)
     sticks = reg.get("sticks", {})
@@ -163,11 +163,10 @@ def cmd_stick_list(vault: str) -> int:
         print("primera vez: conecta el pendrive y ejecuta init o stick-init")
         return 0
     present = set()
-    for drive in drive_letters():
-        if (Path(drive) / KEY_FILENAME).is_file():
-            s = volume_serial(drive)
-            if s is not None:
-                present.add(str(s))
+    for drive in key_drives():          # con plazo: no cuelga con un USB muerto
+        serial = volume_serial(drive)
+        if serial is not None:
+            present.add(str(serial))
     print(f"{len(sticks)} pendrive(s) autorizados")
     for serial, info in sticks.items():
         mark = "conectado" if serial in present else "no conectado"

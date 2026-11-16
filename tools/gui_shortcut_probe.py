@@ -69,7 +69,12 @@ def main() -> int:
           not app._confirm_delete and app._confirm_revoke is None and calls["close"] == 0,
           f"cierres: {calls['close']}")
 
-    # 4. Escape con el cofre abierto: bloquea, no cierra
+    # 4. Escape con el cofre abierto: bloquea, no cierra.
+    # Ojo con el orden real: si la ayuda esta desplegada, Escape la oculta
+    # primero. Aqui se cierra la ayuda para probar la rama del bloqueo.
+    if app.help_box.winfo_ismapped():
+        app.help_box.pack_forget()
+        app.root.update_idletasks()
     app.session = b"x" * 32
     app._on_escape(None)
     check("H4 Escape bloquea en lugar de cerrar",
