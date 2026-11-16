@@ -24,3 +24,5 @@ tools/nm_probe/com.cofre.*.json
 cofre.v1.json
 backups/
 .cofre-hosts.json.importado
+
+nmhost/com.cofre.host.json

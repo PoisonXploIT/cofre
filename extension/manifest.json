@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "COFRE - relleno de secretos",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Rellena contrasenas y claves solo cuando tu lo pides, en los dominios autorizados. El secreto nunca sale del equipo.",
   "permissions": [
     "activeTab",
     "scripting",
-    "clipboardWrite"
+    "clipboardWrite",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "http://127.0.0.1/*"
