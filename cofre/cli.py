@@ -82,6 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
     sg = with_common(sub.add_parser("get"))
     sg.add_argument("name")
     with_common(sub.add_parser("list"))
+    rn = with_common(sub.add_parser("rename", help="cambiar el nombre de un secreto"))
+    rn.add_argument("old")
+    rn.add_argument("new")
     sd = with_common(sub.add_parser("del"))
     sd.add_argument("name")
     sx = with_common(sub.add_parser("exec"))
@@ -739,6 +742,13 @@ def main(argv: list[str]) -> int:
             vault.add(session, args.name, value, args.tag)
             print("guardado", args.name)
             name = args.name
+        elif args.command == "rename":
+            ok = vault.rename(session, args.old, args.new)
+            print(f"renombrado: {args.old} -> {args.new}" if ok
+                  else "no se pudo renombrar (destino ocupado o nombre vacio)")
+            name = args.new
+            if not ok:
+                return 1
         elif args.command == "del":
             print("borrado" if vault.delete(session, args.name) else "no existe")
             name = args.name

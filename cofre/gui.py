@@ -80,6 +80,7 @@ class CofreGUI:
         self.sticky = False
         self.needs_init = False
         self.bridge = None
+        self.bridge_ctl = None
         self.browser_on = False
         self.clipboard_ttl = 30
         self._clip_id = None
@@ -767,28 +768,74 @@ class CofreGUI:
             self.start_bridge()
 
     def start_bridge(self) -> None:
-        from cofre.serve import SecretServer, allowed_origins_for
+        """Puente del navegador. Por defecto, tuberia con nombre (paso 4.0).
 
-        origins = allowed_origins_for()
-        if not origins:
-            self.set_foot("el navegador necesita la extension: ejecuta "
-                          "tools/install_extension.py una vez")
-            return
+        La via TCP queda detras de COFRE_BRIDGE=tcp hasta que la tabla 4.0.e
+        lleve unos dias sin fallos.
+        """
+        import os
+
         if not self.session:
             self.set_foot("abre el cofre con el pendrive antes de activar el navegador")
             return
+
+        if os.environ.get("COFRE_BRIDGE", "pipe").lower() == "tcp":
+            from cofre.serve import SecretServer, allowed_origins_for
+
+            origins = allowed_origins_for()
+            if not origins:
+                self.set_foot("el navegador necesita la extension: ejecuta "
+                              "tools/install_extension.py una vez")
+                return
+            try:
+                self.bridge = SecretServer(self.vault_path, origins, gate=self.gate,
+                                           stick=self.stick).start()
+            except OSError as exc:
+                self.set_foot(f"no se pudo abrir el puerto 47653: {exc}")
+                self.bridge = None
+                return
+            self.browser_on = True
+            self.browser_btn.label.configure(text="Navegador: on (tcp)", fg=OK)
+            record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
+            self.set_foot(f"navegador conectado en {self.bridge.origin} "
+                          "(solo mientras el cofre este abierto)")
+            return
+
+        from cofre import bridge_ops
+        from cofre.pipe_server import BridgeController
+        from cofre.serve import allowed_origins_for
+
+        if not allowed_origins_for():
+            self.set_foot("el navegador necesita la extension: ejecuta "
+                          "tools/install_extension.py una vez")
+            return
+        if self.bridge_ctl is None:
+            self.bridge_ctl = BridgeController(
+                self.root,
+                lambda msg: bridge_ops.dispatch(self, msg),
+                log=lambda m: self.set_foot(f"puente: {m}"))
         try:
-            self.bridge = SecretServer(self.vault_path, origins, gate=self.gate,
-                                       stick=self.stick).start()
-        except OSError as exc:
-            self.set_foot(f"no se pudo abrir el puerto 47653: {exc}")
-            self.bridge = None
+            self.bridge_ctl.start()
+        except Exception as exc:                      # noqa: BLE001
+            self.set_foot(f"no se pudo crear la tuberia: {exc}")
+            self.bridge_ctl = None
             return
         self.browser_on = True
         self.browser_btn.label.configure(text="Navegador: on", fg=OK)
         record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
-        self.set_foot(f"navegador conectado en {self.bridge.origin} "
-                      f"(solo mientras el cofre este abierto)")
+        self.set_foot("navegador conectado por tuberia local "
+                      "(solo mientras el cofre este abierto)")
+        self._pump_bridge()
+
+    def _pump_bridge(self) -> None:
+        """Atiende las peticiones del navegador en el hilo de Tkinter."""
+        if not self.bridge_ctl:
+            return
+        try:
+            self.bridge_ctl.poll()
+        except Exception:
+            pass
+        self.root.after(60, self._pump_bridge)
 
     def stop_bridge(self) -> None:
         if self.bridge:
@@ -797,6 +844,12 @@ class CofreGUI:
             except Exception:
                 pass
             self.bridge = None
+        if getattr(self, "bridge_ctl", None):
+            try:
+                self.bridge_ctl.stop()
+            except Exception:
+                pass
+            self.bridge_ctl = None
         self.browser_on = False
         self.browser_btn.label.configure(text="Navegador: off", fg=FG)
 
