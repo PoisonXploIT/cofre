@@ -21,6 +21,19 @@ PAGE = """<!doctype html>
   <input type="password" name="password" placeholder="contrasena" id="password">
   <input type="text" name="api_key" placeholder="api key" id="api_key">
 </form>
+<p><label><input type="checkbox" id="ver"> ver la contrasena mientras se prueba</label></p>
+<p id="estado"></p>
+<script>
+  const campo = document.getElementById("password");
+  document.getElementById("ver").addEventListener("change", (e) => {
+    campo.type = e.target.checked ? "text" : "password";
+  });
+  // deja constancia de lo que ha escrito el relleno, sin enviarlo a ningun sitio
+  campo.addEventListener("input", () => {
+    document.getElementById("estado").textContent =
+      campo.value ? "el campo tiene " + campo.value.length + " caracteres" : "campo vacio";
+  });
+</script>
 </body></html>
 """
 
