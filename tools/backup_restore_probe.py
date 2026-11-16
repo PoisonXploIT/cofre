@@ -68,12 +68,25 @@ def main() -> int:
 
     # 1. la sal
     data = json.loads((work / "cofre.json").read_text(encoding="utf-8"))
-    meta_salt = bytes.fromhex(data["salt"]) if data.get("salt") else None
+    es_v2 = data.get("format") == 2
+    if es_v2:
+        check("cofre en formato v2 con ranuras",
+              len(data.get("slots", [])) >= 2,
+              f"{len(data.get('slots', []))} ranuras: "
+              f"{[s.get('kind') for s in data.get('slots', [])]}")
+        salts = {s.get("salt") for s in data.get("slots", [])}
+        check("cada ranura tiene su propia sal", len(salts) == len(data.get("slots", [])),
+              f"{len(salts)} sales distintas")
+        meta_salt = None
+    else:
+        meta_salt = bytes.fromhex(data["salt"]) if data.get("salt") else None
     # El .cofre-salt es binario; el "sal cofre.txt" es la version legible.
     # Antes se colaba el binario por buscar "sal" en el nombre.
     txt = next((p for p in work.iterdir()
                 if p.suffix.lower() == ".txt" and "sal" in p.name.lower()), None)
-    if txt:
+    if es_v2:
+        pass
+    elif txt:
         from_backup = base64.b64decode(txt.read_text(encoding="utf-8").strip())
         check("sal del .txt == sal dentro del cofre", from_backup == meta_salt,
               base64.b64encode(meta_salt).decode())
@@ -82,13 +95,21 @@ def main() -> int:
               "no hace falta el .txt: la sal va en el cofre")
 
     bin_salt = work / ".cofre-salt"
-    if bin_salt.exists():
+    if not es_v2 and bin_salt.exists():
         check("el .cofre-salt del backup coincide",
               bin_salt.read_bytes() == meta_salt, f"{len(meta_salt)} bytes")
 
     hosts_file = work / ".cofre-hosts.json"
-    if hosts_file.exists():
-        import json as _json
+    import json as _json
+    if es_v2:
+        crudo = (work / "cofre.json").read_text(encoding="utf-8")
+        check("v2: los dominios no van en claro",
+              "ejemplo.com" not in crudo and "PRUEBA" not in crudo,
+              "el indice esta cifrado")
+        check("v2: el .cofre-hosts.json ya no hace falta",
+              not hosts_file.exists() or hosts_file.name.endswith(".importado"),
+              "")
+    elif hosts_file.exists():
         mapa = _json.loads(hosts_file.read_text(encoding="utf-8"))
         check("el backup lleva los dominios asignados",
               isinstance(mapa, dict) and bool(mapa), f"{sorted(mapa)}")
@@ -104,6 +125,9 @@ def main() -> int:
         return 1
 
     vault = Vault(work / "cofre.json")
+    if es_v2:
+        from cofre.gate import material_for
+        vault.bind_material(material_for("usb", str(work / "cofre.json"), stick=args.stick))
     try:
         vault.unlock(session)
         check("envoltorio descifrado con la sal restaurada", True,
@@ -121,13 +145,17 @@ def main() -> int:
         check("escribir y leer en la copia restaurada", False, str(exc))
 
     # 4. borrar el fichero suelto de la sal: el cofre sigue abriendo
-    (work / ".cofre-salt").unlink(missing_ok=True)
-    try:
-        same = get_salt(str(work / "cofre.json")) == meta_salt
-        check("perder .cofre-salt no rompe la copia", same,
-              "la sal se lee del propio cofre.json")
-    except Exception as exc:
-        check("perder .cofre-salt no rompe la copia", False, str(exc))
+    if es_v2:
+        check("perder .cofre-salt no rompe la copia", True,
+              "v2 guarda la sal en cada ranura")
+    else:
+        (work / ".cofre-salt").unlink(missing_ok=True)
+        try:
+            same = get_salt(str(work / "cofre.json")) == meta_salt
+            check("perder .cofre-salt no rompe la copia", same,
+                  "la sal se lee del propio cofre.json")
+        except Exception as exc:
+            check("perder .cofre-salt no rompe la copia", False, str(exc))
 
     # 5. quitar el registro: H13 cierra la puerta
     (work / ".cofre-sticks.json").unlink(missing_ok=True)

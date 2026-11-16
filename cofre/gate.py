@@ -99,6 +99,28 @@ def usb_session_key(vault_path: str, pin: str = "", stick: str | None = None,
     return _usb_key(path, _salt_for(vault_path), pin), serial
 
 
+def material_for(mode: str, vault_path: str, stick: str | None = None,
+                 allow_new: bool = False, pin: str | None = None) -> dict:
+    """Material de la llave para v2: la llave del pendrive, su serial y el PIN.
+
+    v1 deriva de (llave + sal) y v2 de (llave + PIN) por ranura, asi que el
+    material se devuelve aparte y el cofre v2 lo usa con bind_material().
+    """
+    from cofre.usb import find_stick, read_key
+
+    if mode not in ("usb", "usb-pin"):
+        return {}
+    try:
+        path, serial = find_stick([stick] if stick else None, vault_path, allow_new)
+    except Exception:
+        return {}
+    try:
+        return {"stick_key": read_key(path), "serial": serial,
+                "pin": pin or "", "stick_path": path}
+    except Exception:
+        return {}
+
+
 def read_pin(prompt: str = "PIN del cofre: ") -> str:
     """COFRE_PIN permite uso no interactivo (scripts, pruebas)."""
     env = os.environ.get("COFRE_PIN")

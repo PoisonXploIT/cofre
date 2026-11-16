@@ -30,7 +30,7 @@ from tkinter import font as tkfont
 
 from cofre.audit import record, tail
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, resolve_session_key
+from cofre.gate import GateUnavailable, material_for, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
@@ -577,6 +577,12 @@ class CofreGUI:
                                         "en el panel de Puesta en marcha")
         self._stick_text = " | ".join(r.cget("text") for r in self.stick_rows if r.cget("text"))
 
+    def _bind_material(self) -> None:
+        """v2 necesita la llave del pendrive, no solo la sesion derivada."""
+        if self.vault.is_v2():
+            self.vault.bind_material(
+                material_for(self.gate, str(self.vault_path), self.stick, self.allow_new))
+
     def unlock(self, event=None):
         # En usb-pin la GUI siempre pasa su propio PIN (aunque este vacio),
         # para no quedarse esperando una lectura de terminal.
@@ -595,7 +601,9 @@ class CofreGUI:
             self.refresh_list()
             return False
 
-        if not self.vault.load().get("wrapper"):
+        self._bind_material()
+
+        if not self.vault.is_v2() and not self.vault.load().get("wrapper"):
             self.needs_init = True
             self.set_status("hay llave, pero el cofre no esta inicializado", warn=True)
             self.set_foot("cofre no inicializado: usa 'Inicializar cofre' en el "
@@ -854,11 +862,11 @@ class CofreGUI:
         return set(key_drives())
 
     def state(self) -> str:
-        if self.session and self.vault.load().get("wrapper"):
+        if self.session and (self.vault.is_v2() or self.vault.load().get("wrapper")):
             return "empty" if not self.vault.names() else "open"
         if not self._key_drives() and not self.stick:
             return "no-key"
-        if not self.vault.load().get("wrapper"):
+        if not self.vault.is_v2() and not self.vault.load().get("wrapper"):
             return "key-no-vault"
         return "closed"
 

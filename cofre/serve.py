@@ -71,6 +71,15 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.gate, self.server.vault_path, stick=self.server.stick)
         return session, serial
 
+    def _vault(self, session) -> Vault:
+        """Cofre ligado al material de la llave (necesario en v2)."""
+        vault = Vault(Path(self.server.vault_path))
+        if vault.is_v2():
+            from cofre.gate import material_for
+            vault.bind_material(material_for(self.server.gate, self.server.vault_path,
+                                             self.server.stick))
+        return vault
+
     # ---------- rutas ----------
 
     def do_OPTIONS(self) -> None:  # preflight
@@ -119,15 +128,24 @@ class _Handler(BaseHTTPRequestHandler):
                    name=name, ok=False, detail="gate")
             self._reject(409, f"pendrive no disponible: {exc}")
             return
-        vault = Vault(Path(self.server.vault_path))
+        vault = self._vault(session)
 
         # R1 (2026-11-16): el dominio se comprueba AQUI, contra los dominios
         # asignados a ESE secreto. Sin asignacion no se rellena en ningun sitio,
         # y un dominio que no coincide se rechaza sin preguntar. La extension no
         # decide nada: solo informa del host de la pestana.
-        from cofre.hosts import HostsError, allows
+        from cofre.hosts import HostsError, allows, host_matches
         try:
-            permitido, motivo = allows(self.server.vault_path, name, domain)
+            if vault.is_v2():
+                patrones = vault.urls(name)
+                if not patrones:
+                    permitido, motivo = False, f"'{name}' no tiene ningun sitio asignado"
+                elif not host_matches(domain, patrones):
+                    permitido, motivo = False, f"'{domain}' no esta asignado a '{name}'"
+                else:
+                    permitido, motivo = True, ""
+            else:
+                permitido, motivo = allows(self.server.vault_path, name, domain)
         except HostsError as exc:
             record(self.server.vault_path, "browser-get", self.server.gate, serial,
                    name=name, ok=False, detail="hosts ilegible")
@@ -167,7 +185,7 @@ class _Handler(BaseHTTPRequestHandler):
         except GateUnavailable as exc:
             self._send(200, {"ok": True, "open": False, "error": str(exc)})
             return
-        vault = Vault(Path(self.server.vault_path))
+        vault = self._vault(_session)
         self._send(200, {"ok": True, "open": True, "serial": serial,
                          "count": len(vault.names())})
 
@@ -177,8 +195,16 @@ class _Handler(BaseHTTPRequestHandler):
         except GateUnavailable as exc:
             self._reject(409, f"pendrive no disponible: {exc}")
             return
-        vault = Vault(Path(self.server.vault_path))
+        vault = self._vault(None)
         data = vault.load().get("entries", {})
+        if vault.is_v2():
+            nombres = vault.names()
+            items = [{"name": n, "tags": vault.meta(n).get("tags", []),
+                      "kind": vault.meta(n).get("type", "secret")} for n in nombres]
+            record(self.server.vault_path, "browser-list", self.server.gate, None,
+                   name=f"{len(items)} nombres", ok=True)
+            self._send(200, {"ok": True, "items": items})
+            return
         items = []
         for name in sorted(data):
             info = data[name]

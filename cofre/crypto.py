@@ -52,8 +52,36 @@ def decrypt(master: bytes, blob: dict) -> bytes:
 
 
 class Vault:
+    """Cofre. Si el fichero esta en formato v2, delega en cofre.store.V2Store.
+
+    Asi CLI, GUI y puente siguen llamando igual (con `session`) y no tienen que
+    saber en que formato esta el cofre. Para v2 hace falta `bind_material()` con
+    la llave del pendrive: la `session` de v1 no sirve porque v2 no deriva de la
+    sal suelta sino de la llave de cada ranura.
+    """
+
     def __init__(self, path: Path):
         self.path = Path(path)
+        self._material: dict | None = None
+        self._v2 = None
+
+    # ---------------------------------------------------------------- v2
+
+    def bind_material(self, material: dict | None) -> "Vault":
+        self._material = material
+        return self
+
+    def _v2store(self):
+        if self._v2 is None:
+            from cofre.store import V2Store
+            self._v2 = V2Store(self.path, material=self._material)
+        return self._v2
+
+    def is_v2(self) -> bool:
+        try:
+            return self.load().get("format") == 2
+        except Exception:
+            return False
 
     def load(self) -> dict:
         if not self.path.exists():
@@ -63,6 +91,22 @@ class Vault:
     def save(self, data: dict) -> None:
         # H7: escritura atómica (tmp + os.replace), no write() a secas.
         atomic_write(self.path, json.dumps(data, indent=2))
+
+    def urls(self, name: str) -> list[str]:
+        if self.is_v2():
+            return self._v2store().urls(name)
+        from cofre import hosts
+        try:
+            return hosts.hosts_for(self.path, name)
+        except hosts.HostsError:
+            return []
+
+    def set_urls(self, name: str, urls: list[str]) -> None:
+        if self.is_v2():
+            self._v2store().set_urls(name, urls)
+            return
+        from cofre import hosts
+        hosts.assign(self.path, name, urls)
 
     def init(self, session: bytes, salt: bytes | None = None) -> bytes:
         data = self.load()
@@ -79,12 +123,18 @@ class Vault:
         return master
 
     def unlock(self, session: bytes) -> bytes:
+        if self.is_v2():
+            return self._v2store().unlock()
         data = self.load()
         if not data.get("wrapper"):
             raise FileNotFoundError("no hay cofre inicializado")
         return unwrap_key(data["wrapper"], session)
 
-    def add(self, session: bytes, name: str, value: str, tags: list[str] | None = None) -> None:
+    def add(self, session: bytes, name: str, value: str, tags: list[str] | None = None,
+            urls: list[str] | None = None) -> None:
+        if self.is_v2():
+            self._v2store().add(name, value, tags=tags, urls=urls)
+            return
         master = self.unlock(session)
         data = self.load()
         data["entries"][name] = {
@@ -95,6 +145,8 @@ class Vault:
         self.save(data)
 
     def get(self, session: bytes, name: str) -> str:
+        if self.is_v2():
+            return self._v2store().get(name)
         master = self.unlock(session)
         data = self.load()
         if name not in data["entries"]:
@@ -103,6 +155,8 @@ class Vault:
 
     def rename(self, session: bytes, old: str, new: str) -> bool:
         """Cambiar el nombre de una entrada sin tocar su blob cifrado."""
+        if self.is_v2():
+            return self._v2store().rename(old, new)
         self.unlock(session)
         data = self.load()
         entries = data.get("entries", {})
@@ -113,6 +167,8 @@ class Vault:
         return True
 
     def delete(self, session: bytes, name: str) -> bool:
+        if self.is_v2():
+            return self._v2store().delete(name)
         """Borra una entrada. Cada secreto esta cifrado aparte, asi que quitar
         su blob no afecta a los demas."""
         self.unlock(session)  # valida que la sesion es correcta
@@ -124,7 +180,11 @@ class Vault:
         return True
 
     def names(self) -> list[str]:
+        if self.is_v2():
+            return self._v2store().names()
         return sorted(self.load().get("entries", {}))
 
     def meta(self, name: str) -> dict:
+        if self.is_v2():
+            return self._v2store().meta(name)
         return self.load().get("entries", {}).get(name, {})

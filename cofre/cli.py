@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import sys
 from pathlib import Path
 
 from cofre.audit import record, tail
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, resolve_session_key, _salt_for
+from cofre.gate import GateUnavailable, material_for, resolve_session_key, _salt_for
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
 from cofre.salt import SaltMismatch, SaltMissing, show as salt_show
@@ -137,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
     hh = with_common(sub.add_parser("host-list", help="dominios asignados a cada secreto"))
     hh.add_argument("name", nargs="?", help="solo ese secreto")
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
+    mg = with_common(sub.add_parser("migrate", help="pasar el cofre v1 al formato v2"))
+    mg.add_argument("--dry-run", action="store_true", help="decir que haria, sin escribir")
+    sa = with_common(sub.add_parser("stick-add-v2",
+                                    help="dar llave nueva a un pendrive y anadir su ranura (D11)"))
+    sa.add_argument("path", help=r"ruta del COFRE.KEY nuevo, p. ej. F:\COFRE.KEY.nuevo")
     return p
 
 
@@ -190,7 +196,7 @@ def cmd_stick_verify(vault_path: str) -> int:
                            usb_session_key, volume_serial)
 
     vault = Vault(Path(vault_path))
-    if not vault.load().get("wrapper"):
+    if not vault.is_v2() and not vault.load().get("wrapper"):
         print("el cofre no esta inicializado")
         return 1
     reg = load_registry(vault_path)
@@ -209,9 +215,12 @@ def cmd_stick_verify(vault_path: str) -> int:
             print(f"AVISO  {etiqueta}: no esta autorizado (no se prueba)")
             continue
         try:
-            read_key(path)
-            session = usb_session_key(path, _salt_for(vault_path))
-            vault.unlock(session)
+            key = read_key(path)
+            if vault.is_v2():
+                from cofre.v2.slots import open_with_stick
+                open_with_stick(vault.load(), key, serial)
+            else:
+                vault.unlock(usb_session_key(path, _salt_for(vault_path)))
             print(f"OK     {etiqueta}: abre el cofre")
             ok += 1
         except Exception as exc:
@@ -420,10 +429,107 @@ def main(argv: list[str]) -> int:
     if args.command == "stick-verify":
         return cmd_stick_verify(str(vault_path))
 
+    if args.command == "migrate":
+        from cofre.hosts import load as load_hosts
+        from cofre.v2.migrate import MigrateError, migrate
+        from cofre.usb import find_stick, read_key, StickNotFound, StickNotRegistered
+        path = Path(vault_path)
+        data = vault.load()
+        if data.get("format") == 2:
+            print("el cofre ya esta en formato v2")
+            return 0
+        try:
+            src, serial = find_stick([args.stick] if args.stick else None,
+                                    str(path), args.allow_new_stick)
+        except (StickNotFound, StickNotRegistered) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        try:
+            hosts_map = load_hosts(str(path))
+        except Exception:
+            hosts_map = {}
+        try:
+            res = migrate(path, read_key(src), serial, dry_run=args.dry_run,
+                          hosts_map=hosts_map)
+        except MigrateError as exc:
+            print(f"migracion abortada: {exc}", file=sys.stderr)
+            return 1
+        if args.dry_run:
+            print("dry-run: se migrarian", len(res["entradas"]), "secretos:", ", ".join(res["entradas"]) or "(ninguno)")
+            print("dominios que se importarian:", res["dominios"] or "(ninguno)")
+            return 0
+        print("migrado a v2. Secretos:", ", ".join(res["entradas"]) or "(ninguno)")
+        print("copia del v1:", res["v1_guardado"])
+        print("backup completo:", res["backup"])
+        print("")
+        print("CODIGO DE RECUPERACION (se muestra UNA sola vez, apuntalo en papel):")
+        print("  " + res["codigo"])
+        record(str(path), "migrate", args.gate, serial, name=f"{len(res['entradas'])} secretos", ok=True)
+        return 0
+
+    if args.command == "stick-add-v2":
+        from cofre.usb import read_key, volume_serial, create_key_on, register_stick
+        from cofre.v2.slots import new_usb_slot, open_with_stick, SlotError
+        from cofre.v2.vault import VaultV2
+
+        path = Path(vault_path)
+        raw = VaultV2(path).load()
+        if not VaultV2.is_v2(raw):
+            print("el cofre no esta en v2: ejecuta migrate primero", file=sys.stderr)
+            return 1
+        destino = Path(args.path)
+        if destino.exists() and not destino.name.endswith(".nuevo"):
+            print(f"ya existe {destino}: usa un nombre .nuevo", file=sys.stderr)
+            return 1
+        drive = _drive_of(str(destino))
+        serial = volume_serial(drive)
+        if serial is None:
+            print(f"no se puede leer el serial de {drive}", file=sys.stderr)
+            return 1
+        try:
+            src, src_serial = find_stick([args.stick] if args.stick else None, str(path))
+            master, _slot = open_with_stick(raw, read_key(src), src_serial)
+        except Exception as exc:
+            print(f"no se pudo abrir el cofre para anadir la ranura: {exc}", file=sys.stderr)
+            return 1
+        nueva = secrets.token_bytes(32)
+        destino.write_bytes(nueva)
+        nuevo_slot = new_usb_slot(master, nueva, serial, f"pendrive {serial}", "")
+        VaultV2(path).add_slot(raw, nuevo_slot)
+        VaultV2(path).save(raw)
+        # comprobar que abre ANTES de dar por buena la llave
+        try:
+            releido = VaultV2(path).load()
+            open_with_stick(releido, nueva, serial)
+        except SlotError as exc:
+            destino.unlink(missing_ok=True)
+            print(f"la llave nueva no abre: {exc}. No se ha tocado nada mas.", file=sys.stderr)
+            return 1
+        register_stick(str(path), serial, drive)
+        print(f"llave nueva escrita en {destino}")
+        print(f"ranura anadida para el serial {serial} ({drive})")
+        print("PASO SIGUIENTE, a mano: renombrar a COFRE.KEY cuando confirmes que abre.")
+        record(str(path), "stick-add-v2", args.gate, serial, ok=True)
+        return 0
+
     if args.command in ("host-assign", "host-list"):
         from cofre.hosts import HostsError, assign, clean_host, load
         try:
             if args.command == "host-assign":
+                if vault.is_v2():
+                    # D10: los dominios viven dentro del indice cifrado
+                    material = material_for(args.gate, str(vault_path), args.stick,
+                                            args.allow_new_stick)
+                    vault.bind_material(material)
+                    if args.name not in vault.names():
+                        print(f"no existe el secreto '{args.name}'", file=sys.stderr)
+                        return 1
+                    limpios = [clean_host(h) for h in args.hosts]
+                    vault.set_urls(args.name, limpios)
+                    print(f"{args.name}: {', '.join(limpios)}")
+                    record(str(vault_path), "host-assign", args.gate, None,
+                           name=args.name, ok=True, detail=",".join(limpios))
+                    return 0
                 if not vault.load().get("wrapper"):
                     print("el cofre no esta inicializado", file=sys.stderr)
                     return 1
@@ -435,6 +541,18 @@ def main(argv: list[str]) -> int:
                 record(str(vault_path), "host-assign", args.gate, None,
                        name=args.name, ok=True,
                        detail=",".join(mapping.get(args.name, [])))
+                return 0
+            if vault.is_v2():
+                material = material_for(args.gate, str(vault_path), args.stick,
+                                        args.allow_new_stick)
+                vault.bind_material(material)
+                nombres = [args.name] if args.name else vault.names()
+                if not nombres:
+                    print("el cofre esta vacio o cerrado")
+                    return 0
+                for nombre in nombres:
+                    urls = vault.urls(nombre)
+                    print(f"  {nombre:28} {', '.join(urls) or '(sin asignar)'}")
                 return 0
             mapping = load(str(vault_path))
             if args.name:
@@ -503,14 +621,34 @@ def main(argv: list[str]) -> int:
         except ValueError as exc:
             print(exc)
             return 1
+        if vault.is_v2():
+            from cofre.v2.slots import open_with_stick, SlotError
+            try:
+                open_with_stick(vault.load(), key, volume_serial(_drive_of(str(target))))
+            except SlotError:
+                print("esta llave NO abre una ranura de este cofre. No se registra el serial.")
+                print("Si es un pendrive nuevo: python -m cofre.cli stick-add-v2 %s" % args.path)
+                record(str(vault_path), "stick-register", args.gate, None, ok=False,
+                       detail="la llave no abre el cofre")
+                return 1
+            register_stick(str(vault_path), volume_serial(_drive_of(str(target))),
+                           _drive_of(str(target)))
+            print("llave comprobada contra su ranura. serial autorizado")
+            record(str(vault_path), "stick-register", args.gate,
+                   volume_serial(_drive_of(str(target))), ok=True)
+            return 0
         if not vault.load().get("wrapper"):
             print("el cofre no esta inicializado: primero init y rellena secretos")
             return 1
         try:
             session = usb_session_key(str(target), _salt_for(str(vault_path)))
             vault.unlock(session)
-        except Exception:
-            print("esta llave NO abre este cofre. No se registra el serial.")
+        except Exception as exc:
+            if os.environ.get("COFRE_DEBUG"):
+                import traceback
+                traceback.print_exc()
+            print(f"esta llave NO abre este cofre ({type(exc).__name__}). "
+                  "No se registra el serial.")
             print("Si el pendrive esta vacio o tiene la llave de otro cofre, lo correcto es:")
             print("  python -m cofre.cli stick-copy %s" % args.path)
             record(str(vault_path), "stick-register", args.gate, None, ok=False,
@@ -567,6 +705,15 @@ def main(argv: list[str]) -> int:
         return 1
 
     try:
+        if vault.is_v2():
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+            if not material:
+                print("el cofre v2 necesita el pendrive de una de sus ranuras",
+                      file=sys.stderr)
+                return 1
+
         if args.command in ("get", "export") and not sys.stdout.isatty() and not args.allow_pipe:
             print("get/export no imprime secretos si la salida esta redirigida. "
                   "Usa --allow-pipe si de verdad quieres volcarlos a un fichero o a un pipe.",
@@ -575,7 +722,7 @@ def main(argv: list[str]) -> int:
                    detail="salida no interactiva")
             return 1
 
-        if args.command != "init":
+        if args.command != "init" and not vault.is_v2():
             if not vault.load().get("wrapper"):
                 print("el cofre no esta inicializado: python -m cofre.cli init", file=sys.stderr)
                 return 1

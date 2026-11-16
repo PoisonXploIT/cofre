@@ -19,3 +19,8 @@ tools/nm_probe/.probe-key.pem
 # Manifests de host generados por install_hosts.py (se regeneran; no se versionan)
 tools/nm_probe/com.cofre.*.json
 .cofre-hosts.json
+
+# v2: copia del v1 y backups de la migracion (nunca se versionan)
+cofre.v1.json
+backups/
+.cofre-hosts.json.importado
