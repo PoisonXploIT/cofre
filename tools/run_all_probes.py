@@ -17,6 +17,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 PROBES = [
+    ("backup_restore", [sys.executable, "tools/backup_restore_probe.py"], True),
     ("unittest", [sys.executable, "-m", "unittest", "discover", "-s", "tests"], False),
     ("hardening", [sys.executable, "tools/hardening_probe.py"], False),
     ("gui_shortcut", [sys.executable, "tools/gui_shortcut_probe.py"], False),
@@ -24,7 +25,6 @@ PROBES = [
     ("pipe", [sys.executable, "tools/pipe_probe.py"], False),
     ("serve", [sys.executable, "tools/serve_probe.py"], False),
     ("extension", ["node", "tools/extension_fill_test.mjs"], True),
-    ("backup_restore", [sys.executable, "tools/backup_restore_probe.py"], True),
 ]
 
 

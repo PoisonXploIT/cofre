@@ -69,7 +69,10 @@ def main() -> int:
     # 1. la sal
     data = json.loads((work / "cofre.json").read_text(encoding="utf-8"))
     meta_salt = bytes.fromhex(data["salt"]) if data.get("salt") else None
-    txt = next((p for p in work.iterdir() if "sal" in p.name.lower()), None)
+    # El .cofre-salt es binario; el "sal cofre.txt" es la version legible.
+    # Antes se colaba el binario por buscar "sal" en el nombre.
+    txt = next((p for p in work.iterdir()
+                if p.suffix.lower() == ".txt" and "sal" in p.name.lower()), None)
     if txt:
         from_backup = base64.b64decode(txt.read_text(encoding="utf-8").strip())
         check("sal del .txt == sal dentro del cofre", from_backup == meta_salt,
@@ -77,6 +80,18 @@ def main() -> int:
     else:
         check("sal dentro del cofre.json", meta_salt is not None,
               "no hace falta el .txt: la sal va en el cofre")
+
+    bin_salt = work / ".cofre-salt"
+    if bin_salt.exists():
+        check("el .cofre-salt del backup coincide",
+              bin_salt.read_bytes() == meta_salt, f"{len(meta_salt)} bytes")
+
+    hosts_file = work / ".cofre-hosts.json"
+    if hosts_file.exists():
+        import json as _json
+        mapa = _json.loads(hosts_file.read_text(encoding="utf-8"))
+        check("el backup lleva los dominios asignados",
+              isinstance(mapa, dict) and bool(mapa), f"{sorted(mapa)}")
 
     # 2. el pendrive real abre la copia restaurada
     try:
