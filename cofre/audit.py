@@ -255,6 +255,10 @@ def record(vault_path: str | Path, command: str, gate: str,
     with p.open("a", encoding="utf-8") as fh:
         fh.write(texto + "\n")
     _rotate(p)
+    # el checkpoint se sella SIEMPRE que haya cofre abierto: asi una linea
+    # borrada al final no puede pasar por buena
+    if _STORE is not None and getattr(_STORE, "master", None) is not None:
+        stamp(_STORE, _STORE.master)
     return p
 
 

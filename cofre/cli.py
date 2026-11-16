@@ -341,6 +341,22 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.command == "log":
+        # el propio `log verify` escribe un evento: hay que tener el cofre
+        # abierto y la clave ligada, o la linea queda sin firma y sin sello
+        try:
+            from cofre.audit import bind_store, set_key as _set_key
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+            if vault.is_v2():
+                store = vault._v2store()
+                if store.master is None and material:
+                    _set_key(store.unlock())
+                else:
+                    _set_key(store.master)
+                bind_store(store)
+        except Exception:
+            pass
         if getattr(args, "verify", None) == "verify":
             from cofre.audit import check_checkpoint, legacy_report, verify as verify_log
             ok_legacy, txt_legacy = legacy_report(str(vault_path))
