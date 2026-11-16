@@ -94,6 +94,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if not self._origin_ok():
+            record(self.server.vault_path, "bridge-reject", self.server.gate, None,
+                   ok=False, detail="origen no autorizado")
             self._reject(403, "origen no autorizado")
             return
         if self.path.startswith("/status"):
@@ -105,6 +107,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self._origin_ok():
+            record(self.server.vault_path, "bridge-reject", self.server.gate, None,
+                   ok=False, detail="origen no autorizado")
             self._reject(403, "origen no autorizado")
             return
         if not self.path.startswith("/get"):

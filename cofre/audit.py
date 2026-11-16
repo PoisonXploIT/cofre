@@ -40,6 +40,14 @@ from pathlib import Path
 from cofre.paths import atomic_write, audit_path
 
 MAX_LINES = 5000
+
+# Eventos que SOLO pueden ocurrir con el cofre abierto. Si aparecen sin firma no
+# es que se escribieran con el cofre cerrado: alguien los anadio a mano.
+PRIVILEGED = {
+    "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
+    "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
+    "stick-add-v2", "audit-verify", "alert", "fin-de-pruebas",
+}
 GENESIS = "0" * 64
 _KEY: bytes | None = None
 _STORE = None      # V2Store abierto: permite sellar el checkpoint al escribir
@@ -363,6 +371,17 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     prev = GENESIS
     seq_esperado = 1
     sin_firma = 0
+    antes_de_uso: int | None = None
+    # desde que existe un "fin-de-pruebas" firmado, lo anterior es historico de
+    # pruebas y no se le exige firma; a partir de ahi, todo evento privilegiado
+    # sin firma es manipulacion
+    for texto in lineas:
+        try:
+            ev = json.loads(texto)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("ev") == "fin-de-pruebas" and ev.get("mac"):
+            antes_de_uso = int(ev.get("seq", 0))    # el ULTIMO, si hay varios
     for numero, texto in enumerate(lineas, start=1):
         try:
             ev = json.loads(texto)
@@ -375,6 +394,11 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         mac = ev.pop("mac", None)
         if mac is None:
             sin_firma += 1
+            privilegiado = str(ev.get("ev")) in PRIVILEGED
+            en_uso_real = antes_de_uso is None or int(ev.get("seq", 0)) >= antes_de_uso
+            if _KEY is not None and privilegiado and en_uso_real:
+                return False, (f"linea {numero}: '{ev.get('ev')}' exige cofre abierto "
+                               "y no lleva firma: anadida a mano")
         elif _KEY is not None:
             esperado = hmac.new(_KEY, _canonical(ev), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(mac, esperado):
@@ -382,6 +406,8 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         prev = _line_hash(texto)
         seq_esperado += 1
     detalle = f"{len(lineas)} lineas, cadena intacta"
+    if antes_de_uso:
+        detalle += f", uso real desde la linea {antes_de_uso}"
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle

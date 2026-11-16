@@ -34,3 +34,7 @@ nmhost/com.cofre.host.json
 .cofre-audit*.jsonl
 .cofre-access*.log
 .cofre-access*.log.old
+
+# estado de las alertas y ajustes locales
+.cofre-alert-state.json
+cofre-settings.json

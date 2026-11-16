@@ -85,6 +85,7 @@ class CofreGUI:
         self.session_obj = None
         self.confirm_queue = None
         self.confirm_grants: dict[tuple[str, str], float] = {}
+        self.alert_state = None
         self.browser_on = False
         self.clipboard_ttl = 30
         self._clip_id = None
@@ -1074,6 +1075,33 @@ class CofreGUI:
             pass
         self.root.after(200, self._pump_confirm)
 
+    def _check_alerts(self) -> None:
+        """3.2: evaluar solo lo nuevo, registrar cada alerta y avisar."""
+        try:
+            from cofre import alerts as alerts_mod
+            if self.alert_state is None:
+                self.alert_state = alerts_mod.AlertState()
+            eventos = alerts_mod.events_of(self.vault_path)
+            cfg = alerts_mod.load_settings(self.vault_path)
+            nuevas = alerts_mod.evaluate(eventos, cfg, self.alert_state)
+            nuevas = alerts_mod.apply_cooldown(nuevas, self.alert_state, cfg)
+            if not nuevas:
+                return
+            for a in nuevas:
+                record(self.vault_path, "alert", self.gate, self.serial,
+                       name=a.rule, ok=False, detail=f"{a.severity}: {a.text}"[:150])
+            self.set_status(f"alerta {nuevas[0].severity.upper()}: {nuevas[0].text}"[:110],
+                            warn=True)
+            self.set_foot("ALERTA " + alerts_mod.describe(nuevas))
+            alerts_mod.notify(nuevas)      # MessageBoxW en su propio hilo
+            try:
+                from cofre.audit import stamp_vault
+                stamp_vault(self.vault)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _check_session(self) -> None:
         """2.1: bloquear si la sesion caduca."""
         if not self.session or not self.session_obj:
@@ -1088,6 +1116,7 @@ class CofreGUI:
 
     def _poll(self) -> None:
         self._check_session()
+        self._check_alerts()
         drives = self._key_drives()
         if drives != self._key_cache:
             self._key_cache = drives

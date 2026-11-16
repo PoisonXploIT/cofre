@@ -34,6 +34,7 @@ Solo desbloquean los pendrives cuyo serial de volumen esta registrado en
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import sys
@@ -147,6 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
     ha.add_argument("hosts", nargs="+", help="dominios: github.com  *.ejemplo.com")
     hh = with_common(sub.add_parser("host-list", help="dominios asignados a cada secreto"))
     hh.add_argument("name", nargs="?", help="solo ese secreto")
+    al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
+    al.add_argument("--reset", action="store_true",
+                    help="volver a evaluar desde el principio del log")
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
     mg = with_common(sub.add_parser("migrate", help="pasar el cofre v1 al formato v2"))
     mg.add_argument("--dry-run", action="store_true", help="decir que haria, sin escribir")
@@ -472,6 +476,41 @@ def main(argv: list[str]) -> int:
         record(str(vault_path), "exec", args.gate, serial, name=",".join(args.name), ok=True)
         print(f"ejecutando con {len(args.name)} variables inyectadas (solo para ese proceso)")
         return subprocess.run(args.cmd, env=env).returncode
+
+    if args.command == "alerts":
+        # las alertas se firman: hay que tener el cofre abierto y la clave
+        try:
+            from cofre.audit import bind_store, set_key as _set_key
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+            if vault.is_v2():
+                store = vault._v2store()
+                _set_key(store.master or store.unlock())
+                bind_store(store)
+        except Exception:
+            pass
+        from cofre import alerts as alerts_mod
+        estado_path = Path(vault_path).parent / ".cofre-alert-state.json"
+        estado = alerts_mod.AlertState()
+        if not args.reset and estado_path.exists():
+            try:
+                estado = alerts_mod.AlertState.from_dict(
+                    json.loads(estado_path.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        eventos = alerts_mod.events_of(str(vault_path))
+        cfg = alerts_mod.load_settings(str(vault_path))
+        nuevas = alerts_mod.apply_cooldown(
+            alerts_mod.evaluate(eventos, cfg, estado), estado, cfg)
+        if not nuevas:
+            print("sin alertas nuevas")
+        for a in nuevas:
+            print(f"{a.severity.upper():8} {a.rule:16} {a.text}")
+            record(str(vault_path), "alert", args.gate, None, name=a.rule,
+                   ok=False, detail=f"{a.severity}: {a.text}"[:150])
+        estado_path.write_text(json.dumps(estado.to_dict(), indent=2), encoding="utf-8")
+        return 0
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))
