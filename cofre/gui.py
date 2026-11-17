@@ -532,6 +532,10 @@ class CofreGUI:
         from cofre.gui_confirm import ConfirmQueue
         self.confirm_queue = ConfirmQueue(self.root)
         self.root.after(200, self._pump_confirm)
+        from cofre.lock_screen import LockScreen
+        self.lock_screen = LockScreen(self.root, self)
+        self.lock_screen.mostrar("abriendo el cofre...")
+
         self.refresh_wizard()
         self.unlock()
         self._key_cache = self._key_drives()
@@ -621,6 +625,8 @@ class CofreGUI:
             self.refresh_sticks()
             self.refresh_wizard()
             self.refresh_list()
+            if getattr(self, "lock_screen", None):
+                self.lock_screen.mostrar(str(exc) or "no se encuentra la llave")
             return False
 
         self._bind_material()
@@ -662,13 +668,15 @@ class CofreGUI:
                      if s["serial"] == str(self.serial)), None)
         which = f"{used['drive']} ({used['role']})" if used else str(self.serial)
         n = len(self.vault.names())
+        if getattr(self, "lock_screen", None):
+            self.lock_screen.ocultar()
         self.set_status(f"abierto  |  llave: {which}  |  {n} secreto(s)", warn=False)
         self.refresh_sticks()
         self.refresh_wizard()
         self.refresh_list()
         return True
 
-    def lock(self, event=None):
+    def lock(self, event=None, motivo: str | None = None):
         """Bloquear: se tira la clave de sesion de la RAM. Hace falta el
         pendrive otra vez para abrir."""
         try:
@@ -695,6 +703,9 @@ class CofreGUI:
         self.refresh_list()
         self.refresh_wizard()
         self.set_status("bloqueado  |  la llave ya no esta en memoria", warn=True)
+        if getattr(self, "lock_screen", None):
+            texto = motivo or "la llave ya no esta en memoria. Conecta un pendrive "
+            self.lock_screen.mostrar(texto)
 
     def refresh_list(self):
         for w in self.list_frame.winfo_children():
@@ -1125,13 +1136,18 @@ class CofreGUI:
         if motivo:
             texto = self.session_obj.describe(motivo)
             self.session_obj = None
-            self.lock()
+            self.lock(motivo=texto)
             self.set_foot(texto)
             record(self.vault_path, "lock", self.gate, None, ok=True, detail=motivo)
 
     def _poll(self) -> None:
         self._check_session()
         self._check_alerts()
+        if getattr(self, "lock_screen", None) and not self.session:
+            try:
+                self.lock_screen.refrescar()
+            except Exception:
+                pass
         drives = self._key_drives()
         if drives != self._key_cache:
             self._key_cache = drives
