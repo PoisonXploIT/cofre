@@ -30,12 +30,13 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def textos(widget) -> str:
     partes = []
     for w in widget.winfo_children():
+        texto = ""
         try:
-            t = w.cget("text")
-            if t:
-                partes.append(str(t))
+            texto = str(w.cget("text"))
         except Exception:
-            pass
+            texto = str(getattr(w, "text", ""))
+        if texto:
+            partes.append(texto)
         partes.append(textos(w))
     return " | ".join(partes)
 

@@ -115,9 +115,9 @@ def main() -> int:
             recorrer(hijo)
 
     recorrer(app.root)
-    check("R8 el pie tiene boton Registro", any("Registro" in b for b in botones),
-          "botones: " + ", ".join(botones[:8]))
-    check("R8 el pie tiene boton Guia", any("Guia" in b for b in botones), "")
+    nav = getattr(app, "nav_btns", {})
+    check("R8 la columna tiene Registro y Guia",
+          "registro" in nav and "guia" in nav, ", ".join(sorted(nav)))
 
     # 5. Escape con el cofre cerrado: no hace nada destructivo
     calls["lock"] = 0
