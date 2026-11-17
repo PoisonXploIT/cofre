@@ -13,7 +13,7 @@ import queue
 import threading
 import tkinter as tk
 
-from cofre.theme import COLORS, SPACE, build_fonts
+from cofre.theme import COLORS, SPACE, build_fonts, dark_titlebar
 
 # nombres del tema (COLORS usa surface/text, no panel/fg)
 BG = COLORS["surface"]
@@ -41,6 +41,7 @@ class ConfirmDialog:
         self.win.attributes("-topmost", True)
         self.win.resizable(False, False)
         self.win.transient(root)
+        dark_titlebar(self.win)
 
         cuerpo = build_fonts(root)["body"]
 

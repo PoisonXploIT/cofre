@@ -35,7 +35,7 @@ from cofre.gate import GateUnavailable, material_for, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
-                         enable_dpi_awareness)
+                         dark_titlebar, enable_dpi_awareness)
 from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters, key_drives,
                        find_stick, load_registry, read_key, register_stick,
                        revoke_stick, volume_serial)
@@ -127,6 +127,18 @@ class CofreGUI:
                     pass
                 return
 
+
+    def _sheet(self, titulo: str) -> tk.Toplevel:
+        """Toplevel con la misma barra oscura que la ventana principal."""
+        win = tk.Toplevel(self.root)
+        win.title(titulo)
+        win.configure(bg=PANEL)
+        try:
+            win.transient(self.root)
+        except Exception:
+            pass
+        dark_titlebar(win)
+        return win
 
     def _btn(self, parent, text, command, accent=False, danger=False):
         """Boton plano: Tk tiene un aspecto de los 90; un frame con etiqueta
@@ -1223,10 +1235,7 @@ class CofreGUI:
             pass
         ok, detalle = verify_vault(self.vault)
 
-        win = tk.Toplevel(self.root)
-        win.title("COFRE - registro de accesos")
-        win.configure(bg=PANEL)
-        win.transient(self.root)
+        win = self._sheet("COFRE - registro de accesos")
         win.geometry("760x420")
 
         cabecera = tk.Frame(win, bg=PANEL)
@@ -1270,11 +1279,9 @@ class CofreGUI:
 
     def open_guide(self, event=None) -> None:
         """Guia de uso paginada: un paso por pantalla, texto grande, sin tecnicismos."""
-        win = tk.Toplevel(self.root)
-        win.title("COFRE - guia de uso")
+        win = self._sheet("COFRE - guia de uso")
         win.configure(bg=BG)
         win.geometry("620x520+140+90")
-        win.transient(self.root)
         win.minsize(520, 420)
 
         head = tk.Frame(win, bg=PANEL)
@@ -1760,6 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = parse_args(argv)
     app = CofreGUI(cfg["vault"], cfg["gate"], cfg["stick"], cfg["allow_new"])
     dpi["scaling"] = apply_tk_scaling(app.root, dpi["dpi"])
+    dark_titlebar(app.root)
     app.build()
     if "--selftest" in argv:
         app.root.update_idletasks()

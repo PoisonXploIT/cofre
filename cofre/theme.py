@@ -22,22 +22,35 @@ import tkinter.font as tkfont
 # ---------- color ----------
 
 COLORS = {
-    "bg": "#080B0F",          # fondo de ventana
-    "surface": "#11161E",     # panel lateral
-    "card": "#1F2836",        # tarjeta de trabajo (1.22:1 sobre surface)
-    "input": "#283446",       # campos (1.18:1 sobre card)
-    "border": "#334258",      # separadores 1 px (1.46:1 sobre card)
-    "border_strong": "#3F526E",  # borde de campo enfocado (1.87:1)
-    "text": "#E9EEF5",        # texto principal (12.7:1 sobre card)
-    "muted": "#98A5B6",       # secundario (5.9:1 sobre card)
-    "faint": "#6B7787",       # metadatos (3.3:1 sobre card)
-    "disabled": "#4A5563",    # texto de boton apagado
-    "accent": "#3E9C7A",      # accion primaria
-    "on_accent": "#04120C",   # texto sobre el acento (5.7:1)
-    "danger": "#D9705C",      # borrar (5.6:1)
-    "warn": "#D9A44F",        # atencion (8.1:1)
-    "ok": "#4C9E7C",          # abierto
-    "overlay": "#000000",     # velo de las hojas modales
+    # --- paleta «grafito y laton» (2026-11-17) ---
+    "bg": "#0E0F11",          # ventana y barra de titulo
+    "surface": "#15171A",     # lista, paneles
+    "card": "#212427",        # detalle, dialogos (1.15:1 sobre surface)
+    "raised": "#2C3035",      # campos, fila elegida, chips neutros
+    "input": "#2C3035",       # (compatibilidad) campos
+    "border": "#2E343B",      # borde de boton secundario, hover (1.26:1 sobre card)
+    "border_strong": "#484F58",
+    "text": "#ECEDEE",        # 15,9:1 sobre card
+    "muted": "#A0A6AD",       # 7,3:1
+    "faint": "#8A9098",       # 5,2:1: vale para texto
+    "disabled_bg": "#2A2F35",
+    "disabled": "#767D85",
+    "accent": "#D9A955",      # laton: solo la accion principal
+    "accent_hover": "#E3B96E",
+    "on_accent": "#1C1508",
+    "ok": "#5CBF8F",
+    "ok_bg": "#15231C",
+    "ok_fg": "#9FDDBE",
+    "warn": "#E8964A",
+    "warn_bg": "#3A2014",
+    "warn_fg": "#F2A774",
+    "rot_bg": "#3A2E17",
+    "rot_fg": "#E6C27D",
+    "info": "#7AA7E8",
+    "info_bg": "#17283A",
+    "info_fg": "#8DB8F0",
+    "danger": "#EC7B66",
+    "overlay": "#000000",
 }
 
 # ---------- espaciado (escala de 4) ----------
@@ -47,8 +60,9 @@ SPACE = {
     "sm": 8,
     "md": 12,
     "lg": 16,
-    "xl": 24,
-    "xxl": 32,
+    "xl": 20,
+    "xxl": 24,
+    "x3": 32,
 }
 
 # altura de controles
@@ -59,21 +73,27 @@ SIZES = {
     "icon_btn": 28,
     "chip": 24,
     "scrollbar": 8,
-    "field": 36,
+    "field": 40,
+    "titlebar": 36,
+    "header": 60,
+    "sidebar": 220,
+    "list": 340,
+    "statusbar": 34,
 }
 
-RADIUS = {"btn": 6, "card": 10, "chip": 12, "sheet": 12}
+RADIUS = {"btn": 8, "field": 8, "row": 10, "panel": 12, "dialog": 14,
+          "chip": 10, "card": 12, "sheet": 14}
 
 # ---------- tipografia ----------
 
 #: rol -> (familia preferida, familias de reserva, tamano, peso)
 TYPE = {
-    "display": (("Segoe UI Variable Display", "Segoe UI"), 20, "bold"),
-    "title": (("Segoe UI Variable Text", "Segoe UI"), 15, "bold"),
-    "body": (("Segoe UI Variable Text", "Segoe UI"), 12, "normal"),
-    "label": (("Segoe UI Variable Text", "Segoe UI"), 11, "normal"),
-    "mono": (("Cascadia Mono", "Consolas", "Courier New"), 12, "normal"),
-    "meta": (("Segoe UI Variable Text", "Segoe UI"), 10, "normal"),
+    "display": (("Segoe UI Variable Display", "Segoe UI"), 18, "bold"),
+    "title": (("Segoe UI Variable Text", "Segoe UI"), 13, "bold"),
+    "body": (("Segoe UI Variable Text", "Segoe UI"), 10, "normal"),
+    "label": (("Segoe UI Variable Text", "Segoe UI"), 9, "normal"),
+    "mono": (("Cascadia Mono", "Consolas", "Courier New"), 10, "normal"),
+    "meta": (("Segoe UI Variable Text", "Segoe UI"), 9, "normal"),
 }
 
 #: fuente de iconos: glifos de una fuente, nunca emojis
@@ -134,6 +154,39 @@ def enable_dpi_awareness() -> dict:
     except Exception:
         pass
     return info
+
+
+def dark_titlebar(window) -> bool:
+    """Barra de titulo oscura de Windows, sin dibujar una propia.
+
+    Se pierde arrastrar y ajustar con Win+flechas si se dibuja la barra a mano;
+    con DWM se conserva todo y solo cambia el color. Se aplica a la ventana
+    principal y a cada Toplevel: una hoja blanca sobre una app oscura canta.
+
+    Devuelve True si Windows acepto al menos el modo oscuro.
+    """
+    import ctypes
+
+    try:
+        window.update_idletasks()
+        user32 = ctypes.windll.user32
+        dwm = ctypes.windll.dwmapi
+        hwnd = user32.GetParent(window.winfo_id()) or window.winfo_id()
+
+        on = ctypes.c_int(1)
+        aplicado = False
+        for attr in (20, 19):      # DWMWA_USE_IMMERSIVE_DARK_MODE (19 en Win10 viejo)
+            if dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on),
+                                         ctypes.sizeof(on)) == 0:
+                aplicado = True
+                break
+        # color de la barra (Win11): COLORREF 0x00BBGGRR
+        color = ctypes.c_int(0x00110F0E)          # #0E0F11
+        dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(color),
+                                  ctypes.sizeof(color))
+        return aplicado
+    except Exception:
+        return False
 
 
 def apply_tk_scaling(root, dpi: int) -> float:
