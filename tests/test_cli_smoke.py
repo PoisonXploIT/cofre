@@ -82,6 +82,16 @@ class TestCliSmoke(unittest.TestCase):
             with self.subTest(args=args):
                 self._sin_unbound(self.run_cli(*args), " ".join(args))
 
+    def test_meta_y_rotate(self):
+        # los metadatos y la rotacion en seco: aqui aparecio un UnboundLocalError
+        proc = self.run_cli("meta", "UNO")
+        self._sin_unbound(proc, "meta")
+        proc = self.run_cli("meta", "UNO", "--provider", "cloudflare",
+                            "--token-id", "tok-1", "--rotate-every", "90")
+        self._sin_unbound(proc, "meta --provider")
+        proc = self.run_cli("rotate", "UNO", "--dry-run")
+        self._sin_unbound(proc, "rotate --dry-run")
+
     def test_migrate_dry_run(self):
         proc = self.run_cli("migrate", "--dry-run")
         self._sin_unbound(proc, "migrate --dry-run")

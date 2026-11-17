@@ -154,6 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
     ha.add_argument("hosts", nargs="+", help="dominios: github.com  *.ejemplo.com")
     hh = with_common(sub.add_parser("host-list", help="dominios asignados a cada secreto"))
     hh.add_argument("name", nargs="?", help="solo ese secreto")
+    mta = with_common(sub.add_parser("meta", help="metadatos de ciclo de vida de un secreto"))
+    mta.add_argument("name")
+    mta.add_argument("--provider", default="")
+    mta.add_argument("--token-id", default="")
+    mta.add_argument("--account-id", default="")
+    mta.add_argument("--expires", default="")
+    mta.add_argument("--rotate-every", type=int, default=0)
+    mta.add_argument("--url", action="append", default=[])
+    mta.add_argument("--consumer", action="append", default=[])
+    mta.add_argument("--type", dest="kind", default="")
+    mta.add_argument("--admin", action="store_true",
+                     help="marcar como token de administracion (pide confirmacion)")
+
+    rt = with_common(sub.add_parser("rotate", help="rotar un token de un proveedor"))
+    rt.add_argument("name")
+    rt.add_argument("--admin", default="", help="secreto con permisos de gestion")
+    rt.add_argument("--dry-run", action="store_true", help="enseñar el plan, sin tocar nada")
+    rt.add_argument("--si", action="store_true", help="confirmar sin preguntar")
+    rt.add_argument("--revoke-old", action="store_true",
+                    help="tras crear el reemplazo, borrar el token viejo")
+
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
@@ -550,6 +571,168 @@ def main(argv: list[str]) -> int:
                    ok=False, detail=f"{a.severity}: {a.text}"[:150])
         estado_path.write_text(json.dumps(estado.to_dict(), indent=2), encoding="utf-8")
         return 0
+
+    if args.command == "meta":
+        # los metadatos viven en el indice cifrado (v2) o en el blob v1
+        try:
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+        except Exception:
+            pass
+        meta = dict(vault.meta(args.name) or {})
+        if not meta:
+            print(f"no existe el secreto '{args.name}'", file=sys.stderr)
+            return 1
+        ref = dict(meta.get("provider_ref") or {})
+        cambios = []
+        if args.provider:
+            meta["provider"] = args.provider
+            cambios.append("provider=" + args.provider)
+        if args.token_id:
+            ref["token_id"] = args.token_id
+            cambios.append("token_id=" + args.token_id)
+        if args.account_id:
+            ref["account_id"] = args.account_id
+            cambios.append("account_id=" + args.account_id)
+        if args.expires:
+            meta["expires_at"] = args.expires
+            cambios.append("expires_at=" + args.expires)
+        if args.rotate_every:
+            meta["rotate_every_days"] = args.rotate_every
+            cambios.append(f"rotate_every_days={args.rotate_every}")
+        if args.url:
+            meta["urls"] = args.url
+            cambios.append("urls=" + ",".join(args.url))
+        if args.consumer:
+            meta["consumers"] = args.consumer
+            cambios.append("consumers=" + ",".join(args.consumer))
+        if args.kind:
+            meta["type"] = args.kind
+            cambios.append("type=" + args.kind)
+        if args.admin:
+            etiquetas = [t for t in meta.get("tags", []) if t != "admin"] + ["admin"]
+            meta["tags"] = etiquetas
+            meta["policy"] = {"confirm": True, "browser": False, "exec": False}
+            cambios.append("tags=admin+ (confirmar siempre, sin navegador ni exec)")
+        if ref:
+            meta["provider_ref"] = ref
+        if not cambios:
+            print(f"{args.name}: {json.dumps({k: meta.get(k) for k in ('type','provider','expires_at','rotate_every_days','urls','consumers','tags')}, ensure_ascii=False)}")
+            return 0
+        if vault.is_v2():
+            store = vault._v2store()
+            idx = store.index(store._data, store.master)
+            entrada = idx["entries"].get(args.name)
+            if not entrada:
+                print("no se pudo leer la entrada del indice", file=sys.stderr)
+                return 1
+            entrada.update(meta)
+            store._write_index(store._data, store.master, idx)
+            store.save(store._data)
+        else:
+            print("los metadatos solo se editan en v2", file=sys.stderr)
+            return 1
+        record(str(vault_path), "meta", args.gate, None, name=args.name, ok=True,
+               detail=";".join(cambios)[:150])
+        print(f"{args.name}: " + ", ".join(cambios))
+        return 0
+
+    if args.command == "rotate":
+        try:
+            session, serial = resolve_session_key(args.gate, str(vault_path),
+                                                 stick=args.stick,
+                                                 allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        from cofre.providers import get as provider_get
+        try:
+            from cofre.providers.http import ProviderError
+        except Exception:
+            ProviderError = RuntimeError
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        meta = dict(vault.meta(args.name) or {})
+        if not meta:
+            print(f"no existe el secreto '{args.name}'", file=sys.stderr)
+            return 1
+        proveedor_nombre = str(meta.get("provider") or "")
+        if not proveedor_nombre:
+            print("el secreto no tiene proveedor: usa 'meta --provider cloudflare'", file=sys.stderr)
+            return 1
+        proveedor = provider_get(proveedor_nombre)
+        valor = vault.get(session, args.name)
+        ref = dict(meta.get("provider_ref") or {})
+        token_id = str(ref.get("token_id") or "")
+        consumidores = list(meta.get("consumers") or [])
+        admin_nombre = args.admin or "CLOUDFLARE_TOKEN_ADMIN"
+        admin_valor = ""
+        if not args.dry_run:
+            # la rotacion real necesita el token administrador, que pide confirmacion
+            meta_admin = dict(vault.meta(admin_nombre) or {})
+            if not meta_admin:
+                print(f"falta el secreto administrador '{admin_nombre}': "
+                      "guardalo con la etiqueta admin", file=sys.stderr)
+                return 1
+            if not args.si:
+                print(f"Se va a usar '{admin_nombre}' para rotar '{args.name}'.")
+                print("Escribe ROTAR para confirmar: ", end="", flush=True)
+                if sys.stdin.readline().strip() != "ROTAR":
+                    print("cancelado")
+                    return 1
+            admin_valor = vault.get(session, admin_nombre)
+
+        verificacion = proveedor.verify(valor, meta)
+        print(f"estado del token: {'activo' if verificacion.ok else 'NO valido'}"
+              + (f" (caduca {verificacion.expires_at})" if verificacion.expires_at else "")
+              + (f" - {verificacion.detail}" if verificacion.detail else ""))
+        modo = "B (crear reemplazo y desplegar)" if consumidores else "A (roll del valor)"
+        print(f"modo de rotacion: {modo}")
+        if consumidores:
+            print("consumidores que habria que actualizar: " + ", ".join(consumidores))
+        if args.dry_run:
+            print("dry-run: no se ha tocado nada")
+            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                   ok=True, detail="dry-run")
+            return 0
+        try:
+            if not consumidores:
+                nuevo = proveedor.roll_value(token_id, admin_valor, meta)
+                vault.add(session, args.name, nuevo, meta.get("tags", []),
+                          meta.get("urls", []))
+                print("rotado: valor nuevo guardado en el cofre (no se muestra)")
+            else:
+                nuevo, ref_nuevo = proveedor.create_replacement(meta, admin_valor)
+                print("creado el token nuevo. Pasos siguientes, a mano:")
+                for c in consumidores:
+                    print(f"  - actualizar {c}")
+                vault.add(session, args.name, nuevo, meta.get("tags", []),
+                          meta.get("urls", []))
+                meta["provider_ref"] = ref_nuevo
+                if vault.is_v2():
+                    store = vault._v2store()
+                    idx = store.index(store._data, store.master)
+                    idx["entries"][args.name]["provider_ref"] = ref_nuevo
+                    store._write_index(store._data, store.master, idx)
+                    store.save(store._data)
+                if args.revoke_old and token_id:
+                    proveedor.revoke(token_id, admin_valor, meta)
+                    print("token viejo revocado")
+                else:
+                    print("el token viejo SIGUE activo: revocalo cuando los consumidores "
+                          "usen el nuevo (o repite con --revoke-old)")
+            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                   ok=True, detail=("consumidores" if consumidores else "roll"))
+            from cofre.audit import stamp_vault
+            stamp_vault(vault)
+            return 0
+        except ProviderError as exc:
+            print(f"la rotacion fallo: {exc}", file=sys.stderr)
+            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                   ok=False, detail=str(exc)[:150])
+            return 1
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))
