@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cofre.gui import CofreGUI
+from cofre.paths import default_vault
 
 
 def walk(widget, depth=0, out=None):
@@ -24,7 +25,9 @@ def walk(widget, depth=0, out=None):
 
 
 def main() -> int:
-    app = CofreGUI(str(Path.home() / "AI" / "cofre" / "cofre.json"), "usb")
+    # la ruta buena, no la del repo: con la ruta antigua el cofre "no existe" y
+    # el asistente de puesta en marcha cambia el layout medido
+    app = CofreGUI(str(default_vault()), "usb")
     app.build()
     min_w, min_h = app.root.minsize()
     for size in ("980x620", f"{min_w}x{min_h}"):

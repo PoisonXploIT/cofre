@@ -99,7 +99,10 @@ class CofreGUI:
         # Medido el 2026-11-10: por debajo de 920 px los botones de la fila 2
         # (Renombrar, Borrar) quedan por debajo de su ancho y se recorta el
         # texto. La Fase B (layout responsivo) bajara este minimo.
-        self.root.minsize(920, 560)
+        # E4: tres columnas necesitan mas ancho que las dos de antes.
+        # 1080 deja ~440 px para el detalle, que es lo minimo para los
+        # botones del panel de puesta en marcha sin recortarse.
+        self.root.minsize(1080, 640)
 
         f = build_fonts(self.root)
         self.f_title = f["display"]
@@ -229,14 +232,22 @@ class CofreGUI:
                                      bg=PANEL2, font=self.f_sub)
         self.status_label.pack(side="left", padx=(8, 12), pady=6)
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
-        self._btn(top, "Abrir", self.unlock, accent=True).pack(side="right", padx=(0, 8))
+        self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right", padx=(0, 8))
+        # E4: el buscador vive en la cabecera, no en la lista
+        self.query_var = tk.StringVar()
+        self.query_entry = self._entry(top, self.query_var)
+        self.query_entry.configure(width=28)
+        self.query_entry.pack(side="left", padx=(16, 0))
+        self.query_entry.bind("<KeyRelease>", lambda _e: self.refresh_list())
 
         # ---------- cuerpo ----------
         body = tk.Frame(self.root, bg=BG)
         body.pack(fill="both", expand=True, padx=16, pady=16)
 
-        # izquierda: pendrives, lista, ayuda
-        left = tk.Frame(body, bg=PANEL, width=300)
+        # E4: tres columnas. Barra lateral (llaves y puesta en marcha), lista
+        # de secretos y detalle. Antes la lista y el detalle compartian columna
+        # y el formulario empujaba todo hacia abajo.
+        left = tk.Frame(body, bg=PANEL, width=SIZES["sidebar"])
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
@@ -260,18 +271,17 @@ class CofreGUI:
                                  "conectar los dos.", fg=MUT, font=self.f_small,
                  bg=PANEL2).pack(anchor="w", pady=(4, 4))
 
-        tk.Label(left, text="Secretos", fg=FG, font=self.f_sub, bg=PANEL).pack(
-            anchor="w", padx=12, pady=(12, 4))
-        self.query_var = tk.StringVar()
-        self.query_entry = self._entry(left, self.query_var)
-        self.query_entry.configure(width=1)
-        self.query_entry.pack(fill="x", padx=12, pady=4)
-        tk.Label(left, text="buscar", fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w", padx=12)
-        self.list_frame = tk.Frame(left, bg=PANEL)
-        self.list_frame.pack(fill="both", expand=True, padx=12)
+        lista_col = tk.Frame(body, bg=PANEL, width=SIZES["list"])
+        lista_col.pack(side="left", fill="y", padx=(12, 0))
+        lista_col.pack_propagate(False)
+        cab_lista = tk.Frame(lista_col, bg=PANEL)
+        cab_lista.pack(fill="x", padx=12, pady=(12, 4))
+        tk.Label(cab_lista, text="Secretos", fg=FG, font=self.f_sub, bg=PANEL).pack(side="left")
         self.count_var = tk.StringVar(value="0 entradas")
-        tk.Label(left, textvariable=self.count_var, fg=MUT, font=self.f_small,
-                 bg=PANEL).pack(anchor="w", padx=12, pady=(8, 8))
+        tk.Label(cab_lista, textvariable=self.count_var, fg=MUT, font=self.f_small,
+                 bg=PANEL).pack(side="right")
+        self.list_frame = tk.Frame(lista_col, bg=PANEL)
+        self.list_frame.pack(fill="both", expand=True, padx=8)
 
         self.help_box = tk.Frame(left, bg=PANEL2)
         tk.Label(self.help_box, text="Como funciona (F1 para ocultar)", fg=FG,
@@ -339,13 +349,19 @@ class CofreGUI:
         dent = self._entry(wrow, self.dest_var, mono=True)
         dent.configure(width=6)
         dent.pack(side="left", padx=4)
-        self._btn(wrow, "Crear llave", lambda e: self.wizard_create_key(event=e)).pack(
+        # E4: la columna del detalle es mas estrecha que antes; cada accion en su
+        # fila para que no se recorte
+        wrow3 = tk.Frame(self.wizard, bg=PANEL)
+        wrow3.pack(fill="x", padx=16, pady=(0, 4))
+        self._btn(wrow3, "Crear llave", lambda e: self.wizard_create_key(event=e)).pack(
             side="left", padx=4)
         wrow2 = tk.Frame(self.wizard, bg=PANEL)
-        wrow2.pack(fill="x", padx=16, pady=(0, 8))
+        wrow2.pack(fill="x", padx=16, pady=(0, 4))
         self._btn(wrow2, "Inicializar cofre", lambda e: self.wizard_init(event=e),
                   accent=True).pack(side="left", padx=4)
-        self._btn(wrow2, "Copiar la llave (reserva)",
+        wrow4 = tk.Frame(self.wizard, bg=PANEL)
+        wrow4.pack(fill="x", padx=16, pady=(0, 8))
+        self._btn(wrow4, "Copiar la llave (reserva)",
                   lambda e: self.wizard_backup(event=e)).pack(side="left", padx=4)
 
         self.detail_name = tk.Label(right, text="sin seleccion", fg=FG,
@@ -366,10 +382,13 @@ class CofreGUI:
         # Dos filas, no una. Regla medida: con etiquetas largas, nueve botones
         # en una fila no caben ni a 980 px (los ultimos quedaban con ancho 1).
         # Fila 1: acciones sobre el valor. Fila 2: acciones sobre la entrada.
-        row = tk.Frame(right, bg=PANEL2)
-        row.pack(fill="x", padx=16, pady=(4, 4))
+        # E4: con tres columnas el detalle es mas estrecho (~450 px). Las
+        # acciones van en cuatro filas cortas en vez de dos largas.
         self._ver_targets = set()
         self.action_btns = []
+
+        row = tk.Frame(right, bg=PANEL2)
+        row.pack(fill="x", padx=16, pady=(4, 2))
         ver = self._btn(row, "Ver", self.reveal, accent=True)
         ver.pack(side="left", padx=SM)
         self._ver_frame = ver
@@ -381,24 +400,29 @@ class CofreGUI:
                   self._btn(row, "Copiar valor", self.copy_to_clipboard)):
             b.pack(side="left", padx=SM)
             self.action_btns.append(b)
-        self.sticky_btn = self._btn(row, "Fijar", self.toggle_sticky)
+
+        row1 = tk.Frame(right, bg=PANEL2)
+        row1.pack(fill="x", padx=16, pady=(0, 2))
+        self.sticky_btn = self._btn(row1, "Fijar", self.toggle_sticky)
         self.sticky_btn.pack(side="left", padx=SM)
         self.action_btns.append(self.sticky_btn)
-
-        self.del_btn = self._btn(row, "Borrar", self.delete_selected, danger=True)
+        self.del_btn = self._btn(row1, "Borrar", self.delete_selected, danger=True)
         self.del_btn.pack(side="right", padx=SM)
         self.action_btns.append(self.del_btn)
 
         row2 = tk.Frame(right, bg=PANEL2)
-        row2.pack(fill="x", padx=16, pady=(0, 8))
+        row2.pack(fill="x", padx=16, pady=(0, 2))
         for b in (self._btn(row2, "Copiar nombre", self.copy_name),
-                  self._btn(row2, "Comando exec", self.copy_exec_command),
                   self._btn(row2, "Editar", self.edit_selected),
                   self._btn(row2, "Renombrar", self.rename_selected)):
             b.pack(side="left", padx=SM)
             self.action_btns.append(b)
-        self.edit_btn = self.action_btns[6]
-        self.rename_btn = self.action_btns[7]
+
+        row3 = tk.Frame(right, bg=PANEL2)
+        row3.pack(fill="x", padx=16, pady=(0, 8))
+        self._btn(row3, "Comando exec", self.copy_exec_command).pack(side="left", padx=SM)
+        self.edit_btn = self.action_btns[6] if len(self.action_btns) > 6 else None
+        self.rename_btn = self.action_btns[7] if len(self.action_btns) > 7 else None
 
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
@@ -452,9 +476,11 @@ class CofreGUI:
         genrow.pack(fill="x", pady=(8, 4))
         self._btn(genrow, "Para maquina (384 bits)",
                   lambda e: self.generate("machine", event=e)).pack(side="left", padx=SM)
-        self._btn(genrow, "4 palabras",
+        genrow2 = tk.Frame(add, bg=PANEL)
+        genrow2.pack(fill="x", pady=(0, 4))
+        self._btn(genrow2, "4 palabras",
                   lambda e: self.generate("words", 4, event=e)).pack(side="left", padx=SM)
-        self._btn(genrow, "6 palabras",
+        self._btn(genrow2, "6 palabras",
                   lambda e: self.generate("words", 6, event=e)).pack(side="left", padx=SM)
 
         saverow = tk.Frame(add, bg=PANEL)

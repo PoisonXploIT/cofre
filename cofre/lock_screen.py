@@ -32,8 +32,10 @@ class LockScreen(tk.Frame):
     # ------------------------------------------------------------ dibujo
 
     def _construir(self) -> None:
-        centro = tk.Frame(self, bg=C["bg"])
+        centro = tk.Frame(self, bg=C["bg"], width=420)
         centro.place(relx=0.5, rely=0.46, anchor="center")
+        centro.pack_propagate(False)
+        centro.configure(height=430)
 
         tk.Label(centro, text=GLIFO_CANDADO, fg=C["accent"], bg=C["bg"],
                  font=(self._icon_family(), 46)).pack()
