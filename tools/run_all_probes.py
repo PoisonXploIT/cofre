@@ -28,6 +28,7 @@ PROBES = [
     ("layout", [sys.executable, "tools/layout_check.py"], False),
     ("detail", [sys.executable, "tools/detail_probe.py"], False),
     ("entry_sheet", [sys.executable, "tools/entry_sheet_probe.py"], False),
+    ("lock_event", [sys.executable, "tools/lock_event_probe.py"], False),
     ("stick_register", [sys.executable, "tools/stick_register_probe.py"], False),
     ("pipe", [sys.executable, "tools/pipe_probe.py"], False),
     ("pipe_server", [sys.executable, "tools/pipe_server_probe.py"], False),

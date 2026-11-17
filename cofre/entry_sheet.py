@@ -110,6 +110,11 @@ class EntrySheet:
 
         pie = tk.Frame(cuerpo, bg=C["surface"])
         pie.pack(fill="x")
+        if mode == "edit":
+            W.Button(pie, "Copiar nombre", kind="text", bg=C["surface"],
+                     command=lambda: app.copy_name()).pack(side="left")
+            W.Button(pie, "Renombrar...", kind="text", bg=C["surface"],
+                     command=self._renombrar).pack(side="left", padx=(8, 0))
         W.Button(pie, "Cancelar", kind="secondary", bg=C["surface"],
                  command=self.win.destroy).pack(side="right")
         W.Button(pie, "Guardar", kind="primary", bg=C["surface"],
@@ -151,6 +156,28 @@ class EntrySheet:
             self._fortaleza(valor)
         except Exception as exc:                      # noqa: BLE001
             self.aviso.configure(text=f"no se pudo leer el valor: {exc}")
+
+    def _renombrar(self) -> None:
+        """Renombrar desde la hoja. El valor no se toca."""
+        app = self.app
+        nuevo = app._ask_text("Renombrar", f"Nuevo nombre para '{self.nombre}'",
+                              "NUEVO_NOMBRE")
+        if not nuevo or nuevo == self.nombre:
+            return
+        try:
+            ok = app.vault.rename(app.session, self.nombre, nuevo)
+        except Exception as exc:                      # noqa: BLE001
+            self.aviso.configure(text=f"no se pudo renombrar: {exc}")
+            return
+        if not ok:
+            self.aviso.configure(text="no se pudo renombrar (ese nombre ya existe)")
+            return
+        record(app.vault_path, "rename", app.gate, app.serial, name=nuevo)
+        app.selected = nuevo
+        app.refresh_list()
+        app.select(nuevo)
+        app.set_foot(f"renombrado a '{nuevo}'")
+        self.win.destroy()
 
     # ------------------------------------------------------------ acciones
 

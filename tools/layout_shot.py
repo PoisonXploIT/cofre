@@ -13,9 +13,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tools"))
 
 from cofre.gui import CofreGUI
-from cofre.paths import default_vault
+from tmpvault import cofre_temporal  # noqa: E402
 from cofre.theme import dark_titlebar, enable_dpi_awareness
 
 
@@ -39,7 +40,8 @@ def captura(app, nombre: str) -> Path:
 
 def main() -> int:
     enable_dpi_awareness()
-    app = CofreGUI(str(default_vault()), "usb")
+    vault, llave, tmp = cofre_temporal()
+    app = CofreGUI(str(vault), "usb", stick=str(llave))
     dark_titlebar(app.root)
     app.build()
     for tam, nombre in (("1000x640", "cofre_e4_1000.png"),

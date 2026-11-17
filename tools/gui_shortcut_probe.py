@@ -103,8 +103,13 @@ def main() -> int:
             try:
                 texto = str(hijo.cget("text"))
             except Exception:
-                if hasattr(hijo, "label"):
-                    texto = str(hijo.label.cget("text"))
+                # los botones propios guardan una etiqueta o un canvas
+                etiqueta = getattr(hijo, "label", None)
+                if etiqueta is not None:
+                    try:
+                        texto = str(etiqueta.cget("text"))
+                    except Exception:
+                        texto = ""
             if texto:
                 botones.append(texto)
             recorrer(hijo)

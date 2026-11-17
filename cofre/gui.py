@@ -45,6 +45,7 @@ from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters, 
 BG = COLORS["bg"]
 PANEL = COLORS["surface"]
 PANEL2 = COLORS["card"]
+CAMPO = COLORS["raised"]
 INPUT = COLORS["input"]
 FG = COLORS["text"]
 MUT = COLORS["muted"]
@@ -62,7 +63,8 @@ LINE2 = COLORS["border_strong"]
 XS, SM, MD, LG, XL, XXL = (SPACE["xs"], SPACE["sm"], SPACE["md"],
                            SPACE["lg"], SPACE["xl"], SPACE["xxl"])
 
-MASK = "*" * 18
+MASK = "•" * 16
+ICON_FONT = "Segoe Fluent Icons"   # glifos; nunca emojis
 REVEAL_MS = 15000
 
 
@@ -143,6 +145,71 @@ class CofreGUI:
         dark_titlebar(win)
         return win
 
+    def _text_btn(self, parent, texto: str, command, danger: bool = False):
+        """Boton de texto sin caja: el que usa la maqueta para acciones."""
+        color = DANGER if danger else MUT
+        frame = tk.Frame(parent, bg=PANEL2)
+        lab = tk.Label(frame, text=texto, fg=color, bg=PANEL2,
+                       font=self.f_small, cursor="hand2")
+        lab.pack()
+        frame.label = lab
+        frame._enabled = True
+        frame._danger = danger
+
+        def click(_e=None):
+            if not frame._enabled:
+                return
+            command()
+
+        lab.bind("<Button-1>", click)
+        lab.bind("<Enter>", lambda _e: lab.configure(
+            fg=DANGER if danger else ACC) if frame._enabled else None)
+        lab.bind("<Leave>", lambda _e: lab.configure(fg=color))
+
+        def set_enabled(on: bool):
+            frame._enabled = on
+            lab.configure(fg=color if on else FAINT, cursor="hand2" if on else "")
+
+        frame.set_enabled = set_enabled
+        return frame
+
+    def _icon_btn(self, parent, glyph: str, command, nombre: str = ""):
+        """Boton de icono que pasa el evento real de Tk.
+
+        `reveal` exige un clic de verdad; con un boton propio hay que entregarle
+        el evento del canvas, no una llamada sin argumentos.
+        """
+        frame = tk.Frame(parent, bg=CAMPO)
+        canvas = tk.Canvas(frame, width=30, height=30, bg=CAMPO, bd=0,
+                           highlightthickness=0, takefocus=1)
+        canvas.pack()
+        canvas.create_text(15, 15, text=glyph, fill=MUT, font=(ICON_FONT, 12))
+        frame.canvas = canvas
+        frame._enabled = True
+        frame.label = canvas
+
+        def click(event):
+            if not frame._enabled:
+                return
+            try:
+                command(event)
+            except TypeError:
+                command()
+
+        canvas.bind("<ButtonRelease-1>", click)
+        canvas.bind("<Enter>", lambda _e: canvas.configure(bg=PANEL2))
+        canvas.bind("<Leave>", lambda _e: canvas.configure(bg=CAMPO))
+        if nombre == "ver":
+            self._ver_targets_extra = getattr(self, "_ver_targets_extra", [])
+            self._ver_targets_extra.append(canvas)
+
+        def set_enabled(on: bool):
+            frame._enabled = on
+            canvas.configure(cursor="hand2" if on else "")
+
+        frame.set_enabled = set_enabled
+        return frame
+
     def _btn(self, parent, text, command, accent=False, danger=False):
         """Boton plano: Tk tiene un aspecto de los 90; un frame con etiqueta
         dentro queda mas limpio y permite hover. Admite estado deshabilitado:
@@ -213,7 +280,6 @@ class CofreGUI:
         # ---------- cabecera ----------
         header = tk.Frame(self.root, bg=PANEL)
         header.pack(fill="x")
-        tk.Frame(header, bg=ACC, height=3).pack(fill="x")
 
         top = tk.Frame(header, bg=PANEL)
         top.pack(fill="x", padx=16, pady=12)
@@ -235,10 +301,21 @@ class CofreGUI:
         self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right", padx=(0, 8))
         # E4: el buscador vive en la cabecera, no en la lista
         self.query_var = tk.StringVar()
-        self.query_entry = self._entry(top, self.query_var)
-        self.query_entry.configure(width=28)
-        self.query_entry.pack(side="left", padx=(16, 0))
+        caja_buscar = tk.Frame(top, bg=PANEL2, highlightthickness=1,
+                               highlightbackground=LINE)
+        caja_buscar.pack(side="left", padx=(16, 0))
+        tk.Label(caja_buscar, text="", fg=MUT, bg=PANEL2,
+                 font=(ICON_FONT, 11)).pack(side="left", padx=(8, 4))
+        self.query_entry = self._entry(caja_buscar, self.query_var)
+        self.query_entry.configure(width=26, bg=PANEL2, highlightthickness=0, bd=0)
+        self.query_entry.pack(side="left", pady=5)
+        tk.Label(caja_buscar, text="Ctrl K", fg=FAINT, bg=PANEL2,
+                 font=self.f_small).pack(side="left", padx=(6, 8))
         self.query_entry.bind("<KeyRelease>", lambda _e: self.refresh_list())
+        self.query_entry.bind("<FocusIn>", lambda _e: caja_buscar.configure(
+            highlightbackground=ACC))
+        self.query_entry.bind("<FocusOut>", lambda _e: caja_buscar.configure(
+            highlightbackground=LINE))
 
         # ---------- cuerpo ----------
         body = tk.Frame(self.root, bg=BG)
@@ -375,18 +452,25 @@ class CofreGUI:
         self.chips_row = tk.Frame(right, bg=PANEL2)
         self.chips_row.pack(fill="x", padx=16, pady=(0, 6))
 
-        tk.Label(right, text="valor", fg=MUT, font=self.f_small,
-                 bg=PANEL2, anchor="w").pack(fill="x", padx=16)
-        self.value_box = tk.Text(right, height=2, bg=PANEL, fg=MUT, font=self.f_mono,
-                                 relief="flat", borderwidth=0,
-                                 highlightbackground=LINE, highlightthickness=1,
-                                 wrap="word")
-        self.value_box.pack(fill="x", padx=16, pady=(2, 4))
+        self.valor_label = tk.Label(right, text="valor", fg=MUT, font=self.f_small,
+                                    bg=PANEL2, anchor="w")
+        self.valor_label.pack(fill="x", padx=16)
+        campo_valor = tk.Frame(right, bg=CAMPO)
+        self.campo_valor = campo_valor
+        campo_valor.pack(fill="x", padx=16, pady=(2, 6))
+        self.value_box = tk.Text(campo_valor, height=1, bg=CAMPO, fg=FG,
+                                 font=self.f_mono, relief="flat", borderwidth=0,
+                                 highlightthickness=0, wrap="none", padx=10, pady=10)
+        self.value_box.pack(side="left", fill="x", expand=True)
         self.value_box.insert("1.0", MASK)
         self.value_box.configure(fg=MUT)
+        self._icon_btn(campo_valor, "", self.reveal, "ver").pack(side="right", padx=2)
+        self._icon_btn(campo_valor, "", self.copy_to_clipboard, "copiar").pack(
+            side="right", padx=2)
 
         # E5: sitios asignados (dominios donde se puede rellenar)
         cab_sitios = tk.Frame(right, bg=PANEL2)
+        self.cab_sitios = cab_sitios
         cab_sitios.pack(fill="x", padx=16, pady=(6, 0))
         tk.Label(cab_sitios, text="Sitios donde se puede rellenar", fg=FG,
                  font=self.f_sub, bg=PANEL2).pack(side="left")
@@ -396,6 +480,7 @@ class CofreGUI:
 
         # E5: usado en (consumidores) y ciclo de vida
         fila_info = tk.Frame(right, bg=PANEL2)
+        self.fila_info = fila_info
         fila_info.pack(fill="x", padx=16, pady=(0, 8))
         col_uso = tk.Frame(fila_info, bg=PANEL2)
         col_uso.pack(side="left", fill="both", expand=True)
@@ -413,47 +498,28 @@ class CofreGUI:
         # Dos filas, no una. Regla medida: con etiquetas largas, nueve botones
         # en una fila no caben ni a 980 px (los ultimos quedaban con ancho 1).
         # Fila 1: acciones sobre el valor. Fila 2: acciones sobre la entrada.
-        # E4: con tres columnas el detalle es mas estrecho (~450 px). Las
-        # acciones van en cuatro filas cortas en vez de dos largas.
+        # E7/E4: acciones como botones de TEXTO (sin caja), una sola fila.
+        # Ver y copiar viven dentro del campo del valor; Ocultar sobra (el ojo
+        # alterna) y Fijar se ha movido a Ajustes.
         self._ver_targets = set()
         self.action_btns = []
-
-        row = tk.Frame(right, bg=PANEL2)
-        row.pack(fill="x", padx=16, pady=(4, 2))
-        ver = self._btn(row, "Ver", self.reveal, accent=True)
-        ver.pack(side="left", padx=SM)
-        self._ver_frame = ver
-        for w in (ver, *ver.winfo_children(),
-                  *[c for w in ver.winfo_children() for c in w.winfo_children()]):
-            self._ver_targets.add(w)
-        self.action_btns.append(ver)
-        for b in (self._btn(row, "Ocultar", self.hide),
-                  self._btn(row, "Copiar valor", self.copy_to_clipboard)):
-            b.pack(side="left", padx=SM)
+        acciones = tk.Frame(right, bg=PANEL2)
+        acciones.pack(fill="x", padx=16, pady=(2, 6))
+        for texto, comando in (("Editar", self.edit_selected),
+                               ("Historial", self._show_history),
+                               ("Comando exec", self.copy_exec_command)):
+            b = self._text_btn(acciones, texto, comando)
+            b.pack(side="left", padx=(0, 12))
             self.action_btns.append(b)
-
-        row1 = tk.Frame(right, bg=PANEL2)
-        row1.pack(fill="x", padx=16, pady=(0, 2))
-        self.sticky_btn = self._btn(row1, "Fijar", self.toggle_sticky)
-        self.sticky_btn.pack(side="left", padx=SM)
-        self.action_btns.append(self.sticky_btn)
-        self.del_btn = self._btn(row1, "Borrar", self.delete_selected, danger=True)
-        self.del_btn.pack(side="right", padx=SM)
+        self.del_btn = self._text_btn(acciones, "Mover a la papelera",
+                                      self.delete_selected, danger=True)
+        self.del_btn.pack(side="right")
         self.action_btns.append(self.del_btn)
-
-        row2 = tk.Frame(right, bg=PANEL2)
-        row2.pack(fill="x", padx=16, pady=(0, 2))
-        for b in (self._btn(row2, "Copiar nombre", self.copy_name),
-                  self._btn(row2, "Editar", self.edit_selected),
-                  self._btn(row2, "Renombrar", self.rename_selected)):
-            b.pack(side="left", padx=SM)
-            self.action_btns.append(b)
-
-        row3 = tk.Frame(right, bg=PANEL2)
-        row3.pack(fill="x", padx=16, pady=(0, 8))
-        self._btn(row3, "Comando exec", self.copy_exec_command).pack(side="left", padx=SM)
-        self.edit_btn = self.action_btns[6] if len(self.action_btns) > 6 else None
-        self.rename_btn = self.action_btns[7] if len(self.action_btns) > 7 else None
+        self.edit_btn = self.action_btns[0]
+        self.rename_btn = None      # renombrar y copiar nombre viven en la hoja Editar
+        self.sticky_btn = None
+        self.show_val_btn = None
+        self._ver_frame = None
 
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
@@ -475,14 +541,25 @@ class CofreGUI:
         if self.gate == "usb-pin":
             self.pinrow.pack(fill="x", padx=16, pady=(4, 4))
 
-        logbox = tk.Frame(right, bg=PANEL)
-        logbox.pack(fill="x", padx=16, pady=(8, 16))
+        # E7: el registro de actividad ya no vive dentro del detalle; esta en
+        # el boton Registro del pie y en la pantalla de registro.
         self.log_labels = []
-        for _ in range(3):
-            lab = tk.Label(logbox, text="", fg=FAINT, font=self.f_small, bg=PANEL, anchor="w")
-            lab.pack(fill="x")
-            self.log_labels.append(lab)
-        self.refresh_log()
+
+        # E7: estado vacio del detalle. Sin seleccion no se muestran campos ni
+        # botones grises: solo el mensaje y el boton Nuevo.
+        self.empty_detail = tk.Frame(right, bg=PANEL2)
+        centro_vacio = tk.Frame(self.empty_detail, bg=PANEL2)
+        centro_vacio.place(relx=0.5, rely=0.4, anchor="center")
+        tk.Label(centro_vacio, text="", fg=FAINT, bg=PANEL2,
+                 font=(ICON_FONT, 30)).pack()
+        tk.Label(centro_vacio, text="Elige un secreto de la lista", fg=MUT,
+                 bg=PANEL2, font=self.f_sub).pack(pady=(6, 10))
+        self._btn(centro_vacio, "Nuevo secreto", self._focus_new,
+                  accent=True).pack()
+        self._detail_piezas = [self.chips_row, self.valor_label, self.campo_valor,
+                               self.sites_box, self.consumers_box, self.life_box,
+                               acciones, self.cab_sitios, self.fila_info]
+        self._update_detail_visible()
 
         # ---------- pie ----------
         foot = tk.Frame(self.root, bg=PANEL)
@@ -671,7 +748,7 @@ class CofreGUI:
         self.refresh_list()
         return True
 
-    def lock(self, event=None, motivo: str | None = None):
+    def lock(self, event=None, motivo: str | None = None, detalle: str = ""):
         """Bloquear: se tira la clave de sesion de la RAM. Hace falta el
         pendrive otra vez para abrir."""
         try:
@@ -683,8 +760,11 @@ class CofreGUI:
         # motivo que sea: a mano, por inactividad o por suspension
         self.confirm_grants.clear()
         # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
-        # existe si el cofre estaba abierto
-        record(self.vault_path, "lock", self.gate, None, ok=True)
+        # existe si el cofre estaba abierto. Y si no habia sesion no se escribe
+        # nada: bloquear un cofre ya cerrado no es un evento.
+        if self.session:
+            record(self.vault_path, "lock", self.gate, self.serial, ok=True,
+                   detail=detalle or "manual")
         audit_clear_key()
         self.session = None
         self.serial = None
@@ -695,8 +775,10 @@ class CofreGUI:
         self.hide()
         self.detail_name.configure(text="sin seleccion")
         self.meta_var.set("cofre bloqueado")
+        self.selected = None
         self.refresh_list()
         self.refresh_wizard()
+        self._update_detail_visible()
         self.set_status("bloqueado  |  la llave ya no esta en memoria", warn=True)
         if getattr(self, "lock_screen", None):
             texto = motivo or "la llave ya no esta en memoria. Conecta un pendrive "
@@ -730,6 +812,7 @@ class CofreGUI:
             self.detail_name.configure(text="sin seleccion")
             self.meta_var.set("selecciona un secreto de la lista")
         self._refresh_actions()
+        self._update_detail_visible()
         self.count_var.set(f"{len(names)} entrada(s)")
         if not names:
             empty = tk.Frame(self.list_frame, bg=PANEL)
@@ -1135,9 +1218,8 @@ class CofreGUI:
         if motivo:
             texto = self.session_obj.describe(motivo)
             self.session_obj = None
-            self.lock(motivo=texto)
+            self.lock(motivo=texto, detalle=motivo)
             self.set_foot(texto)
-            record(self.vault_path, "lock", self.gate, None, ok=True, detail=motivo)
 
     def _poll(self) -> None:
         self._check_session()
@@ -1506,8 +1588,31 @@ class CofreGUI:
         self.value_box.delete("1.0", "end")
         self.value_box.insert("1.0", MASK)
         self.refresh_detail()
+        self._update_detail_visible()
 
     # ---------- detalle (E5) ----------
+
+    def _update_detail_visible(self) -> None:
+        """Con seleccion, el detalle; sin ella, el estado vacio."""
+        hay = bool(self.selected) and bool(self.session)
+        piezas = list(getattr(self, "_detail_piezas", []))
+        for w in piezas:
+            try:
+                if hay:
+                    if not w.winfo_ismapped():
+                        w.pack(fill="x" if w is not self.chips_row else "x",
+                               padx=16 if w not in (self.chips_row,) else 16)
+                else:
+                    w.pack_forget()
+            except Exception:
+                pass
+        try:
+            if hay:
+                self.empty_detail.pack_forget()
+            elif not self.empty_detail.winfo_ismapped():
+                self.empty_detail.pack(fill="both", expand=True)
+        except Exception:
+            pass
 
     def refresh_detail(self) -> None:
         """Chips, sitios, consumidores y ciclo de vida del secreto elegido."""
@@ -1580,6 +1685,28 @@ class CofreGUI:
                  "neutral": MUT}.get(kind, MUT)
         return tk.Label(parent, text=texto, fg=color, bg=PANEL,
                         font=self.f_small, padx=6, pady=1)
+
+    def _show_history(self) -> None:
+        """Historial del secreto: eventos del log que lo mencionan."""
+        if not self.selected:
+            return
+        from cofre.audit import _events
+        eventos = [e for e in _events(self.vault_path)
+                   if e.get("name") == self.selected]
+        win = self._sheet(f"Historial de {self.selected}")
+        win.geometry("620x420")
+        texto = tk.Text(win, bg=PANEL, fg=FG, font=self.f_mono, bd=0,
+                        highlightthickness=0, wrap="word")
+        texto.pack(fill="both", expand=True, padx=12, pady=12)
+        if not eventos:
+            texto.insert("end", "sin eventos para este secreto")
+        for e in eventos[-60:]:
+            firma = "firmado" if e.get("mac") else "sin firma"
+            linea = (f"{e.get('ts')}  {e.get('ev')}  "
+                     + ('ok' if e.get('ok') else 'FALLO') + f"  {firma}" + chr(10))
+            texto.insert("end", linea)
+        texto.configure(state="disabled")
+        self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
 
     def assign_site(self) -> None:
         """Asignar un dominio a ESTE secreto. Pasa por confirmacion."""
@@ -1665,7 +1792,8 @@ class CofreGUI:
         if not isinstance(event, tk.Event) or getattr(event, "num", None) != 1:
             self.set_foot("ver el valor exige un click de raton en el boton 'Ver'")
             return
-        if event.widget not in self._ver_targets:
+        objetivos = set(self._ver_targets) | set(getattr(self, "_ver_targets_extra", []))
+        if event.widget not in objetivos:
             self.set_foot("'Ver' solo funciona pulsando el boton Ver")
             return
         # un click real tiene coordenadas dentro del widget; un evento

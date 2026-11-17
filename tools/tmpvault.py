@@ -19,6 +19,17 @@ SECRETOS = [
 ]
 
 
+def aislar(vault: Path) -> None:
+    """Apunta COFRE_VAULT al cofre temporal de ESTE proceso.
+
+    Asi cualquier sonda que llame a default_vault() sin querer sigue escribiendo
+    en el temporal y no en el log real. Paso el 2026-11-17: tres sondas dejaron
+    eventos en el log de verdad.
+    """
+    import os
+    os.environ["COFRE_VAULT"] = str(vault)
+
+
 def cofre_temporal(secretos=None) -> tuple[Path, Path, Path]:
     tmp = Path(tempfile.mkdtemp(prefix="cofre-sonda-"))
     vault = tmp / "cofre.json"
@@ -35,4 +46,5 @@ def cofre_temporal(secretos=None) -> tuple[Path, Path, Path]:
         v2.put(data, master, nombre, valor, tags, urls, kind=tipo)
     v2.save(data)
     register_stick(str(vault), serial, drive)
+    aislar(vault)
     return vault, llave, tmp

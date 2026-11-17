@@ -83,7 +83,7 @@ def main() -> int:
     check("7. ciclo de vida informa", bool(vida), vida[:60])
 
     check("8. el valor sigue oculto",
-          "******" in app.value_box.get("1.0", "end").strip(), app.value_box.get("1.0", "end").strip())
+          "•" in app.value_box.get("1.0", "end").strip(), app.value_box.get("1.0", "end").strip())
 
     # asignar y quitar un sitio de prueba, por la via de la GUI
     app.selected = elegido
