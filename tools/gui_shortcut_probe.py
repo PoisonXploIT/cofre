@@ -93,6 +93,27 @@ def main() -> int:
     app._on_enter(None)
     check("R7 Enter copia el seleccionado", calls["copy"] == 1, f"copy={calls['copy']}")
 
+    # 4d. el boton Registro existe y abre la verificacion sin consola
+    # los botones de COFRE son Frame + Label dentro, no tk.Button
+    botones = []
+
+    def recorrer(w):
+        for hijo in w.winfo_children():
+            texto = ""
+            try:
+                texto = str(hijo.cget("text"))
+            except Exception:
+                if hasattr(hijo, "label"):
+                    texto = str(hijo.label.cget("text"))
+            if texto:
+                botones.append(texto)
+            recorrer(hijo)
+
+    recorrer(app.root)
+    check("R8 el pie tiene boton Registro", any("Registro" in b for b in botones),
+          "botones: " + ", ".join(botones[:8]))
+    check("R8 el pie tiene boton Guia", any("Guia" in b for b in botones), "")
+
     # 5. Escape con el cofre cerrado: no hace nada destructivo
     calls["lock"] = 0
     app._on_escape(None)

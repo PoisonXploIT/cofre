@@ -493,6 +493,7 @@ class CofreGUI:
         self.browser_btn = self._btn(footrow, "Navegador: off",
                                      lambda _e: self.toggle_browser())
         self.browser_btn.pack(side="right", padx=(SM, 0))
+        self._btn(footrow, "Registro", self.open_audit).pack(side="right", padx=SM)
         self._btn(footrow, "Guia", self.open_guide).pack(side="right", padx=SM)
 
         # Con pythonw no hay consola: si un callback lanza, Tk imprime el
@@ -1205,6 +1206,67 @@ class CofreGUI:
             "Si no abre y no dice nada: usa el acceso COFRE (diagnostico).",
         ]),
     ]
+
+    def open_audit(self, event=None) -> None:
+        """Verificar la cadena del registro y ensenar las ultimas entradas.
+
+        El equivalente a 'python -m cofre.cli log verify', pero sin consola.
+        """
+        from cofre.audit import legacy_files, tail_human, verify_vault
+
+        if not self.session:
+            self.set_foot("abre el cofre para verificar las firmas del registro")
+            return
+        try:
+            self.vault.refresh()
+        except Exception:
+            pass
+        ok, detalle = verify_vault(self.vault)
+
+        win = tk.Toplevel(self.root)
+        win.title("COFRE - registro de accesos")
+        win.configure(bg=PANEL)
+        win.transient(self.root)
+        win.geometry("760x420")
+
+        cabecera = tk.Frame(win, bg=PANEL)
+        cabecera.pack(fill="x", padx=SM, pady=(SM, 0))
+        tk.Label(cabecera, text="Registro de accesos", fg=FG, font=self.f_title,
+                 bg=PANEL, anchor="w").pack(side="left")
+        self._btn(cabecera, "Cerrar", win.destroy).pack(side="right")
+
+        estado = "cadena y firmas correctas" if ok else "PROBLEMA: " + detalle
+        tk.Label(win, text=estado, fg=OK if ok else WARN, bg=PANEL,
+                 font=self.f_sub, anchor="w", wraplength=700,
+                 justify="left").pack(fill="x", padx=SM, pady=(2, 0))
+        tk.Label(win, text=detalle if ok else "", fg=MUT, bg=PANEL,
+                 font=self.f_small, anchor="w", wraplength=700,
+                 justify="left").pack(fill="x", padx=SM)
+
+        viejos = [p.name for p in legacy_files(self.vault_path)
+                  if p.name.startswith(".cofre-access-v1-")]
+        if viejos:
+            tk.Label(win, text=f"historico v1 (sin verificar): {viejos[0]}",
+                     fg=FAINT, bg=PANEL, font=self.f_small, anchor="w").pack(
+                fill="x", padx=SM, pady=(2, 0))
+
+        marco = tk.Frame(win, bg=PANEL2)
+        marco.pack(fill="both", expand=True, padx=SM, pady=SM)
+        texto = tk.Text(marco, bg=PANEL2, fg=FG, font=self.f_mono, bd=0,
+                        highlightthickness=0, wrap="word")
+        barra = tk.Scrollbar(marco, command=texto.yview)
+        texto.configure(yscrollcommand=barra.set)
+        barra.pack(side="right", fill="y")
+        texto.pack(side="left", fill="both", expand=True, padx=XS, pady=XS)
+
+        lineas = tail_human(self.vault_path, 40)
+        cuerpo = "\n".join(lineas) if lineas else "todavia no hay eventos"
+        texto.insert("end", cuerpo)
+        texto.configure(state="disabled")
+
+        record(self.vault_path, "audit-verify", self.gate, self.serial, ok=ok,
+               detail=detalle[:150])
+        self.set_foot(("registro verificado: " if ok else "registro con problemas: ") + detalle)
 
     def open_guide(self, event=None) -> None:
         """Guia de uso paginada: un paso por pantalla, texto grande, sin tecnicismos."""
