@@ -62,6 +62,34 @@ class TestHosts(unittest.TestCase):
             clean_host("https://github.com/login")
 
 
+class TestRutaPorDefecto(unittest.TestCase):
+    def test_no_devuelve_la_ruta_del_repo(self):
+        import os
+        from cofre.paths import default_vault
+        antes = os.environ.pop("COFRE_VAULT", None)
+        try:
+            ruta = default_vault()
+            self.assertNotIn("AI", ruta.parts[:len(ruta.parts) - 1],
+                             "la ruta por defecto no debe caer en el repo")
+            self.assertIn("cofre", str(ruta).lower())
+        finally:
+            if antes is not None:
+                os.environ["COFRE_VAULT"] = antes
+
+    def test_la_variable_manda(self):
+        import os
+        from cofre.paths import default_vault
+        antes = os.environ.get("COFRE_VAULT")
+        os.environ["COFRE_VAULT"] = r"C:	mp\otro.json"
+        try:
+            self.assertEqual(str(default_vault()), r"C:	mp\otro.json")
+        finally:
+            if antes is None:
+                os.environ.pop("COFRE_VAULT", None)
+            else:
+                os.environ["COFRE_VAULT"] = antes
+
+
 class TestRegistro(unittest.TestCase):
     def test_registro_corrupto_falla_cerrado(self):
         tmp = Path(tempfile.mkdtemp())

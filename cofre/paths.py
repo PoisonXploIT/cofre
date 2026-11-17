@@ -26,9 +26,38 @@ REGISTRY_NAME = ".cofre-sticks.json"
 HOSTS_NAME = ".cofre-hosts.json"
 
 
+def data_home() -> Path:
+    r"""Carpeta de datos del cofre: %LOCALAPPDATA%\cofre\vault.
+
+    Desde el 2026-11-17 los datos NO viven en el repo. Si alguien los deja
+    dentro, se siguen encontrando por compatibilidad, pero el orden de busqueda
+    es: variable de entorno, carpeta de datos, y solo despues la ruta antigua.
+    """
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "cofre" / "vault"
+
+
 def default_vault() -> Path:
-    """Unica fuente de la ruta del cofre. COFRE_VAULT la sobrepone."""
-    return Path(os.environ.get("COFRE_VAULT", Path.home() / "AI" / "cofre" / VAULT_FILENAME))
+    r"""Unica fuente de la ruta del cofre.
+
+    1. COFRE_VAULT, si esta definida (es lo normal: la fija el usuario).
+    2. %LOCALAPPDATA%\cofre\vault\cofre.json, si existe.
+    3. la ruta antigua del repo, si existe (compatibilidad).
+    4. %LOCALAPPDATA%\cofre\vault\cofre.json como destino por defecto.
+
+    Nunca se devuelve una ruta del repo si alli no hay cofre: eso crearia uno
+    nuevo y vacio sin avisar.
+    """
+    env = os.environ.get("COFRE_VAULT")
+    if env:
+        return Path(env)
+    nuevo = data_home() / VAULT_FILENAME
+    if nuevo.exists():
+        return nuevo
+    antiguo = Path.home() / "AI" / "cofre" / VAULT_FILENAME
+    if antiguo.exists():
+        return antiguo
+    return nuevo
 
 
 def atomic_write(path: str | Path, data: str | bytes) -> Path:
