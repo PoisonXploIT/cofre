@@ -38,3 +38,6 @@ nmhost/com.cofre.host.json
 # estado de las alertas y ajustes locales
 .cofre-alert-state.json
 cofre-settings.json
+
+# Los datos del cofre ya no viven en el repo (desde 2026-11-17):
+# %LOCALAPPDATA%\cofre\vault, localizado con COFRE_VAULT.
