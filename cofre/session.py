@@ -8,7 +8,7 @@ Motivos posibles:
   - "tiempo maximo"    la sesion lleva abierta M horas
   - "el equipo estuvo suspendido"  entre dos comprobaciones pasa demasiado tiempo
   - "pendrive retirado" lo detecta la GUI (hotplug) y llama a lock()
-  - "windows bloqueado" paso 2.2, si OpenInputDesktop distingue bien
+  - "windows bloqueado"    se bloqueo la sesion de Windows (Win+L)
 """
 
 from __future__ import annotations
@@ -25,12 +25,18 @@ DEFAULTS = {
 class Session:
     """Estado de una sesion abierta. No sabe descifrar: eso es del cofre."""
 
-    def __init__(self, settings: dict | None = None, now=None, wall=None):
+    def __init__(self, settings: dict | None = None, now=None, wall=None,
+                 lock_state=None):
         cfg = dict(DEFAULTS)
         cfg.update({k: v for k, v in (settings or {}).items() if k in DEFAULTS})
         self.settings = cfg
         self._now = now or time.monotonic
         self._wall = wall or time.time
+        # 2.2: probado en esta maquina; si no se puede saber, devuelve None
+        if lock_state is None:
+            from cofre.winlock import is_locked as lock_state
+        self._lock_state = lock_state
+        self._bloqueada_antes: bool | None = None
         self.opened_at = self._now()
         self.opened_wall = self._wall()
         self.last_activity = self.opened_at
@@ -65,6 +71,21 @@ class Session:
         mono_gap = self._now() - self.last_activity
         if wall_gap - mono_gap > self.settings["suspend_gap_seconds"] and wall_gap > 60:
             return "el equipo estuvo suspendido"
+
+        # bloqueo de Windows: solo cuenta cuando pasa de desbloqueado a bloqueado,
+        # para no bloquear el cofre al abrirlo desde una sesion ya bloqueada
+        try:
+            bloqueada = self._lock_state()
+        except Exception:
+            bloqueada = None
+        if self._bloqueada_antes is None:
+            # primera observacion: estado de partida, sin bloquear
+            self._bloqueada_antes = bool(bloqueada)
+        elif bloqueada is True and not self._bloqueada_antes:
+            self._bloqueada_antes = True
+            return "windows bloqueado"
+        elif bloqueada is False:
+            self._bloqueada_antes = False
 
         if self.idle_seconds() >= self.settings["idle_minutes"] * 60:
             return "inactividad"

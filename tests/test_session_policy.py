@@ -57,6 +57,31 @@ class TestSession(unittest.TestCase):
         self.clock.mono += 1
         self.assertEqual(self.s.check(), "el equipo estuvo suspendido")
 
+    def test_bloqueo_de_windows(self):
+        # la sonda del 2026-11-17 confirmo que OpenInputDesktop distingue aqui
+        estado = {"bloqueada": False}
+        s = Session({"idle_minutes": 60, "max_hours": 8},
+                    now=lambda: self.clock.mono, wall=lambda: self.clock.wall,
+                    lock_state=lambda: estado["bloqueada"])
+        self.assertIsNone(s.check())
+        estado["bloqueada"] = True
+        self.assertEqual(s.check(), "windows bloqueado")
+        estado["bloqueada"] = False
+        self.assertIsNone(s.check())
+        estado["bloqueada"] = True
+        self.assertEqual(s.check(), "windows bloqueado")
+
+    def test_no_bloquea_si_se_abre_ya_bloqueada(self):
+        # abrir el cofre con la sesion bloqueada no debe cerrarlo al instante
+        s = Session({"idle_minutes": 60}, now=lambda: self.clock.mono,
+                    wall=lambda: self.clock.wall, lock_state=lambda: True)
+        self.assertIsNone(s.check())
+
+    def test_sin_dato_de_bloqueo_no_adivina(self):
+        s = Session({"idle_minutes": 60}, now=lambda: self.clock.mono,
+                    wall=lambda: self.clock.wall, lock_state=lambda: None)
+        self.assertIsNone(s.check())
+
     def test_describe_en_espanol(self):
         self.assertIn("inactividad", self.s.describe("inactividad"))
         self.assertIn("suspendido", self.s.describe("el equipo estuvo suspendido"))
@@ -126,8 +151,10 @@ class TestPermisosTemporales(unittest.TestCase):
         except tk.TclError:
             self.skipTest("sin pantalla para Tk")
         root.withdraw()
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="cofre-perms-"))
         try:
-            app = CofreGUI(str(REPO / "cofre.json"), "usb")
+            app = CofreGUI(str(tmp / "cofre.json"), "usb")
             app.build()          # sin widgets, lock() no tiene donde escribir
             app.confirm_grants[("CLOUDFLARE_DNS_TOKEN", "Navegador")] = 10 ** 12
             self.assertTrue(app.confirm_grants)
@@ -139,6 +166,8 @@ class TestPermisosTemporales(unittest.TestCase):
                 root.destroy()
             except Exception:
                 pass
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

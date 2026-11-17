@@ -145,6 +145,12 @@ def archive_legacy(vault_path: str | Path) -> tuple[Path, str] | None:
         return None
     marca = datetime.now().strftime("%Y-%m-%d")
     destino = Path(vault_path).parent / f".cofre-access-v1-hasta-{marca}.log"
+    # el archivo del dia puede existir ya (y estar en solo lectura): se busca
+    # un nombre libre en vez de fallar
+    n = 2
+    while destino.exists():
+        destino = Path(vault_path).parent / f".cofre-access-v1-hasta-{marca}-{n}.log"
+        n += 1
     # si hay varios (log y .old) se concatenan en el mismo archivo
     with destino.open("ab") as salida:
         for p in pendientes:
