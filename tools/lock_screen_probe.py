@@ -60,7 +60,8 @@ def main() -> int:
     app.root.update()
     check("7. abrir desde la capa deja el cofre operativo",
           bool(app.session) and not capa.winfo_ismapped(),
-          f"sesion={'si' if app.session else 'no'} mapeada={capa.winfo_ismapped()}")
+          f"sesion={'si' if app.session else 'no'} mapeada={capa.winfo_ismapped()} "
+          f"pie={app.foot_var.get()[:70]!r}")
 
     # volver a bloquear y capturar
     app.lock(motivo="bloqueado por inactividad (10 min sin usarlo)")

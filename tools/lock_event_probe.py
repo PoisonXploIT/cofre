@@ -68,6 +68,58 @@ def main() -> int:
     check("5. bloquear un cofre ya cerrado no escribe evento",
           len(eventos(vault)) == antes2, f"{len(eventos(vault))} vs {antes2}")
 
+    # todos los caminos de bloqueo dejan el evento firmado
+    from cofre.session import Session
+
+    def ciclo(nombre, disparo):
+        app2 = CofreGUI(str(vault), "usb", stick=str(llave))
+        app2.build()
+        app2.root.update()
+        if not app2.session:
+            check(nombre, False, "no se pudo abrir")
+            return
+        antes3 = len(eventos(vault))
+        disparo(app2)
+        app2.root.update()
+        nuevos3 = eventos(vault)[antes3:]
+        locks3 = [e for e in nuevos3 if e.get("ev") == "lock"]
+        ok3 = bool(locks3) and all(e.get("mac") for e in locks3)
+        check(nombre, ok3, f"{len(locks3)} lock, firmados={[bool(e.get('mac')) for e in locks3]}")
+        try:
+            app2.root.destroy()
+        except Exception:
+            pass
+
+    def por_inactividad(a):
+        a.session_obj = Session({"idle_minutes": 0}, lock_state=lambda: False)
+        a.session_obj.last_activity -= 10
+        a._check_session()
+
+    def por_winl(a):
+        estado = {"bloqueada": False}
+        a.session_obj = Session({"idle_minutes": 60}, lock_state=lambda: estado["bloqueada"])
+        a.session_obj.check()
+        estado["bloqueada"] = True
+        a._check_session()
+
+    def por_pendrive(a):
+        a.serial = -1        # un serial que no esta conectado simula el retirado
+
+    ciclo("7. bloqueo por inactividad firma", por_inactividad)
+    ciclo("8. bloqueo por Win+L firma", por_winl)
+
+    # cerrar la ventana
+    app3 = CofreGUI(str(vault), "usb", stick=str(llave))
+    app3.build()
+    app3.root.update()
+    antes4 = len(eventos(vault))
+    app3._on_close()
+    nuevos4 = eventos(vault)[antes4:]
+    locks4 = [e for e in nuevos4 if e.get("ev") == "lock"]
+    check("9. cerrar la ventana firma el lock",
+          bool(locks4) and bool(locks4[0].get("mac")),
+          str([bool(e.get("mac")) for e in locks4]))
+
     ok, detalle = verify(vault)
     check("6. verify del log temporal en verde", ok, detalle[:80])
 

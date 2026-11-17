@@ -284,10 +284,9 @@ class CofreGUI:
         top = tk.Frame(header, bg=PANEL)
         top.pack(fill="x", padx=16, pady=12)
         tk.Label(top, text="COFRE", fg=FG, font=self.f_title, bg=PANEL).pack(side="left")
-        tk.Label(top, text="  boveda local", fg=MUT, font=self.f_sub,
-                 bg=PANEL).pack(side="left")
 
-        self.status_var = tk.StringVar(value="pendrive no detectado")
+
+        self.status_var = tk.StringVar(value="cerrado")
         pill = tk.Frame(top, bg=PANEL2, highlightthickness=1, highlightbackground=LINE)
         pill.pack(side="right", padx=(0, 8))
         self.pill_dot = tk.Canvas(pill, width=10, height=10, bg=PANEL2,
@@ -297,8 +296,8 @@ class CofreGUI:
         self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
                                      bg=PANEL2, font=self.f_sub)
         self.status_label.pack(side="left", padx=(8, 12), pady=6)
+        self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right")
         self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
-        self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right", padx=(0, 8))
         # E4: el buscador vive en la cabecera, no en la lista
         self.query_var = tk.StringVar()
         caja_buscar = tk.Frame(top, bg=PANEL2, highlightthickness=1,
@@ -325,10 +324,10 @@ class CofreGUI:
         self.alert_text = tk.Label(self.alert_band, text="", fg=WARNFG, bg=WARNBG,
                                    font=self.f_small, anchor="w")
         self.alert_text.pack(side="left", fill="x", expand=True)
-        self._btn(self.alert_band, "Descartar", self.dismiss_alerts).pack(
-            side="right", padx=6, pady=4)
-        self._btn(self.alert_band, "Ver detalle", self.open_health).pack(
-            side="right", pady=4)
+        self._text_btn(self.alert_band, "Descartar", self.dismiss_alerts).pack(
+            side="right", padx=(6, 16))
+        self._text_btn(self.alert_band, "Ver detalle", self.open_health).pack(
+            side="right", padx=6)
         self._alerts_visibles = []
 
         # ---------- cuerpo ----------
@@ -351,10 +350,18 @@ class CofreGUI:
             tk.Label(left, text=titulo.upper(), fg=FAINT, font=self.f_small,
                      bg=PANEL, anchor="w").pack(fill="x", padx=14, pady=(12, 2))
 
-        def entrada(clave: str, texto: str, comando) -> None:
-            b = self._text_btn(left, texto, comando, alinear="w")
-            b.pack(fill="x", padx=12, pady=1)
+        self.nav_counts = {}
+
+        def entrada(clave: str, texto: str, comando, contador: bool = True) -> None:
+            fila = tk.Frame(left, bg=PANEL)
+            fila.pack(fill="x", padx=12, pady=1)
+            b = self._text_btn(fila, texto, comando, alinear="w")
+            b.pack(side="left", fill="x", expand=True)
             self.nav_btns[clave] = b
+            if contador:
+                lab = tk.Label(fila, text="", fg=FAINT, bg=PANEL, font=self.f_small)
+                lab.pack(side="right", padx=(0, 6))
+                self.nav_counts[clave] = lab
 
         seccion("Biblioteca")
         entrada("todos", "Todos", lambda: self.set_filtro("todos"))
@@ -368,15 +375,26 @@ class CofreGUI:
         entrada("caducan", "Caducan pronto", lambda: self.set_filtro("caducan"))
         entrada("papelera", "Papelera", lambda: self.set_filtro("papelera"))
 
-        relleno = tk.Frame(left, bg=PANEL)
-        relleno.pack(fill="both", expand=True)
+        sistema = tk.Frame(left, bg=PANEL)
+        sistema.pack(side="bottom", fill="x", pady=(0, 8))
 
-        seccion("Sistema")
-        entrada("salud", "Salud", self.open_health)
-        entrada("llaves", "Llaves y recuperación", self.open_keys)
-        entrada("registro", "Registro", self.open_audit)
-        entrada("guia", "Guía", self.open_guide)
-        entrada("ajustes", "Ajustes", self.open_settings)
+        def seccion_sistema(titulo: str) -> None:
+            tk.Label(sistema, text=titulo.upper(), fg=FAINT, font=self.f_small,
+                     bg=PANEL, anchor="w").pack(fill="x", padx=14, pady=(6, 2))
+
+        def entrada_sistema(clave: str, texto: str, comando) -> None:
+            fila = tk.Frame(sistema, bg=PANEL)
+            fila.pack(fill="x", padx=12, pady=1)
+            b = self._text_btn(fila, texto, comando, alinear="w")
+            b.pack(side="left", fill="x", expand=True)
+            self.nav_btns[clave] = b
+
+        seccion_sistema("Sistema")
+        entrada_sistema("salud", "Salud", self.open_health)
+        entrada_sistema("llaves", "Llaves y recuperación", self.open_keys)
+        entrada_sistema("registro", "Registro", self.open_audit)
+        entrada_sistema("guia", "Guía", self.open_guide)
+        entrada_sistema("ajustes", "Ajustes", self.open_settings)
 
         lista_col = tk.Frame(body, bg=PANEL, width=SIZES["list"])
         lista_col.pack(side="left", fill="y", padx=(12, 0))
@@ -456,12 +474,13 @@ class CofreGUI:
         self._btn(wrow4, "Copiar la llave (reserva)",
                   lambda e: self.wizard_backup(event=e)).pack(side="left", padx=4)
 
-        self.detail_name = tk.Label(right, text="sin seleccion", fg=FG,
+        self.detail_name = tk.Label(right, text="sin selección", fg=FG,
                                     font=self.f_h2, bg=PANEL2)
         self.detail_name.pack(anchor="w", padx=16, pady=(12, 4))
         self.meta_var = tk.StringVar(value="selecciona un secreto de la lista")
-        tk.Label(right, textvariable=self.meta_var, fg=MUT, font=self.f_sub,
-                 bg=PANEL2).pack(anchor="w", padx=16, pady=(0, 8))
+        self.meta_label = tk.Label(right, textvariable=self.meta_var, fg=MUT,
+                                   font=self.f_sub, bg=PANEL2)
+        self.meta_label.pack(anchor="w", padx=16, pady=(0, 8))
 
         # E5: chips de estado bajo el nombre
         self.chips_row = tk.Frame(right, bg=PANEL2)
@@ -571,27 +590,24 @@ class CofreGUI:
                  bg=PANEL2, font=self.f_sub).pack(pady=(6, 10))
         self._btn(centro_vacio, "Nuevo secreto", self._focus_new,
                   accent=True).pack()
-        self._detail_piezas = [self.chips_row, self.valor_label, self.campo_valor,
-                               self.sites_box, self.consumers_box, self.life_box,
-                               acciones, self.cab_sitios, self.fila_info]
+        self._detail_piezas = [self.detail_name, self.meta_label, self.chips_row,
+                               self.valor_label, self.campo_valor, self.sites_box,
+                               self.consumers_box, self.life_box, acciones,
+                               self.cab_sitios, self.fila_info]
         self._update_detail_visible()
 
         # ---------- pie ----------
         foot = tk.Frame(self.root, bg=PANEL)
         foot.pack(fill="x")
         tk.Frame(foot, bg=LINE, height=1).pack(fill="x")
-        self.foot_var = tk.StringVar(
-            value="El pendrive GUARDA la clave (32 bytes en COFRE.KEY), no la deriva. "
-                  "Sin pendrive el cofre no se abre. Cada accion queda en "
-                  ".cofre-audit.jsonl, firmado (el nombre, nunca el valor).")
+        self.foot_var = tk.StringVar(value="listo")
         footrow = tk.Frame(foot, bg=PANEL)
         footrow.pack(fill="x", padx=16, pady=6)
         tk.Label(footrow, textvariable=self.foot_var, fg=MUT, font=self.f_small,
                  bg=PANEL, anchor="w", justify="left",
                  wraplength=640).pack(side="left", fill="x", expand=True)
-        self.browser_btn = self._btn(footrow, "Navegador: off",
-                                     lambda _e: self.toggle_browser())
-        self.browser_btn.pack(side="right", padx=(SM, 0))
+        # el interruptor del navegador vive en Ajustes; en el pie solo avisos
+        self.browser_btn = None
         # Guia, Registro y ajustes viven en la columna izquierda; en el pie solo
         # queda el interruptor del navegador y los avisos breves.
 
@@ -658,6 +674,20 @@ class CofreGUI:
             serial = volume_serial(drive)
             if serial is not None:
                 present[str(serial)] = drive
+        # si la sesion se abrio con una ruta explicita (--stick), esa llave
+        # cuenta como presente mientras el fichero exista. Sin esto, el
+        # auto-bloqueo por pendrive retirado dispara con llaves fuera de un
+        # volumen con COFRE.KEY (pruebas, sobres de recuperacion).
+        if getattr(self, "stick", None):
+            try:
+                from pathlib import Path as _P
+                llave = _P(self.stick)
+                if llave.is_file():
+                    serial = volume_serial(str(llave.resolve())[:3])
+                    if serial is not None:
+                        present.setdefault(str(serial), str(llave.resolve())[:3])
+            except Exception:
+                pass
         out = []
         for i, s in enumerate(sticks):
             serial = str(s.get("serial"))
@@ -775,7 +805,7 @@ class CofreGUI:
         if self.gate == "usb-pin":
             self.pin_var.set("")
         self.hide()
-        self.detail_name.configure(text="sin seleccion")
+        self.detail_name.configure(text="sin selección")
         self.meta_var.set("cofre bloqueado")
         self.selected = None
         self.refresh_list()
@@ -814,16 +844,17 @@ class CofreGUI:
         self._names = names
         if self.selected not in names:
             self.selected = None
-            self.detail_name.configure(text="sin seleccion")
+            self.detail_name.configure(text="sin selección")
             self.meta_var.set("selecciona un secreto de la lista")
         self._refresh_actions()
         self._update_detail_visible()
+        self._refresh_nav_counts()
         self.count_var.set(f"{len(names)} entrada(s)")
         if not names:
             empty = tk.Frame(self.list_frame, bg=PANEL)
             empty.pack(fill="x", pady=LG)
-            texto_vacio = ("Todavia no hay secretos" if not self.vault.names()
-                           else "Ninguno coincide con la busqueda")
+            texto_vacio = ("Todavía no hay secretos" if not self.vault.names()
+                           else "Ninguno coincide con la búsqueda")
             if self.filtro == "papelera":
                 texto_vacio = "La papelera esta vacia (todavia no existe)"
             elif self.filtro not in ("todos",) and self.vault.names():
@@ -839,33 +870,33 @@ class CofreGUI:
                           accent=True).pack(anchor="w")
             return
         for n in names:
-            sel = (n == self.selected)
-            rowbg = PANEL2 if sel else PANEL
-            outer = tk.Frame(self.list_frame, bg=rowbg)
-            outer.pack(fill="x", pady=1)
-            bar = tk.Frame(outer, bg=ACC if sel else rowbg, width=3)
-            bar.pack(side="left", fill="y")
-            lab = tk.Label(outer, text=n, fg=FG, font=self.f_body, bg=rowbg,
-                           anchor="w", height=1)
-            lab.pack(side="left", fill="x", expand=True, padx=(SM, SM), pady=SM)
-            kind = tk.Label(outer, text=self._kind_of(n), fg=FAINT, font=self.f_small,
-                            bg=rowbg)
-            kind.pack(side="right", padx=(0, SM))
-
-            def _hover(_e, w=(outer, lab, kind)):
+            meta = self.vault.meta(n) or {}
+            proveedor = str(meta.get("provider") or "")
+            try:
+                sitio = (self.vault.urls(n) or [""])[0]
+            except Exception:
+                sitio = ""
+            sub = " · ".join(p for p in (proveedor or self._kind_of(n), sitio) if p)
+            chip = self._chip_de(n, meta)
+            fila = tk.Frame(self.list_frame, bg=PANEL)
+            fila.pack(fill="x", pady=1)
+            L = None
+            try:
+                from cofre import widgets as W
+                L = W.ListRow(fila, n, sub, inicial=(proveedor or n)[:1].upper(),
+                              chip=chip, on_click=lambda _t, name=n: self._click_row(name),
+                              bg=PANEL)
+            except Exception:
+                L = None
+            if L is None:
+                lab = tk.Label(fila, text=n, fg=FG, font=self.f_body, bg=PANEL,
+                               anchor="w")
+                lab.pack(fill="x", padx=SM, pady=SM)
+                lab.bind("<Button-1>", lambda _e, name=n: self._click_row(name))
+            else:
+                L.pack(fill="x")
                 if n == self.selected:
-                    return
-                for x in w:
-                    x.configure(bg=LINE)
-            def _unhover(_e, w=(outer, lab, kind)):
-                if n == self.selected:
-                    return
-                for x in w:
-                    x.configure(bg=PANEL)
-            for widget in (outer, lab, kind):
-                widget.bind("<Button-1>", lambda _e, name=n: self._click_row(name))
-                widget.bind("<Enter>", _hover)
-                widget.bind("<Leave>", _unhover)
+                    L.set_seleccionada(True)
 
     def _click_row(self, name: str) -> None:
         """Seleccionar con el raton y dejar el foco donde Ctrl+C si copia."""
@@ -874,6 +905,42 @@ class CofreGUI:
             self.list_frame.focus_set()
         except Exception:
             pass
+
+    def _refresh_nav_counts(self) -> None:
+        """Contadores de la navegacion: cuantos secretos caen en cada vista."""
+        try:
+            todos = self.vault.names()
+        except Exception:
+            return
+        metas = {n: (self.vault.meta(n) or {}) for n in todos}
+        cuentas = {
+            "todos": len(todos),
+            "password": sum(1 for m in metas.values() if m.get("type") == "password"),
+            "api": sum(1 for m in metas.values()
+                       if m.get("type") in ("api_key", "api_token", "oauth_app", "private_key")),
+            "note": sum(1 for m in metas.values() if m.get("type") == "note"),
+            "atencion": sum(1 for n, m in metas.items() if self._necesita_atencion(n, m)),
+            "rotacion": sum(1 for m in metas.values() if self._rotacion_pendiente(m)),
+            "caducan": sum(1 for m in metas.values() if self._caduca_pronto(m)),
+            "papelera": 0,
+        }
+        for clave, etiqueta in getattr(self, "nav_counts", {}).items():
+            valor = cuentas.get(clave, 0)
+            etiqueta.configure(text=str(valor) if valor else "",
+                               fg=WARN if clave == "atencion" and valor else FAINT)
+
+    def _chip_de(self, nombre: str, meta: dict) -> tuple[str, str] | None:
+        """Etiqueta de estado de la fila: caduca, rotar, sin sitio."""
+        if self._caduca_pronto(meta):
+            return (f"caduca {str(meta.get('expires_at'))[:10]}", "rot")
+        if self._rotacion_pendiente(meta):
+            return ("rotar", "rot")
+        try:
+            if not self.vault.urls(nombre) and str(meta.get("type")) != "note":
+                return ("sin sitio", "warn")
+        except Exception:
+            pass
+        return ("abierto", "ok")
 
     def _kind_of(self, name: str) -> str:
         """Etiqueta corta a la derecha de la fila, sin llamar al cifrado."""
@@ -884,7 +951,7 @@ class CofreGUI:
         if any(k in low for k in ("api", "key", "token", "secret", "hec")):
             return "clave"
         if any(k in low for k in ("pass", "pwd", "contras")):
-            return "contrasena"
+            return "contraseña"
         return ""
 
     def _focus_new(self, event=None):
@@ -953,7 +1020,7 @@ class CofreGUI:
                 self.bridge = None
                 return
             self.browser_on = True
-            self.browser_btn.label.configure(text="Navegador: on (tcp)", fg=OK)
+            self.set_foot("navegador conectado por TCP (respaldo)")
             record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
             self.set_foot(f"navegador conectado en {self.bridge.origin} "
                           "(solo mientras el cofre este abierto)")
@@ -979,7 +1046,7 @@ class CofreGUI:
             self.bridge_ctl = None
             return
         self.browser_on = True
-        self.browser_btn.label.configure(text="Navegador: on", fg=OK)
+        self.set_foot("navegador conectado por tubería local")
         record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
         self.set_foot("navegador conectado por tuberia local "
                       "(solo mientras el cofre este abierto)")
@@ -1009,7 +1076,7 @@ class CofreGUI:
                 pass
             self.bridge_ctl = None
         self.browser_on = False
-        self.browser_btn.label.configure(text="Navegador: off", fg=FG)
+        self.set_foot("navegador desconectado")
 
     def _current_salt(self) -> bytes | None:
         """La sal del cofre, para guardarla dentro de cofre.json (H9)."""
@@ -1063,6 +1130,13 @@ class CofreGUI:
         self.copy_to_clipboard()
 
     def _on_close(self) -> None:
+        # cerrar la ventana es otro camino de bloqueo: se firma antes de soltar
+        # la clave, igual que el resto
+        if self.session:
+            try:
+                self.lock(motivo="se cerro la ventana", detalle="cerrar ventana")
+            except Exception:
+                pass
         self.stop_bridge()
         self.root.destroy()
 
@@ -1088,12 +1162,20 @@ class CofreGUI:
             self.wizard_msg.set(
                 "No hay COFRE.KEY en ningun volumen. Conecta el pendrive y "
                 "pulsa 'Crear llave' (se escriben 32 bytes aleatorios en el USB).")
-            self.wizard.pack(fill="x", padx=16, pady=(12, 4), before=self.detail_name)
+            if self.detail_name.winfo_manager():
+                self.wizard.pack(fill="x", padx=16, pady=(12, 4),
+                                 before=self.detail_name)
+            else:
+                self.wizard.pack(fill="x", padx=16, pady=(12, 4))
         elif st == "key-no-vault":
             self.wizard_msg.set(
                 f"La llave esta en {', '.join(drives)} pero el cofre no esta "
                 "inicializado. Pulsa 'Inicializar cofre'.")
-            self.wizard.pack(fill="x", padx=16, pady=(12, 4), before=self.detail_name)
+            if self.detail_name.winfo_manager():
+                self.wizard.pack(fill="x", padx=16, pady=(12, 4),
+                                 before=self.detail_name)
+            else:
+                self.wizard.pack(fill="x", padx=16, pady=(12, 4))
         else:
             self.wizard.pack_forget()
 
@@ -1262,7 +1344,8 @@ class CofreGUI:
                          if s["serial"] == str(self.serial)), None)
             if used is not None and not used["connected"]:
                 label = f"{used['drive']} ({used['role']})"
-                self.lock()
+                self.lock(motivo=f"se quito el pendrive {label}",
+                          detalle="pendrive retirado")
                 self.set_status(f"bloqueado: se quito el pendrive {label}", warn=True)
                 self.set_foot(f"se retiro el pendrive {label}: el cofre se ha bloqueado "
                               "solo. Conecta cualquier pendrive del cofre y pulsa Reconectar.")
@@ -1477,6 +1560,15 @@ class CofreGUI:
         ]) + chr(10)
         texto.insert("end", ajustes)
         texto.configure(state="disabled")
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=12, pady=(0, 8))
+        estado_nav = "conectado" if self.browser_on else "desconectado"
+        tk.Label(fila, text=f"navegador: {estado_nav}", fg=MUT, bg=PANEL,
+                 font=self.f_small).pack(side="left")
+        etiqueta = "Desconectar navegador" if self.browser_on else "Conectar navegador"
+        self._btn(fila, etiqueta, lambda e: (self.toggle_browser(), win.destroy())
+                  ).pack(side="right")
         self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
 
     def open_audit(self, event=None) -> None:
@@ -2111,7 +2203,7 @@ class CofreGUI:
         self.set_foot("borrado" if ok else "no existe")
         if ok:
             self.selected = None
-            self.detail_name.configure(text="sin seleccion")
+            self.detail_name.configure(text="sin selección")
             self.meta_var.set("")
             self.value_box.delete("1.0", "end")
         self.refresh_list()
