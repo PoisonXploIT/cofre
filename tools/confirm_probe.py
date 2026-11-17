@@ -37,8 +37,18 @@ def main() -> int:
     # 1 y 2: timeout corto, sin tocar nada
     dlg = ConfirmDialog(root, "Navegador - dash.cloudflare.com",
                         "CLOUDFLARE_DNS_TOKEN", timeout_ms=600)
-    textos = [w.cget("text") for w in dlg.win.winfo_children()
-              if isinstance(w, tk.Label)]
+    def recoger(widget, salida):
+        for hijo in widget.winfo_children():
+            try:
+                t = hijo.cget("text")
+                if t:
+                    salida.append(str(t))
+            except Exception:
+                pass
+            recoger(hijo, salida)
+        return salida
+
+    textos = recoger(dlg.win, [])
     check("1. muestra quien pide", any("dash.cloudflare.com" in t for t in textos),
           textos[1] if len(textos) > 1 else "")
     check("1b. muestra que pide", any("CLOUDFLARE_DNS_TOKEN" in t for t in textos), "")
@@ -48,21 +58,25 @@ def main() -> int:
     check("2. se cierra solo y deniega", resultado == "deny",
           f"{resultado} tras {time.time() - inicio:.1f}s")
 
+    # 2b: la cuenta atras se ve en el texto
+    dlg_t = ConfirmDialog(root, "Tu - Copiar", "SIMULACRO_RESTAURA", timeout_ms=2500)
+    check("2b. ensena la cuenta atras", "se deniega en" in dlg_t.msg.cget("text"),
+          dlg_t.msg.cget("text"))
+    check("2c. Denegar es la accion con acento",
+          dlg_t.b_deny.kind == "primary", dlg_t.b_deny.kind)
+    dlg_t._close("deny")   # ya destruida: no se llama a wait()
+
     # 3: el retardo de 700 ms impide autorizar con un clic que iba a otra parte
     dlg2 = ConfirmDialog(root, "Tu - Copiar", "SIMULACRO_RESTAURA", timeout_ms=4000)
     check("3. Permitir empieza deshabilitado",
-          str(dlg2.b_once.cget("state")) == "disabled"
-          and str(dlg2.b_grant.cget("state")) == "disabled",
-          f"once={dlg2.b_once.cget('state')} grant={dlg2.b_grant.cget('state')}")
+          dlg2.b_once._estado == "disabled" and dlg2.b_grant._estado == "disabled",
+          f"once={dlg2.b_once._estado} grant={dlg2.b_grant._estado}")
 
     def pulsar(objetivo):
         def _p():
-            for w in dlg2.win.winfo_children():
-                if isinstance(w, tk.Frame):
-                    for b in w.winfo_children():
-                        if isinstance(b, tk.Button) and "una vez" in str(b.cget("text")):
-                            b.invoke()
-                            return
+            # el boton es un widget propio: se pulsa por su metodo
+            if objetivo == "once":
+                dlg2.b_once.invoke()
         return _p
 
     dlg2.win.after(200, pulsar("once"))     # demasiado pronto: no debe hacer nada
