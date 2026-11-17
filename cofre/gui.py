@@ -371,13 +371,44 @@ class CofreGUI:
         tk.Label(right, textvariable=self.meta_var, fg=MUT, font=self.f_sub,
                  bg=PANEL2).pack(anchor="w", padx=16, pady=(0, 8))
 
-        self.value_box = tk.Text(right, height=3, bg=PANEL, fg=MUT, font=self.f_mono,
+        # E5: chips de estado bajo el nombre
+        self.chips_row = tk.Frame(right, bg=PANEL2)
+        self.chips_row.pack(fill="x", padx=16, pady=(0, 6))
+
+        tk.Label(right, text="valor", fg=MUT, font=self.f_small,
+                 bg=PANEL2, anchor="w").pack(fill="x", padx=16)
+        self.value_box = tk.Text(right, height=2, bg=PANEL, fg=MUT, font=self.f_mono,
                                  relief="flat", borderwidth=0,
                                  highlightbackground=LINE, highlightthickness=1,
                                  wrap="word")
-        self.value_box.pack(fill="x", padx=16, pady=8)
+        self.value_box.pack(fill="x", padx=16, pady=(2, 4))
         self.value_box.insert("1.0", MASK)
         self.value_box.configure(fg=MUT)
+
+        # E5: sitios asignados (dominios donde se puede rellenar)
+        cab_sitios = tk.Frame(right, bg=PANEL2)
+        cab_sitios.pack(fill="x", padx=16, pady=(6, 0))
+        tk.Label(cab_sitios, text="Sitios donde se puede rellenar", fg=FG,
+                 font=self.f_sub, bg=PANEL2).pack(side="left")
+        self._btn(cab_sitios, "Asignar sitio", self.assign_site).pack(side="right")
+        self.sites_box = tk.Frame(right, bg=PANEL2)
+        self.sites_box.pack(fill="x", padx=16, pady=(2, 6))
+
+        # E5: usado en (consumidores) y ciclo de vida
+        fila_info = tk.Frame(right, bg=PANEL2)
+        fila_info.pack(fill="x", padx=16, pady=(0, 8))
+        col_uso = tk.Frame(fila_info, bg=PANEL2)
+        col_uso.pack(side="left", fill="both", expand=True)
+        tk.Label(col_uso, text="Usado en", fg=FG, font=self.f_sub,
+                 bg=PANEL2, anchor="w").pack(fill="x")
+        self.consumers_box = tk.Frame(col_uso, bg=PANEL2)
+        self.consumers_box.pack(fill="x")
+        col_vida = tk.Frame(fila_info, bg=PANEL2)
+        col_vida.pack(side="left", fill="both", expand=True, padx=(12, 0))
+        tk.Label(col_vida, text="Ciclo de vida", fg=FG, font=self.f_sub,
+                 bg=PANEL2, anchor="w").pack(fill="x")
+        self.life_box = tk.Frame(col_vida, bg=PANEL2)
+        self.life_box.pack(fill="x")
 
         # Dos filas, no una. Regla medida: con etiquetas largas, nueve botones
         # en una fila no caben ni a 980 px (los ultimos quedaban con ancho 1).
@@ -1537,6 +1568,155 @@ class CofreGUI:
         self.meta_var.set(meta)
         self.value_box.delete("1.0", "end")
         self.value_box.insert("1.0", MASK)
+        self.refresh_detail()
+
+    # ---------- detalle (E5) ----------
+
+    def refresh_detail(self) -> None:
+        """Chips, sitios, consumidores y ciclo de vida del secreto elegido."""
+        for caja in (self.chips_row, self.sites_box, self.consumers_box, self.life_box):
+            for w in caja.winfo_children():
+                w.destroy()
+        if not self.selected or not self.session:
+            return
+        try:
+            meta = dict(self.vault.meta(self.selected) or {})
+            sitios = self.vault.urls(self.selected)
+        except Exception:
+            return
+
+        tipo = str(meta.get("type") or "api_key")
+        from cofre import policy as _policy
+        pol = _policy.effective(meta)
+        etiquetas = [(tipo, "neutral")]
+        if sitios:
+            etiquetas.append(("sitio asignado", "ok"))
+        else:
+            etiquetas.append(("sin sitio", "warn"))
+        if pol.get("confirm"):
+            etiquetas.append(("pide confirmacion", "rot"))
+        if not pol.get("browser"):
+            etiquetas.append(("no sale al navegador", "neutral"))
+        caduca = str(meta.get("expires_at") or "")
+        if caduca:
+            etiquetas.append((f"caduca {caduca}", "rot"))
+        for texto, kind in etiquetas:
+            self._chip(self.chips_row, texto, kind).pack(side="left", padx=(0, 6))
+
+        if not sitios:
+            tk.Label(self.sites_box, text="ninguno: este secreto no se rellena en ninguna web",
+                     fg=FAINT, font=self.f_small, bg=PANEL2, anchor="w").pack(fill="x")
+        for sitio in sitios:
+            fila = tk.Frame(self.sites_box, bg=PANEL2)
+            fila.pack(fill="x", pady=1)
+            tk.Label(fila, text=sitio, fg=FG, font=self.f_mono, bg=PANEL2,
+                     anchor="w").pack(side="left")
+            self._btn(fila, "Quitar",
+                      lambda s=sitio: self.remove_site(s)).pack(side="right")
+
+        consumidores = list(meta.get("consumers") or [])
+        if not consumidores:
+            tk.Label(self.consumers_box, text="nada desplegado", fg=FAINT,
+                     font=self.f_small, bg=PANEL2, anchor="w").pack(fill="x")
+        for c in consumidores:
+            tk.Label(self.consumers_box, text=str(c), fg=MUT, font=self.f_small,
+                     bg=PANEL2, anchor="w").pack(fill="x")
+
+        lineas = []
+        if meta.get("provider"):
+            lineas.append(f"proveedor: {meta['provider']}")
+        if caduca:
+            lineas.append(f"caduca: {caduca}")
+        if meta.get("rotate_every_days"):
+            lineas.append(f"rotar cada {meta['rotate_every_days']} dias")
+        if meta.get("last_rotated"):
+            lineas.append(f"ultima rotacion: {meta['last_rotated']}")
+        if not lineas:
+            lineas.append("sin datos de ciclo de vida")
+        for linea in lineas:
+            tk.Label(self.life_box, text=linea, fg=MUT, font=self.f_small,
+                     bg=PANEL2, anchor="w").pack(fill="x")
+
+    def _chip(self, parent, texto: str, kind: str):
+        """Chip pequeno sin depender del rediseño completo (E2 lo sustituye)."""
+        color = {"ok": OK, "warn": WARN, "rot": ACC2 if False else WARN,
+                 "neutral": MUT}.get(kind, MUT)
+        return tk.Label(parent, text=texto, fg=color, bg=PANEL,
+                        font=self.f_small, padx=6, pady=1)
+
+    def assign_site(self) -> None:
+        """Asignar un dominio a ESTE secreto. Pasa por confirmacion."""
+        if not self.selected or not self.session:
+            self.set_foot("selecciona un secreto con el cofre abierto")
+            return
+        from cofre.hosts import HostsError, clean_host
+        valor = self._ask_text("Asignar un sitio",
+                               f"Dominio donde se puede rellenar '{self.selected}'",
+                               "ejemplo.com")
+        if not valor:
+            return
+        try:
+            host = clean_host(valor)
+        except HostsError as exc:
+            self.set_foot(f"dominio invalido: {exc}")
+            return
+        if self.request_confirm(f"Tu - asignar sitio", self.selected) == "deny":
+            self.set_foot("asignacion cancelada")
+            return
+        try:
+            actuales = list(self.vault.urls(self.selected))
+            if host not in actuales:
+                actuales.append(host)
+            self.vault.set_urls(self.selected, actuales)
+        except Exception as exc:                     # noqa: BLE001
+            self.set_foot(f"no se pudo asignar: {exc}")
+            return
+        record(self.vault_path, "host-assign", self.gate, self.serial,
+               name=self.selected, ok=True, detail=host)
+        self.set_foot(f"'{host}' asignado a {self.selected}")
+        self.refresh_detail()
+
+    def remove_site(self, host: str) -> None:
+        if not self.selected or not self.session:
+            return
+        try:
+            actuales = [h for h in self.vault.urls(self.selected) if h != host]
+            self.vault.set_urls(self.selected, actuales)
+        except Exception as exc:                     # noqa: BLE001
+            self.set_foot(f"no se pudo quitar: {exc}")
+            return
+        record(self.vault_path, "host-assign", self.gate, self.serial,
+               name=self.selected, ok=True, detail=f"quitar {host}")
+        self.set_foot(f"'{host}' ya no esta asignado a {self.selected}")
+        self.refresh_detail()
+
+    def _ask_text(self, titulo: str, etiqueta: str, ejemplo: str = "") -> str:
+        """Hoja minima de una linea. Devuelve '' si se cancela."""
+        from cofre.widgets import Field
+        win = self._sheet(titulo)
+        win.geometry("460x180")
+        tk.Label(win, text=etiqueta, fg=FG, bg=PANEL, font=self.f_sub,
+                 anchor="w", wraplength=420, justify="left").pack(
+            fill="x", padx=16, pady=(14, 6))
+        campo = Field(win, placeholder=ejemplo, width=420, bg=PANEL)
+        campo.pack(anchor="w", padx=16)
+        if ejemplo:
+            campo.set("")
+        salida = {"valor": ""}
+
+        def aceptar():
+            salida["valor"] = campo.get().strip()
+            win.destroy()
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=16, pady=10)
+        self._btn(fila, "Cancelar", win.destroy).pack(side="right")
+        self._btn(fila, "Guardar", aceptar, accent=True).pack(side="right", padx=8)
+        win.bind("<Return>", lambda _e: aceptar())
+        win.bind("<Escape>", lambda _e: win.destroy())
+        campo.focus()
+        self.root.wait_window(win)
+        return salida["valor"]
 
     # ---------- acciones ----------
 

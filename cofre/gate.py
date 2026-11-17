@@ -68,12 +68,27 @@ def pin_session_key(pin: str, salt: bytes) -> bytes:
     return _scrypt(pin, salt)
 
 
+def _es_v2(vault_path: str) -> bool:
+    """El cofre v2 no usa la sal suelta: cada ranura tiene la suya."""
+    try:
+        import json
+        with open(vault_path, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("format") == 2
+    except Exception:
+        return False
+
+
 def _salt_for(vault_path: str) -> bytes:
     """H5 y H9: una sola ruta para sacar la sal, y nunca se inventa en silencio.
 
     Se crea solo si el cofre aun no existe (init). Si el cofre existe y la sal
     no esta, se aborta: regenerarla deja el cofre cerrado para siempre.
     """
+    if _es_v2(vault_path):
+        # En v2 la sesion de v1 no se usa para descifrar: el material de la
+        # llave va aparte (gate.material_for). Se devuelve una sal fija para no
+        # exigir un fichero que v2 no tiene.
+        return b"cofre-v2-sin-sal"
     try:
         return get_salt(vault_path, create=not Path(vault_path).exists())
     except (SaltMissing, SaltMismatch) as exc:

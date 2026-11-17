@@ -16,8 +16,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from cofre.gui import CofreGUI
-from cofre.paths import default_vault
 from cofre.theme import dark_titlebar, enable_dpi_awareness
+from tmpvault import cofre_temporal
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -29,7 +29,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def main() -> int:
     enable_dpi_awareness()
-    app = CofreGUI(str(default_vault()), "usb")
+    vault, llave, tmp = cofre_temporal()
+    app = CofreGUI(str(vault), "usb", stick=str(llave))
     dark_titlebar(app.root)
     app.build()
     app.root.update()
@@ -79,6 +80,8 @@ def main() -> int:
     check("8. captura de la pantalla de bloqueo", salida.exists(), str(salida))
 
     app.root.destroy()
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
     fallos = [r for r in RESULTS if not r[1]]
     print("")
     print(f"{len(RESULTS) - len(fallos)}/{len(RESULTS)} comprobaciones OK")
