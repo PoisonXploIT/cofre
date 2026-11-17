@@ -1,7 +1,7 @@
 """COFRE - widgets propios del rediseño «grafito y latón» (E2).
 
 Nota de ubicacion: el plan decia `cofre/gui/widgets.py`, pero `cofre/gui.py` es
-un modulo, no un paquete, asi que el paquete `cofre.gui` no existe. Se deja en
+un modulo, no un paquete, así que el paquete `cofre.gui` no existe. Se deja en
 `cofre/widgets.py` para no trocear gui.py a mitad del rediseño.
 
 Tkinter no tiene esquinas redondeadas ni estados decentes por defecto. En vez de

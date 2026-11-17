@@ -5,7 +5,7 @@ con lo necesario y por tipo:
 
   nombre · tipo · valor · etiquetas · sitios donde se puede rellenar
 
-Generadores y fortaleza viven aqui, no en la ventana principal. Esc cancela,
+Generadores y fortaleza viven aquí, no en la ventana principal. Esc cancela,
 Ctrl+Enter guarda. No cambia ninguna regla de seguridad: escribe con
 `vault.add` y `vault.set_urls`, los mismos metodos que antes.
 """

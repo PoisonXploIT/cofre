@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Cofre - boveda de secretos con gate de pendrive USB.
+"""Cofre - bóveda de secretos con gate de pendrive USB.
 
 Uso:
   python -m cofre.cli gui                     # ventana grafica (Tkinter)
@@ -56,7 +56,7 @@ DEFAULT_VAULT = default_vault()
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Cofre - boveda de secretos")
+    p = argparse.ArgumentParser(description="Cofre - bóveda de secretos")
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     p.add_argument("--gate", default="usb", choices=["pin", "hid", "usb", "usb-pin"])
     p.add_argument("--stick", help="ruta explicita del fichero clave del USB")
@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     mta.add_argument("--consumer", action="append", default=[])
     mta.add_argument("--type", dest="kind", default="")
     mta.add_argument("--admin", action="store_true",
-                     help="marcar como token de administracion (pide confirmacion)")
+                     help="marcar como token de administracion (pide confirmación)")
 
     rt = with_common(sub.add_parser("rotate", help="rotar un token de un proveedor"))
     rt.add_argument("name")
@@ -341,7 +341,7 @@ def cmd_shell(vault_path: str, gate: str, stick: str | None, allow_new: bool) ->
                 record(vault_path, "gen", gate, serial)
             elif cmd == "export":
                 print("export vuelca los secretos a pantalla: no lo uses en una")
-                print("sesion compartida ni con capturas de pantalla activas.")
+                print("sesión compartida ni con capturas de pantalla activas.")
                 for n in vault.names():
                     print(f"{n}={vault.get(session, n)}")
                 record(vault_path, "export", gate, serial, name="todos")
@@ -358,7 +358,7 @@ def prepare_audit(vault_path, gate: str, stick: str | None, allow_new: bool):
     """Deja el cofre ligado a la llave y el log firmando.
 
     Cualquier comando que escriba un evento privilegiado (rotate, meta, log,
-    alerts...) tiene que pasar por aqui ANTES de registrar nada: si no, la linea
+    alerts...) tiene que pasar por aquí ANTES de registrar nada: si no, la linea
     sale sin firma y verify la marca como manipulacion. Paso tres veces.
     """
     from cofre.audit import bind_store, set_key as _set_key
@@ -423,7 +423,7 @@ def main(argv: list[str]) -> int:
             pass
         if args.reanchor:
             # Re-anclar tapa lineas anteriores: solo lo hace el usuario, a mano y
-            # con confirmacion. Nunca como parte de un arreglo de codigo.
+            # con confirmación. Nunca como parte de un arreglo de código.
             if not args.motivo.strip():
                 print("hace falta --motivo: por que se re-ancla", file=sys.stderr)
                 return 1
@@ -515,7 +515,7 @@ def main(argv: list[str]) -> int:
         try:
             vault.unlock(session)
         except Exception:
-            print("la clave de sesion no corresponde a este cofre", file=sys.stderr)
+            print("la clave de sesión no corresponde a este cofre", file=sys.stderr)
             return 1
         existing = set(vault.names())
         missing = []
@@ -828,7 +828,7 @@ def main(argv: list[str]) -> int:
         print("backup completo:", res["backup"])
         print("")
         print("CODIGO DE RECUPERACION (se muestra UNA sola vez, apuntalo en papel):")
-        print("  " + res["codigo"])
+        print("  " + res["código"])
         record(str(path), "migrate", args.gate, serial, name=f"{len(res['entradas'])} secretos", ok=True)
         return 0
 
@@ -973,7 +973,7 @@ def main(argv: list[str]) -> int:
     if args.command == "stick-register":
         # R2 (2026-11-16): registrar un serial sin comprobar la llave crea falsos
         # sobres de recuperacion. Antes de autorizar nada, la llave de ese
-        # pendrive tiene que abrir ESTE cofre. Se comprueba aqui, no de memoria.
+        # pendrive tiene que abrir ESTE cofre. Se comprueba aquí, no de memoria.
         target = Path(args.path)
         if not target.is_file():
             print("no existe %s" % target)
@@ -1089,10 +1089,10 @@ def main(argv: list[str]) -> int:
             try:
                 vault.unlock(session)
             except Exception:
-                print("la clave de sesion no corresponde a este cofre: pendrive equivocado "
+                print("la clave de sesión no corresponde a este cofre: pendrive equivocado "
                       "o PIN incorrecto", file=sys.stderr)
                 record(str(vault_path), args.command, args.gate, serial, ok=False,
-                       detail="sesion invalida")
+                       detail="sesión invalida")
                 return 1
 
         try:

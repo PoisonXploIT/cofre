@@ -14,7 +14,7 @@ Lo que aplica:
   - el valor esta oculto; solo un click de raton en "Ver" lo muestra, y se
     oculta solo a los 15 s ("Fijar" evita la auto-ocultacion);
   - Copiar escribe en el portapapeles real de Windows (avisa: cualquier
-    proceso de la sesion puede leerlo);
+    proceso de la sesión puede leerlo);
   - los secretos no se escriben en ningun fichero de la interfaz;
   - cada accion queda en .cofre-access.log (nombre y gate, nunca el valor).
 """
@@ -98,7 +98,7 @@ class CofreGUI:
         self._key_cache: set[str] = set()
 
         self.root = root or tk.Tk()
-        self.root.title("COFRE - boveda de secretos")
+        self.root.title("COFRE - bóveda de secretos")
         self._set_icon()
         self.root.configure(bg=BG)
         self.root.geometry("980x620+30+30")
@@ -184,6 +184,9 @@ class CofreGUI:
             frame._enabled = on
             lab.configure(fg=color if on else FAINT, cursor="hand2" if on else "")
 
+        frame.set_colores = lambda fg, bg: (
+            lab.configure(fg=fg, bg=bg), frame.configure(bg=bg))
+
         frame.set_enabled = set_enabled
         return frame
 
@@ -228,7 +231,7 @@ class CofreGUI:
         """Boton de la ventana principal usando los widgets redondeados (E2).
 
         Se mantiene la API antigua (`label.configure(text=...)`,
-        `set_enabled`, `_enabled`) porque hay codigo que la usa; el widget nuevo
+        `set_enabled`, `_enabled`) porque hay código que la usa; el widget nuevo
         expone `label` como un proxy de texto.
         """
         from cofre import widgets as W
@@ -393,7 +396,7 @@ class CofreGUI:
         entrada_sistema("salud", "Salud", self.open_health)
         entrada_sistema("llaves", "Llaves y recuperación", self.open_keys)
         entrada_sistema("registro", "Registro", self.open_audit)
-        entrada_sistema("guia", "Guía", self.open_guide)
+        entrada_sistema("guía", "Guía", self.open_guide)
         entrada_sistema("ajustes", "Ajustes", self.open_settings)
 
         lista_col = tk.Frame(body, bg=PANEL, width=SIZES["list"])
@@ -408,7 +411,7 @@ class CofreGUI:
         self.list_frame = tk.Frame(lista_col, bg=PANEL)
         self.list_frame.pack(fill="both", expand=True, padx=8)
 
-        # la ayuda larga vive en la hoja Guia (F1), no en la columna
+        # la ayuda larga vive en la hoja Guía (F1), no en la columna
         self.help_box = tk.Frame(left, bg=PANEL2)
 
         # derecha: wizard + detalle + alta
@@ -417,11 +420,29 @@ class CofreGUI:
         right_outer = tk.Frame(body, bg=PANEL2)
         right_outer.pack(side="left", fill="both", expand=True, padx=(16, 0))
         self.canvas = tk.Canvas(right_outer, bg=PANEL2, highlightthickness=0, bd=0)
-        self.vbar = tk.Scrollbar(right_outer, orient="vertical",
-                                 command=self.canvas.yview,
-                                 width=SIZES["scrollbar"], bg=PANEL, troughcolor=BG,
-                                 activebackground=LINE2, relief="flat", bd=0,
-                                 highlightthickness=0)
+        # El tk.Scrollbar nativo ignora los colores en Windows. ttk con tema
+        # clam si los respeta, y el cambio de tema solo afecta a widgets ttk.
+        from tkinter import ttk
+        estilo = ttk.Style(self.root)
+        try:
+            estilo.theme_use("clam")
+        except Exception:
+            pass
+        estilo.layout("Cofre.Vertical.TScrollbar", [
+            ("Vertical.Scrollbar.trough", {
+                "sticky": "ns",
+                "children": [("Vertical.Scrollbar.thumb",
+                              {"expand": 1, "sticky": "nswe"})]})])
+        estilo.configure("Cofre.Vertical.TScrollbar",
+                         troughcolor=PANEL2, background=LINE,
+                         bordercolor=PANEL2, lightcolor=LINE, darkcolor=LINE,
+                         gripcount=0, width=SIZES["scrollbar"])
+        estilo.map("Cofre.Vertical.TScrollbar",
+                   background=[("active", LINE2)])
+        self.vbar = ttk.Scrollbar(right_outer, orient="vertical",
+                                  style="Cofre.Vertical.TScrollbar",
+                                  command=self.canvas.yview)
+        self.vbar_visible = True
         self.canvas.configure(yscrollcommand=self.vbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vbar.pack(side="right", fill="y")
@@ -429,8 +450,17 @@ class CofreGUI:
         self._right_win = self.canvas.create_window((0, 0), window=right, anchor="nw")
 
         def _sync_scroll(_e=None):
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            caja = self.canvas.bbox("all")
+            self.canvas.configure(scrollregion=caja)
             self.canvas.itemconfigure(self._right_win, width=self.canvas.winfo_width())
+            # la barra solo se ve si el contenido no cabe
+            cabe = bool(caja) and (caja[3] - caja[1]) <= self.canvas.winfo_height() + 1
+            if cabe and self.vbar_visible:
+                self.vbar.pack_forget()
+                self.vbar_visible = False
+            elif not cabe and not self.vbar_visible:
+                self.vbar.pack(side="right", fill="y")
+                self.vbar_visible = True
 
         right.bind("<Configure>", _sync_scroll)
         self.canvas.bind("<Configure>", _sync_scroll)
@@ -558,7 +588,7 @@ class CofreGUI:
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
         # E6: el alta vive en una hoja (cofre/entry_sheet.py). Aqui solo quedan
-        # las variables de estado que usan otros sitios del codigo.
+        # las variables de estado que usan otros sitios del código.
         self.name_var = tk.StringVar()
         self.val_var = tk.StringVar()
         self.pin_var = tk.StringVar()
@@ -579,7 +609,7 @@ class CofreGUI:
         # el boton Registro del pie y en la pantalla de registro.
         self.log_labels = []
 
-        # E7: estado vacio del detalle. Sin seleccion no se muestran campos ni
+        # E7: estado vacio del detalle. Sin selección no se muestran campos ni
         # botones grises: solo el mensaje y el boton Nuevo.
         self.empty_detail = tk.Frame(right, bg=PANEL2)
         centro_vacio = tk.Frame(self.empty_detail, bg=PANEL2)
@@ -608,7 +638,7 @@ class CofreGUI:
                  wraplength=640).pack(side="left", fill="x", expand=True)
         # el interruptor del navegador vive en Ajustes; en el pie solo avisos
         self.browser_btn = None
-        # Guia, Registro y ajustes viven en la columna izquierda; en el pie solo
+        # Guía, Registro y ajustes viven en la columna izquierda; en el pie solo
         # queda el interruptor del navegador y los avisos breves.
 
         # Con pythonw no hay consola: si un callback lanza, Tk imprime el
@@ -617,7 +647,7 @@ class CofreGUI:
         self.root.report_callback_exception = self._on_tk_error
 
         # H4: Escape no cierra la aplicacion. Cierra dialogs, desarma la
-        # confirmacion pendiente y, si no hay nada pendiente, bloquea el cofre.
+        # confirmación pendiente y, si no hay nada pendiente, bloquea el cofre.
         # Para cerrar la ventana: la X, Ctrl+Q o el menu del sistema.
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Control-q>", lambda _e: self._on_close())
@@ -674,7 +704,7 @@ class CofreGUI:
             serial = volume_serial(drive)
             if serial is not None:
                 present[str(serial)] = drive
-        # si la sesion se abrio con una ruta explicita (--stick), esa llave
+        # si la sesión se abrio con una ruta explicita (--stick), esa llave
         # cuenta como presente mientras el fichero exista. Sin esto, el
         # auto-bloqueo por pendrive retirado dispara con llaves fuera de un
         # volumen con COFRE.KEY (pruebas, sobres de recuperacion).
@@ -708,7 +738,7 @@ class CofreGUI:
             for d in self.stick_report())
 
     def _bind_material(self) -> None:
-        """v2 necesita la llave del pendrive, no solo la sesion derivada."""
+        """v2 necesita la llave del pendrive, no solo la sesión derivada."""
         if self.vault.is_v2():
             self.vault.bind_material(
                 material_for(self.gate, str(self.vault_path), self.stick, self.allow_new))
@@ -745,7 +775,7 @@ class CofreGUI:
             self.refresh_list()
             return False
 
-        # 2.1: sesion con inactividad y tiempo maximo
+        # 2.1: sesión con inactividad y tiempo maximo
         from cofre.session import Session
         self.session_obj = Session(self._session_settings())
 
@@ -774,14 +804,25 @@ class CofreGUI:
         n = len(self.vault.names())
         if getattr(self, "lock_screen", None):
             self.lock_screen.ocultar()
-        self.set_status(f"abierto  |  llave: {which}  |  {n} secreto(s)", warn=False)
+        if getattr(self, "stick", None):
+            # llave suelta: se avisa, porque el auto-bloqueo por pendrive no
+            # puede funcionar con un fichero que no esta en un volumen
+            self.set_status(f"abierto  |  llave de prueba: fichero  |  {n} secreto(s)",
+                            warn=True)
+            try:
+                record(self.vault_path, "gate-explicit", self.gate, self.serial,
+                       ok=True, detail="stick-explicito")
+            except Exception:
+                pass
+        else:
+            self.set_status(f"abierto  |  llave: {which}  |  {n} secreto(s)", warn=False)
         self.refresh_sticks()
         self.refresh_wizard()
         self.refresh_list()
         return True
 
     def lock(self, event=None, motivo: str | None = None, detalle: str = ""):
-        """Bloquear: se tira la clave de sesion de la RAM. Hace falta el
+        """Bloquear: se tira la clave de sesión de la RAM. Hace falta el
         pendrive otra vez para abrir."""
         try:
             from cofre.audit import stamp_vault
@@ -792,7 +833,7 @@ class CofreGUI:
         # motivo que sea: a mano, por inactividad o por suspension
         self.confirm_grants.clear()
         # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
-        # existe si el cofre estaba abierto. Y si no habia sesion no se escribe
+        # existe si el cofre estaba abierto. Y si no habia sesión no se escribe
         # nada: bloquear un cofre ya cerrado no es un evento.
         if self.session:
             record(self.vault_path, "lock", self.gate, self.serial, ok=True,
@@ -856,7 +897,7 @@ class CofreGUI:
             texto_vacio = ("Todavía no hay secretos" if not self.vault.names()
                            else "Ninguno coincide con la búsqueda")
             if self.filtro == "papelera":
-                texto_vacio = "La papelera esta vacia (todavia no existe)"
+                texto_vacio = "La papelera esta vacia (todavía no existe)"
             elif self.filtro not in ("todos",) and self.vault.names():
                 texto_vacio = "Nada en este filtro"
             tk.Label(empty, text=texto_vacio,
@@ -927,7 +968,7 @@ class CofreGUI:
         for clave, etiqueta in getattr(self, "nav_counts", {}).items():
             valor = cuentas.get(clave, 0)
             etiqueta.configure(text=str(valor) if valor else "",
-                               fg=WARN if clave == "atencion" and valor else FAINT)
+                               fg=WARN if (clave == "atencion" and valor) else FAINT)
 
     def _chip_de(self, nombre: str, meta: dict) -> tuple[str, str] | None:
         """Etiqueta de estado de la fila: caduca, rotar, sin sitio."""
@@ -996,7 +1037,7 @@ class CofreGUI:
         """Puente del navegador. Por defecto, tuberia con nombre (paso 4.0).
 
         La via TCP queda detras de COFRE_BRIDGE=tcp hasta que la tabla 4.0.e
-        lleve unos dias sin fallos.
+        lleve unos días sin fallos.
         """
         import os
 
@@ -1091,7 +1132,7 @@ class CofreGUI:
         if getattr(self, "_confirm_delete", False) or getattr(self, "_confirm_revoke", None):
             self._cancel_delete()
             self._confirm_revoke = None
-            self.set_foot("confirmacion cancelada")
+            self.set_foot("confirmación cancelada")
             return
         if getattr(self, "help_box", None) is not None and self.help_box.winfo_ismapped():
             self.toggle_help()
@@ -1302,7 +1343,7 @@ class CofreGUI:
             pass
 
     def _check_session(self) -> None:
-        """2.1: bloquear si la sesion caduca."""
+        """2.1: bloquear si la sesión caduca."""
         if not self.session or not self.session_obj:
             return
         motivo = self.session_obj.check()
@@ -1337,7 +1378,7 @@ class CofreGUI:
                                       "Reconectar.")
                     else:
                         self.unlock()
-        # Auto-bloqueo: si desaparece el pendrive que abrio la sesion, la llave
+        # Auto-bloqueo: si desaparece el pendrive que abrio la sesión, la llave
         # no debe seguir viva en RAM. Reabrir es un click con el otro pendrive.
         if self.session and self.serial is not None:
             used = next((s for s in self.stick_report()
@@ -1361,7 +1402,7 @@ class CofreGUI:
             i = 0
         self.select(names[(i + delta) % len(names)])
 
-    # ---------- guia de uso ----------
+    # ---------- guía de uso ----------
 
     GUIDE_TITLE = "Como se usa el cofre, paso a paso"
 
@@ -1390,7 +1431,7 @@ class CofreGUI:
         ]),
         ("5. Usarla en un programa", [
             "Pulsa 'Comando exec' y pega en la terminal.",
-            "Queda asi: run.cmd exec --name TAVILY_API_KEY -- python script.py",
+            "Queda así: run.cmd exec --name TAVILY_API_KEY -- python script.py",
             "La clave va dentro de ese proceso, no a ningun fichero.",
             "Cuando el proceso termina, la clave desaparece con el.",
         ]),
@@ -1428,12 +1469,17 @@ class CofreGUI:
         self.alert_band.pack_forget()
 
     def set_filtro(self, clave: str) -> None:
+        """Vista activa con fondo `raised` y texto normal: el laton es solo para
+        la accion principal de la pantalla (Nuevo), no para la navegacion."""
         self.filtro = clave
         for nombre, boton in getattr(self, "nav_btns", {}).items():
             try:
                 activo = nombre == clave
-                boton.label.configure(
-                    fg=ACC if activo else (DANGER if nombre == "papelera" else MUT))
+                fondo = CAMPO if activo else PANEL
+                boton.configure(bg=fondo)
+                boton.label.configure(bg=fondo,
+                                      fg=TEXT if activo else
+                                      (DANGER if nombre == "papelera" else MUT))
             except Exception:
                 pass
         self.refresh_list()
@@ -1500,7 +1546,7 @@ class CofreGUI:
         sin_sitio = sum(1 for n, m in zip(self.vault.names(), meta_todos)
                         if not self.vault.urls(n) and str(m.get("type")) != "note")
         lineas.append(f"sin sitio asignado: {sin_sitio}")
-        lineas.append(f"caducan en 30 dias: "
+        lineas.append(f"caducan en 30 días: "
                       f"{sum(1 for m in meta_todos if self._caduca_pronto(m))}")
         lineas.append(f"rotacion pendiente: "
                       f"{sum(1 for m in meta_todos if self._rotacion_pendiente(m))}")
@@ -1555,7 +1601,7 @@ class CofreGUI:
             f"gate: {self.gate}",
             f"ruta del cofre: {self.vault_path}",
             f"bloqueo por inactividad: {SESION_IDLE} min",
-            f"tiempo maximo de sesion: {SESION_MAX} h",
+            f"tiempo maximo de sesión: {SESION_MAX} h",
             "puente: tuberia con nombre (TCP con COFRE_BRIDGE=tcp)",
         ]) + chr(10)
         texto.insert("end", ajustes)
@@ -1621,7 +1667,7 @@ class CofreGUI:
         texto.pack(side="left", fill="both", expand=True, padx=XS, pady=XS)
 
         lineas = tail_human(self.vault_path, 40)
-        cuerpo = "\n".join(lineas) if lineas else "todavia no hay eventos"
+        cuerpo = "\n".join(lineas) if lineas else "todavía no hay eventos"
         texto.insert("end", cuerpo)
         texto.configure(state="disabled")
 
@@ -1630,8 +1676,8 @@ class CofreGUI:
         self.set_foot(("registro verificado: " if ok else "registro con problemas: ") + detalle)
 
     def open_guide(self, event=None) -> None:
-        """Guia de uso paginada: un paso por pantalla, texto grande, sin tecnicismos."""
-        win = self._sheet("COFRE - guia de uso")
+        """Guía de uso paginada: un paso por pantalla, texto grande, sin tecnicismos."""
+        win = self._sheet("COFRE - guía de uso")
         win.configure(bg=BG)
         win.geometry("620x520+140+90")
         win.minsize(520, 420)
@@ -1750,7 +1796,7 @@ class CofreGUI:
 
     def copy_name(self, event=None) -> None:
         if not self.selected:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         try:
             from cofre.clipboard import copy_text
@@ -1763,7 +1809,7 @@ class CofreGUI:
 
     def copy_exec_command(self, event=None) -> None:
         if not self.selected:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         cmd = f"run.cmd exec --name {self.selected} -- python script.py"
         try:
@@ -1778,7 +1824,7 @@ class CofreGUI:
     def rename_selected(self, event=None) -> None:
         new = self.name_var.get().strip()
         if not self.selected or not self.session:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         if self._is_canary(self.selected):
             self._canary_alert(self.selected, "copiar")
@@ -1806,7 +1852,7 @@ class CofreGUI:
 
     def edit_selected(self, event=None) -> None:
         if not self.selected or not self.session:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         from cofre.entry_sheet import EntrySheet
         self._sheet_nueva = EntrySheet(self, mode="edit", nombre=self.selected)
@@ -1848,7 +1894,7 @@ class CofreGUI:
     # ---------- detalle (E5) ----------
 
     def _update_detail_visible(self) -> None:
-        """Con seleccion, el detalle; sin ella, el estado vacio."""
+        """Con selección, el detalle; sin ella, el estado vacio."""
         hay = bool(self.selected) and bool(self.session)
         piezas = list(getattr(self, "_detail_piezas", []))
         for w in piezas:
@@ -1891,7 +1937,7 @@ class CofreGUI:
         else:
             etiquetas.append(("sin sitio", "warn"))
         if pol.get("confirm"):
-            etiquetas.append(("pide confirmacion", "rot"))
+            etiquetas.append(("pide confirmación", "rot"))
         if not pol.get("browser"):
             etiquetas.append(("no sale al navegador", "neutral"))
         caduca = str(meta.get("expires_at") or "")
@@ -1925,9 +1971,9 @@ class CofreGUI:
         if caduca:
             lineas.append(f"caduca: {caduca}")
         if meta.get("rotate_every_days"):
-            lineas.append(f"rotar cada {meta['rotate_every_days']} dias")
+            lineas.append(f"rotar cada {meta['rotate_every_days']} días")
         if meta.get("last_rotated"):
-            lineas.append(f"ultima rotacion: {meta['last_rotated']}")
+            lineas.append(f"última rotacion: {meta['last_rotated']}")
         if not lineas:
             lineas.append("sin datos de ciclo de vida")
         for linea in lineas:
@@ -1964,7 +2010,7 @@ class CofreGUI:
         self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
 
     def assign_site(self) -> None:
-        """Asignar un dominio a ESTE secreto. Pasa por confirmacion."""
+        """Asignar un dominio a ESTE secreto. Pasa por confirmación."""
         if not self.selected or not self.session:
             self.set_foot("selecciona un secreto con el cofre abierto")
             return
@@ -2042,7 +2088,7 @@ class CofreGUI:
     def reveal(self, event=None):
         # Solo un click de raton real revela. Un script que llame a reveal()
         # sin evento de Tk, o con un evento que no venga del boton, no lo
-        # consigue. No es una barrera contra codigo malicioso con acceso a la
+        # consigue. No es una barrera contra código malicioso con acceso a la
         # maquina: es una barrera contra la revelacion involuntaria o automatizada.
         if not isinstance(event, tk.Event) or getattr(event, "num", None) != 1:
             self.set_foot("ver el valor exige un click de raton en el boton 'Ver'")
@@ -2059,7 +2105,7 @@ class CofreGUI:
             self.set_foot("'Ver' solo responde a un click dentro del boton")
             return
         if not self.selected or not self.session:
-            self.set_foot("no hay seleccion o el gate no esta abierto")
+            self.set_foot("no hay selección o el gate no esta abierto")
             return
         try:
             value = self.vault.get(self.session, self.selected)
@@ -2113,7 +2159,7 @@ class CofreGUI:
             return False
 
     def _canary_alert(self, name: str, canal: str) -> None:
-        """3.2: leer un senuelo es lo mas grave que puede pasar aqui."""
+        """3.2: leer un senuelo es lo mas grave que puede pasar aquí."""
         record(self.vault_path, "canary-access", self.gate, self.serial,
                name=name, ok=False, detail=f"canal={canal}")
         self.set_status("ALERTA: alguien ha pedido un senuelo", warn=True)
@@ -2132,7 +2178,7 @@ class CofreGUI:
 
     def copy_to_clipboard(self, event=None):
         if not self.selected or not self.session:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         try:
             value = self.vault.get(self.session, self.selected)
@@ -2165,10 +2211,10 @@ class CofreGUI:
                     pass
             self._clip_id = self.root.after(self.clipboard_ttl * 1000, _clean)
             self.set_foot(f"copiado al portapapeles. Se vacia solo en {self.clipboard_ttl} s "
-                         "(mientras esta ahi, cualquier proceso de la sesion puede leerlo).")
+                         "(mientras esta ahi, cualquier proceso de la sesión puede leerlo).")
         else:
             self.set_foot("copiado al portapapeles de Windows y NO se limpia solo: "
-                         "cualquier proceso de la sesion puede leerlo.")
+                         "cualquier proceso de la sesión puede leerlo.")
 
     def toggle_show_value(self, event=None):
         if self._is_canary(self.selected):
@@ -2184,7 +2230,7 @@ class CofreGUI:
 
     def delete_selected(self, event=None):
         if not self.selected or not self.session:
-            self.set_foot("no hay seleccion")
+            self.set_foot("no hay selección")
             return
         if not getattr(self, "_confirm_delete", False):
             self._confirm_delete = True

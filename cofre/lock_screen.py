@@ -77,7 +77,7 @@ class LockScreen(tk.Frame):
         self.b_reconectar.pack(side="left", padx=(SPACE["sm"], 0))
 
         self.recuperacion = tk.Label(
-            centro, text="¿Perdiste los pendrives? El codigo de recuperacion\n"
+            centro, text="¿Perdiste los pendrives? El código de recuperacion\n"
                          "se usa desde la consola: run.cmd get NOMBRE --recovery",
             fg=C["faint"], bg=C["bg"], font=self._font("label"), justify="left")
         self.recuperacion.pack(pady=(SPACE["lg"], 0), anchor="w")

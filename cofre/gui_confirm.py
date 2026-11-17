@@ -1,4 +1,4 @@
-"""COFRE - dialogo de confirmacion (paso 2.4, aspecto E7).
+"""COFRE - dialogo de confirmación (paso 2.4, aspecto E7).
 
 Ventana modal, siempre encima, con la accion segura por defecto:
 
