@@ -175,6 +175,10 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--revoke-old", action="store_true",
                     help="tras crear el reemplazo, borrar el token viejo")
 
+    ti = with_common(sub.add_parser("token-info",
+                                    help="id, estado y caducidad de un token (sin el valor)"))
+    ti.add_argument("name")
+
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
@@ -570,6 +574,32 @@ def main(argv: list[str]) -> int:
             record(str(vault_path), "alert", args.gate, None, name=a.rule,
                    ok=False, detail=f"{a.severity}: {a.text}"[:150])
         estado_path.write_text(json.dumps(estado.to_dict(), indent=2), encoding="utf-8")
+        return 0
+
+    if args.command == "token-info":
+        try:
+            session, serial = resolve_session_key(args.gate, str(vault_path),
+                                                 stick=args.stick,
+                                                 allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        from cofre.providers import get as provider_get
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        meta = dict(vault.meta(args.name) or {})
+        proveedor_nombre = str(meta.get("provider") or "")
+        if not proveedor_nombre:
+            print("el secreto no tiene proveedor", file=sys.stderr)
+            return 1
+        proveedor = provider_get(proveedor_nombre)
+        valor = vault.get(session, args.name)
+        v = proveedor.verify(valor, meta)
+        print(f"{args.name}: {'valido' if v.ok else 'NO valido'} | estado {v.status or '?'} "
+              f"| id {v.token_id or '(sin id)'} | caduca {v.expires_at or '(sin caducidad)'}")
+        if v.detail and v.detail != "activo":
+            print(f"  detalle: {v.detail}")
         return 0
 
     if args.command == "meta":

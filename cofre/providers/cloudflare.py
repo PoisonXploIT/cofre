@@ -59,9 +59,11 @@ class Cloudflare(Provider):
         result = body.get("result") or {}
         estado = str(result.get("status", ""))
         caduca = str(result.get("expires_on", ""))[:10]
+        ident = str(result.get("id", ""))
         if estado and estado != "active":
-            return VerifyResult(False, caduca, f"el token esta en estado '{estado}'")
-        return VerifyResult(True, caduca, "activo")
+            return VerifyResult(False, caduca, f"el token esta en estado '{estado}'",
+                                ident, estado)
+        return VerifyResult(True, caduca, "activo", ident, estado or "active")
 
     # -------------------------------------------------------------- roll
 

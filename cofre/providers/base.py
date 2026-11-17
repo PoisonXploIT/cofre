@@ -10,6 +10,8 @@ class VerifyResult:
     ok: bool
     expires_at: str = ""
     detail: str = ""
+    token_id: str = ""
+    status: str = ""
 
 
 class Provider:
