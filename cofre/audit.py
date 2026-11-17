@@ -372,15 +372,15 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     seq_esperado = 1
     sin_firma = 0
     antes_de_uso: int | None = None
-    # desde que existe un "fin-de-pruebas" firmado, lo anterior es historico de
-    # pruebas y no se le exige firma; a partir de ahi, todo evento privilegiado
-    # sin firma es manipulacion
+    # Desde la ULTIMA marca firmada ("fin-de-pruebas" o "reanchor") se exige
+    # firma; lo anterior es historico y no se le pide. Re-anclar es decision del
+    # usuario, queda firmado, se avisa en esta misma salida y dispara alerta.
     for texto in lineas:
         try:
             ev = json.loads(texto)
         except json.JSONDecodeError:
             continue
-        if ev.get("ev") == "fin-de-pruebas" and ev.get("mac"):
+        if ev.get("ev") in ("fin-de-pruebas", "reanchor") and ev.get("mac"):
             antes_de_uso = int(ev.get("seq", 0))    # el ULTIMO, si hay varios
     for numero, texto in enumerate(lineas, start=1):
         try:
@@ -415,10 +415,10 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         if ev.get("ev") in ("fin-de-pruebas", "reanchor") and ev.get("mac"):
             anclas.append(int(ev.get("seq", 0)))
     if anclas:
-        detalle += f", re-anclado en la linea {max(anclas)}"
-        if len(anclas) > 1:
-            exentas = f"1-{max(anclas) - 1}"
-            detalle += f" (lineas {exentas} exentas de firma)"
+        ultima_ancla = max(anclas)
+        detalle += f", re-anclado en la linea {ultima_ancla}"
+        if ultima_ancla > 1:
+            detalle += f" (lineas 1-{ultima_ancla - 1} exentas de firma)"
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle

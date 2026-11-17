@@ -127,6 +127,14 @@ class TestFirmaExigible(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("anadida a mano", detalle)
 
+    def test_reanclar_mueve_el_punto_de_exigencia(self):
+        audit.record(self.vault, "lock", "usb", ok=True)          # sin contexto: sin firma
+        audit.record(self.vault, "reanchor", "usb", ok=True, detail="decision del usuario")
+        ok, detalle = audit.verify(self.vault)
+        self.assertTrue(ok, detalle)
+        self.assertIn("re-anclado en la linea 2", detalle)
+        self.assertIn("exentas de firma", detalle)
+
     def test_restaurar_copia_antigua_avisa_pero_no_falla(self):
         from cofre.v2 import VaultV2, new_usb_slot
         from cofre.store import open_any
