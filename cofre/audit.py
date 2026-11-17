@@ -47,6 +47,7 @@ PRIVILEGED = {
     "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
     "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
     "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
+    "meta", "host-assign",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -371,6 +372,7 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     prev = GENESIS
     seq_esperado = 1
     sin_firma = 0
+    culpables: list[str] = []
     antes_de_uso: int | None = None
     # Desde la ULTIMA marca firmada ("fin-de-pruebas" o "reanchor") se exige
     # firma; lo anterior es historico y no se le pide. Re-anclar es decision del
@@ -397,14 +399,18 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
             privilegiado = str(ev.get("ev")) in PRIVILEGED
             en_uso_real = antes_de_uso is None or int(ev.get("seq", 0)) >= antes_de_uso
             if _KEY is not None and privilegiado and en_uso_real:
-                return False, (f"linea {numero}: '{ev.get('ev')}' exige cofre abierto "
-                               "y no lleva firma: anadida a mano")
+                culpables.append(f"{numero}:{ev.get('ev')}")
         elif _KEY is not None:
             esperado = hmac.new(_KEY, _canonical(ev), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(mac, esperado):
                 return False, f"linea {numero}: firma incorrecta (manipulada)"
         prev = _line_hash(texto)
         seq_esperado += 1
+    if culpables:
+        muestra = ", ".join(culpables[:6])
+        extra = "" if len(culpables) <= 6 else f" y {len(culpables) - 6} mas"
+        return False, (f"eventos que exigen cofre abierto y van sin firma: "
+                       f"{muestra}{extra}. Se anadieron a mano")
     detalle = f"{len(lineas)} lineas, cadena intacta"
     anclas = []
     for texto in lineas:

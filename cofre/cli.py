@@ -354,10 +354,35 @@ def cmd_shell(vault_path: str, gate: str, stick: str | None, allow_new: bool) ->
     return 0
 
 
+def prepare_audit(vault_path, gate: str, stick: str | None, allow_new: bool):
+    """Deja el cofre ligado a la llave y el log firmando.
+
+    Cualquier comando que escriba un evento privilegiado (rotate, meta, log,
+    alerts...) tiene que pasar por aqui ANTES de registrar nada: si no, la linea
+    sale sin firma y verify la marca como manipulacion. Paso tres veces.
+    """
+    from cofre.audit import bind_store, set_key as _set_key
+    try:
+        material = material_for(gate, str(vault_path), stick, allow_new)
+        vault = Vault(Path(vault_path)).bind_material(material)
+        if vault.is_v2():
+            store = vault._v2store()
+            _set_key(store.master)
+            bind_store(store)
+        return vault
+    except Exception:
+        return Vault(Path(vault_path))
+
+
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     vault_path = Path(args.vault)
     vault = Vault(vault_path)
+    _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
+                  "host-list", "get", "add", "del", "rename", "exec", "export",
+                  "migrate", "stick-add-v2", "check", "list"}
+    if args.command in _CON_CLAVE:
+        vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
     if args.command == "gen":
         if args.entropy:

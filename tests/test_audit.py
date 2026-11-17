@@ -125,7 +125,8 @@ class TestFirmaExigible(unittest.TestCase):
         audit_path(self.vault).write_text(contenido, encoding="utf-8")
         ok, detalle = audit.verify(self.vault)
         self.assertFalse(ok)
-        self.assertIn("anadida a mano", detalle)
+        self.assertIn("van sin firma", detalle)
+        self.assertIn("browser-get", detalle)
 
     def test_reanclar_mueve_el_punto_de_exigencia(self):
         audit.record(self.vault, "lock", "usb", ok=True)          # sin contexto: sin firma
