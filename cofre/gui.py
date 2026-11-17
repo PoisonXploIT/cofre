@@ -272,6 +272,27 @@ class CofreGUI:
         boton.set_enabled = set_enabled
         return boton
 
+    def _placeholder(self, texto: str, entry, var) -> None:
+        """Texto de ayuda gris dentro del campo, que desaparece al escribir."""
+        if var.get():
+            return
+        entry.insert(0, texto)
+        entry.configure(fg=FAINT)
+        self._placeholder_text = texto
+
+        def dentro(_e=None):
+            if entry.get() == texto:
+                entry.delete(0, "end")
+                entry.configure(fg=FG)
+
+        def fuera(_e=None):
+            if not entry.get():
+                entry.insert(0, texto)
+                entry.configure(fg=FAINT)
+
+        entry.bind("<FocusIn>", dentro, add="+")
+        entry.bind("<FocusOut>", fuera, add="+")
+
     def _entry(self, parent, var, mono=False, show=None):
         return tk.Entry(parent, textvariable=var, bg=INPUT, fg=FG,
                         font=self.f_mono if mono else self.f_body,
@@ -299,8 +320,9 @@ class CofreGUI:
         self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
                                      bg=PANEL2, font=self.f_sub)
         self.status_label.pack(side="left", padx=(8, 12), pady=6)
-        self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right")
-        self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 8))
+        self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right",
+                                                                   padx=(0, 0))
+        self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 10))
         # E4: el buscador vive en la cabecera, no en la lista
         self.query_var = tk.StringVar()
         caja_buscar = tk.Frame(top, bg=PANEL2, highlightthickness=1,
@@ -309,8 +331,9 @@ class CofreGUI:
         tk.Label(caja_buscar, text="", fg=MUT, bg=PANEL2,
                  font=(ICON_FONT, 11)).pack(side="left", padx=(8, 4))
         self.query_entry = self._entry(caja_buscar, self.query_var)
-        self.query_entry.configure(width=26, bg=PANEL2, highlightthickness=0, bd=0)
+        self.query_entry.configure(width=30, bg=PANEL2, highlightthickness=0, bd=0)
         self.query_entry.pack(side="left", pady=5)
+        self._placeholder("Buscar secretos y acciones", self.query_entry, self.query_var)
         tk.Label(caja_buscar, text="Ctrl K", fg=FAINT, bg=PANEL2,
                  font=self.f_small).pack(side="left", padx=(6, 8))
         self.query_entry.bind("<KeyRelease>", lambda _e: self.refresh_list())
@@ -329,7 +352,8 @@ class CofreGUI:
         self.alert_text.pack(side="left", fill="x", expand=True)
         self._text_btn(self.alert_band, "Descartar", self.dismiss_alerts).pack(
             side="right", padx=(6, 16))
-        self._text_btn(self.alert_band, "Ver detalle", self.open_health).pack(
+        self._text_btn(self.alert_band, "Ver detalle",
+                       lambda: self._mostrar_vista("salud")).pack(
             side="right", padx=6)
         self._alerts_visibles = []
 
@@ -350,14 +374,23 @@ class CofreGUI:
         self.nav_btns = {}
 
         def seccion(titulo: str) -> None:
-            tk.Label(left, text=titulo.upper(), fg=FAINT, font=self.f_small,
-                     bg=PANEL, anchor="w").pack(fill="x", padx=14, pady=(12, 2))
+            tk.Label(self._nav_box if hasattr(self, "_nav_box") else left,
+                     text=titulo.upper(), fg=FAINT, font=self.f_small,
+                     bg=PANEL, anchor="w").pack(fill="x", padx=14, pady=(10, 2))
 
         self.nav_counts = {}
 
-        def entrada(clave: str, texto: str, comando, contador: bool = True) -> None:
-            fila = tk.Frame(left, bg=PANEL)
+        self.nav_dots = {}
+
+        def entrada(clave: str, texto: str, comando, contador: bool = True,
+                    punto: str | None = None) -> None:
+            fila = tk.Frame(self._nav_box, bg=PANEL)
             fila.pack(fill="x", padx=12, pady=1)
+            if punto:
+                punto_lab = tk.Label(fila, text="●", fg=punto, bg=PANEL,
+                                     font=(self.f_small.actual("family"), 8))
+                punto_lab.pack(side="left", padx=(2, 4))
+                self.nav_dots[clave] = punto_lab
             b = self._text_btn(fila, texto, comando, alinear="w")
             b.pack(side="left", fill="x", expand=True)
             self.nav_btns[clave] = b
@@ -366,6 +399,10 @@ class CofreGUI:
                 lab.pack(side="right", padx=(0, 6))
                 self.nav_counts[clave] = lab
 
+        nav = tk.Frame(left, bg=PANEL)
+        nav.pack(fill="both", expand=True)
+        self._nav_box = nav
+
         seccion("Biblioteca")
         entrada("todos", "Todos", lambda: self.set_filtro("todos"))
         entrada("password", "Contraseñas", lambda: self.set_filtro("password"))
@@ -373,7 +410,8 @@ class CofreGUI:
         entrada("note", "Notas", lambda: self.set_filtro("note"))
 
         seccion("Vigilar")
-        entrada("atencion", "Atención", lambda: self.set_filtro("atencion"))
+        entrada("atencion", "Atención", lambda: self.set_filtro("atencion"),
+                punto=WARN)
         entrada("rotacion", "Rotación pendiente", lambda: self.set_filtro("rotacion"))
         entrada("caducan", "Caducan pronto", lambda: self.set_filtro("caducan"))
         entrada("papelera", "Papelera", lambda: self.set_filtro("papelera"))
@@ -447,6 +485,7 @@ class CofreGUI:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vbar.pack(side="right", fill="y")
         right = tk.Frame(self.canvas, bg=PANEL2)
+        self.right = right
         self._right_win = self.canvas.create_window((0, 0), window=right, anchor="nw")
 
         def _sync_scroll(_e=None):
@@ -611,9 +650,11 @@ class CofreGUI:
 
         # E7: estado vacio del detalle. Sin selección no se muestran campos ni
         # botones grises: solo el mensaje y el boton Nuevo.
-        self.empty_detail = tk.Frame(right, bg=PANEL2)
+        # el estado vacio va sobre el lienzo, no dentro del contenido que se
+        # desplaza: asi se centra en el hueco visible
+        self.empty_detail = tk.Frame(self.canvas, bg=PANEL2)
         centro_vacio = tk.Frame(self.empty_detail, bg=PANEL2)
-        centro_vacio.place(relx=0.5, rely=0.4, anchor="center")
+        centro_vacio.pack(expand=True)
         tk.Label(centro_vacio, text="", fg=FAINT, bg=PANEL2,
                  font=(ICON_FONT, 30)).pack()
         tk.Label(centro_vacio, text="Elige un secreto de la lista", fg=MUT,
@@ -866,6 +907,8 @@ class CofreGUI:
             self._refresh_actions()
             return
         q = self.query_var.get().strip().lower()
+        if q and q == str(getattr(self, "_placeholder_text", "")).lower():
+            q = ""
         tags = []
         if q.startswith("tag:"):
             tags = [t for t in q[4:].split(",") if t]
@@ -926,7 +969,7 @@ class CofreGUI:
                 from cofre import widgets as W
                 L = W.ListRow(fila, n, sub, inicial=(proveedor or n)[:1].upper(),
                               chip=chip, on_click=lambda _t, name=n: self._click_row(name),
-                              bg=PANEL)
+                              bg=PANEL, color=W.color_de_proveedor(proveedor or n))
             except Exception:
                 L = None
             if L is None:
@@ -971,9 +1014,16 @@ class CofreGUI:
                                fg=WARN if (clave == "atencion" and valor) else FAINT)
 
     def _chip_de(self, nombre: str, meta: dict) -> tuple[str, str] | None:
-        """Etiqueta de estado de la fila: caduca, rotar, sin sitio."""
-        if self._caduca_pronto(meta):
-            return (f"caduca {str(meta.get('expires_at'))[:10]}", "rot")
+        """Solo etiquetas que piden atencion: si esta sano, sin etiqueta."""
+        caduca = str(meta.get("expires_at") or "")
+        if caduca:
+            try:
+                from datetime import date
+                dias = (date.fromisoformat(caduca[:10]) - date.today()).days
+                if dias <= 30:
+                    return (f"caduca en {max(dias, 0)} d", "rot")
+            except Exception:
+                pass
         if self._rotacion_pendiente(meta):
             return ("rotar", "rot")
         try:
@@ -981,7 +1031,7 @@ class CofreGUI:
                 return ("sin sitio", "warn")
         except Exception:
             pass
-        return ("abierto", "ok")
+        return None
 
     def _kind_of(self, name: str) -> str:
         """Etiqueta corta a la derecha de la fila, sin llamar al cifrado."""
@@ -1331,7 +1381,6 @@ class CofreGUI:
             for a in nuevas:
                 record(self.vault_path, "alert", self.gate, self.serial,
                        name=a.rule, ok=False, detail=f"{a.severity}: {a.text}"[:150])
-            self.set_status(f"alerta {nuevas[0].severity.upper()}", warn=True)
             self.show_alerts([f"{a.severity.upper()}: {a.text}" for a in nuevas])
             alerts_mod.notify(nuevas)      # MessageBoxW en su propio hilo
             try:
@@ -1535,33 +1584,84 @@ class CofreGUI:
                 or (sin_sitio and str(meta.get("type")) != "note"))
 
     def open_health(self) -> None:
-        win = self._sheet("Salud del cofre")
-        win.geometry("560x420")
-        texto = tk.Text(win, bg=PANEL, fg=FG, font=self.f_mono, bd=0,
-                        highlightthickness=0, wrap="word")
-        texto.pack(fill="both", expand=True, padx=12, pady=12)
-        lineas = []
-        lineas.append(f"secretos: {len(self.vault.names())}")
-        meta_todos = [self.vault.meta(n) for n in self.vault.names()]
-        sin_sitio = sum(1 for n, m in zip(self.vault.names(), meta_todos)
-                        if not self.vault.urls(n) and str(m.get("type")) != "note")
-        lineas.append(f"sin sitio asignado: {sin_sitio}")
-        lineas.append(f"caducan en 30 días: "
-                      f"{sum(1 for m in meta_todos if self._caduca_pronto(m))}")
-        lineas.append(f"rotacion pendiente: "
-                      f"{sum(1 for m in meta_todos if self._rotacion_pendiente(m))}")
+        """Vista de salud dentro de la ventana: tarjetas que filtran la lista."""
+        self._mostrar_vista("salud")
+
+    def _salud_panel(self) -> None:
+        """Panel de salud dentro de la columna del detalle."""
+        if getattr(self, "_salud_frame", None) is not None:
+            self._salud_frame.destroy()
+        panel = tk.Frame(self.right, bg=PANEL2)
+        self._salud_frame = panel
+        panel.pack(fill="both", expand=True, padx=16, pady=12)
+        tk.Label(panel, text="Salud del cofre", fg=FG, bg=PANEL2,
+                 font=self.f_h2, anchor="w").pack(fill="x")
+
+        nombres = self.vault.names()
+        metas = {n: (self.vault.meta(n) or {}) for n in nombres}
+        tarjetas = [
+            ("sin sitio", sum(1 for n, m in metas.items()
+                              if not self.vault.urls(n) and str(m.get("type")) != "note"),
+             "warn", "atencion"),
+            ("caducan en 30 d", sum(1 for m in metas.values() if self._caduca_pronto(m)),
+             "rot", "caducan"),
+            ("rotación pendiente", sum(1 for m in metas.values()
+                                       if self._rotacion_pendiente(m)), "rot", "rotacion"),
+            ("secretos", len(nombres), "ok", "todos"),
+        ]
+        fila = tk.Frame(panel, bg=PANEL2)
+        fila.pack(fill="x", pady=(12, 8))
+        for titulo, valor, kind, filtro in tarjetas:
+            fondo = {"warn": WARNBG, "rot": COLORS["rot_bg"], "ok": COLORS["ok_bg"]}[kind]
+            color = {"warn": WARNFG, "rot": COLORS["rot_fg"], "ok": COLORS["ok_fg"]}[kind]
+            tarjeta = tk.Frame(fila, bg=fondo, highlightthickness=1,
+                               highlightbackground=fondo, cursor="hand2")
+            tarjeta.pack(side="left", padx=(0, 8), ipadx=10, ipady=6)
+            n_lab = tk.Label(tarjeta, text=str(valor), fg=color, bg=fondo,
+                             font=self.f_title)
+            n_lab.pack()
+            t_lab = tk.Label(tarjeta, text=titulo, fg=color, bg=fondo,
+                             font=self.f_small)
+            t_lab.pack()
+            for w in (tarjeta, n_lab, t_lab):
+                w.bind("<Button-1>", lambda _e, f=filtro: (
+                    self.set_filtro(f), self._mostrar_vista("detalle")))
+
         try:
             from cofre.audit import verify_vault
             ok, detalle = verify_vault(self.vault)
-            lineas.append(f"registro: {'OK' if ok else 'PROBLEMA'} - {detalle}")
+            texto = ("registro: OK · " if ok else "registro: PROBLEMA · ") + detalle
+            color = OK if ok else WARN
         except Exception as exc:                      # noqa: BLE001
-            lineas.append(f"registro: no se pudo verificar ({exc})")
+            texto, color = f"registro: no se pudo verificar ({exc})", WARN
+        tk.Label(panel, text=texto, fg=color, bg=PANEL2, font=self.f_small,
+                 anchor="w", wraplength=520, justify="left").pack(fill="x")
+
         for datos in self.stick_report():
             estado = "conectada" if datos.get("present") else "no conectada"
-            lineas.append(f"llave {datos.get('drive')} ({datos.get('role')}): {estado}")
-        texto.insert("end", chr(10).join(lineas))
-        texto.configure(state="disabled")
-        self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
+            if getattr(self, "stick", None):
+                estado = "llave de prueba (fichero)"
+            linea = (f"llave {datos.get('drive')} · {datos.get('role')} · {estado}")
+            tk.Label(panel, text=linea, fg=MUT if datos.get("present") else FAINT,
+                     bg=PANEL2, font=self.f_small, anchor="w").pack(fill="x")
+
+    def _mostrar_vista(self, vista: str) -> None:
+        """Cambia entre el detalle normal y las vistas (salud)."""
+        self.vista = vista
+        if vista == "salud":
+            for w in getattr(self, "_detail_piezas", []):
+                try:
+                    w.pack_forget()
+                except Exception:
+                    pass
+            self.empty_detail.place_forget()
+            self._salud_panel()
+            return
+        if getattr(self, "_salud_frame", None) is not None:
+            self._salud_frame.destroy()
+            self._salud_frame = None
+        self._update_detail_visible()
+        self.refresh_detail()
 
     def open_keys(self) -> None:
         win = self._sheet("Llaves y recuperación")
@@ -1873,6 +1973,9 @@ class CofreGUI:
 
     def select(self, name: str):
         self.selected = name
+        if getattr(self, "_salud_frame", None) is not None:
+            self._salud_frame.destroy()
+            self._salud_frame = None
         self.refresh_list()
         self.detail_name.configure(text=name)
         if self.session_obj:
@@ -1909,9 +2012,9 @@ class CofreGUI:
                 pass
         try:
             if hay:
-                self.empty_detail.pack_forget()
+                self.empty_detail.place_forget()
             elif not self.empty_detail.winfo_ismapped():
-                self.empty_detail.pack(fill="both", expand=True)
+                self.empty_detail.place(relx=0.5, rely=0.42, anchor="center")
         except Exception:
             pass
 

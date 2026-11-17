@@ -197,9 +197,14 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
     # log manipulado: cuenta el ULTIMO veredicto, no los historicos que ya se
     # resolvieron con un re-anclaje
     veredictos = [e for e in events if e.get("ev") == "audit-verify"]
+    notas = [e for e in events if e.get("ev") == "audit-note" and e.get("mac")]
     if veredictos:
         ultimo = veredictos[-1]
-        if not ultimo.get("ok"):
+        ultima_nota = max((int(n.get("seq", 0)) for n in notas), default=0)
+        explicado = bool(notas) and all(
+            ultima_nota > int(ev.get("seq", 0))
+            for ev in veredictos if not ev.get("ok"))
+        if not ultimo.get("ok") and not explicado:
             encontradas.append(Alert("log-manipulado", "critica",
                                      str(ultimo.get("detail", "el log no cuadra"))[:160],
                                      int(ultimo.get("seq", 0))))

@@ -35,6 +35,7 @@ BORDER = C["border"]
 BORDER_STRONG = C["border_strong"]
 TEXT = C["text"]
 MUTED = C["muted"]
+MUT = MUTED      # alias usado por los widgets
 FAINT = C["faint"]
 DISABLED = C["disabled"]
 DISABLED_BG = C["disabled_bg"]
@@ -58,6 +59,18 @@ def round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float,
         x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
     ]
     return canvas.create_polygon(puntos, smooth=True, splinesteps=36, **kw)
+
+
+PALETA_PROVEEDOR = ("#7AA7E8", "#5CBF8F", "#D9A955", "#C58BE0", "#E8964A",
+                    "#6FC7C7", "#E07A9A", "#9FB05C")
+
+
+def color_de_proveedor(nombre: str) -> str:
+    """Color estable por proveedor: el mismo nombre da siempre el mismo tono."""
+    if not nombre:
+        return MUT
+    total = sum(ord(c) for c in nombre.lower())
+    return PALETA_PROVEEDOR[total % len(PALETA_PROVEEDOR)]
 
 
 def _font(root, role: str = "body") -> tkfont.Font:
@@ -312,7 +325,7 @@ class ListRow(tk.Frame):
 
     def __init__(self, parent, titulo: str, subtitulo: str = "", inicial: str = "",
                  chip: tuple[str, str] | None = None, on_click=None,
-                 bg: str | None = None):
+                 bg: str | None = None, color: str | None = None):
         self._bg = bg or SURFACE
         super().__init__(parent, bg=self._bg, bd=0, highlightthickness=0)
         self.on_click = on_click
@@ -328,6 +341,7 @@ class ListRow(tk.Frame):
         self._titulo = titulo
         self._subtitulo = subtitulo
         self._inicial = (inicial or titulo[:1] or "?").upper()
+        self._color = color or MUT
         self._chip = chip
         self.canvas.bind("<Enter>", lambda _e: self._hover(True))
         self.canvas.bind("<Leave>", lambda _e: self._hover(False))

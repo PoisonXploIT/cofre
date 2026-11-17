@@ -413,6 +413,20 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         prev = _line_hash(texto)
         seq_esperado += 1
     if culpables:
+        # si hay una nota firmada posterior que las explica, se dan por
+        # explicadas: siguen en el log, pero no gritan para siempre
+        nota = None
+        for texto in lineas:
+            try:
+                ev = json.loads(texto)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("ev") == "audit-note" and ev.get("mac"):
+                nota = int(ev.get("seq", 0))
+        if nota and all(int(c.split(":")[0]) < nota for c in culpables):
+            detalle = (f"{len(lineas)} lineas, cadena intacta; {len(culpables)} "
+                       f"sin firma explicadas por la nota firmada de la linea {nota}")
+            return True, detalle
         muestra = ", ".join(culpables[:6])
         extra = "" if len(culpables) <= 6 else f" y {len(culpables) - 6} mas"
         return False, (f"eventos que exigen cofre abierto y van sin firma: "
