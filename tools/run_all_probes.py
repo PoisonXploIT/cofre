@@ -23,6 +23,7 @@ PROBES = [
     ("gui_shortcut", [sys.executable, "tools/gui_shortcut_probe.py"], False),
     ("gui_audit", [sys.executable, "tools/gui_audit_probe.py"], False),
     ("dark_bar", [sys.executable, "tools/dark_bar_probe.py"], False),
+    ("widgets", [sys.executable, "tools/widgets_probe.py"], False),
     ("stick_register", [sys.executable, "tools/stick_register_probe.py"], False),
     ("pipe", [sys.executable, "tools/pipe_probe.py"], False),
     ("pipe_server", [sys.executable, "tools/pipe_server_probe.py"], False),
