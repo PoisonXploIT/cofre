@@ -42,10 +42,10 @@ def main() -> int:
     check("H3 Ctrl+C con foco en el buscador no copia", calls["copy"] == 0,
           f"llamadas a copy: {calls['copy']}")
 
-    app.name_entry.focus_set()
+    app.query_entry.focus_set()
     app.root.update()
     app._on_copy_shortcut(None)
-    check("H3 Ctrl+C con foco en el campo de valor no copia", calls["copy"] == 0,
+    check("H3 Ctrl+C con foco en un campo de texto no copia", calls["copy"] == 0,
           f"llamadas a copy: {calls['copy']}")
 
     # 2. foco en la lista (no en un campo): Ctrl+C si copia

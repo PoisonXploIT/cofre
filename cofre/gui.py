@@ -457,76 +457,14 @@ class CofreGUI:
 
         tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
 
-        add = tk.Frame(right, bg=PANEL)
-        add.pack(fill="x", padx=16, pady=4)
-        tk.Label(add, text="Guardar un secreto nuevo (si el nombre ya existe, "
-                            "se actualiza su valor)", fg=FG, font=self.f_sub,
-                 bg=PANEL).pack(anchor="w", pady=(8, 4))
+        # E6: el alta vive en una hoja (cofre/entry_sheet.py). Aqui solo quedan
+        # las variables de estado que usan otros sitios del codigo.
         self.name_var = tk.StringVar()
         self.val_var = tk.StringVar()
         self.pin_var = tk.StringVar()
         self.lang_var = tk.StringVar(value="es")
         self.words_var = tk.StringVar(value="5")
-        tk.Label(add, text="sugerencias de password (se escriben en el campo de valor, "
-                             "no se guardan solas)", fg=MUT, font=self.f_sub, bg=PANEL).pack(anchor="w", pady=(8, 4))
-        langrow = tk.Frame(add, bg=PANEL)
-        langrow.pack(fill="x", pady=4)
-        tk.Label(langrow, text="lista", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left")
-        for code in ("es", "en"):
-            self._btn(langrow, code, lambda c=code: self.set_lang(c)).pack(side="left", padx=4)
-        tk.Label(langrow, text="palabras", fg=MUT, font=self.f_small, bg=PANEL).pack(side="left", padx=(8, 4))
-        wentry = self._entry(langrow, self.words_var)
-        wentry.configure(width=4)
-        wentry.pack(side="left")
-        tk.Label(add, text="nombre (sin espacios), p. ej. TAVILY_API_KEY", fg=MUT,
-                 font=self.f_small, bg=PANEL).pack(anchor="w")
         self.tags_var = tk.StringVar(value="")
-        tk.Label(add, text="tags (opcional, separados por coma). Ej: google, trabajo",
-                 fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
-        tags_entry = self._entry(add, self.tags_var)
-        tags_entry.configure(width=1)
-        tags_entry.pack(fill="x", pady=(4, 4))
-        self.name_entry = self._entry(add, self.name_var)
-        self.name_entry.configure(width=1)
-        self.name_entry.pack(fill="x", pady=(4, 4))
-        tk.Label(add, text="valor: la contraseña, la clave API o el token",
-                 fg=MUT, font=self.f_small, bg=PANEL).pack(anchor="w")
-        self.val_entry = self._entry(add, self.val_var, mono=True, show="*")
-        self.val_entry.configure(width=1)
-        self.val_entry.pack(fill="x", pady=(4, 4))
-        self.strength_var = tk.StringVar(value="fuerza: sin valor")
-        tk.Label(add, textvariable=self.strength_var, fg=MUT, font=self.f_small,
-                 bg=PANEL).pack(anchor="w")
-        self.val_entry.bind("<Key>", self._update_strength)
-        self.name_entry.bind("<Return>", lambda _e: self.add_secret())
-        self.val_entry.bind("<Return>", lambda _e: self.add_secret())
-        # Generadores en su propia fila y "Mostrar al teclear" + Guardar en otra:
-        # medido el 2026-11-10, cinco botones en una fila dejaban "Guardar" con
-        # ancho 1 (invisible) incluso a 980 px.
-        genrow = tk.Frame(add, bg=PANEL)
-        genrow.pack(fill="x", pady=(8, 4))
-        self._btn(genrow, "Para maquina (384 bits)",
-                  lambda e: self.generate("machine", event=e)).pack(side="left", padx=SM)
-        genrow2 = tk.Frame(add, bg=PANEL)
-        genrow2.pack(fill="x", pady=(0, 4))
-        self._btn(genrow2, "4 palabras",
-                  lambda e: self.generate("words", 4, event=e)).pack(side="left", padx=SM)
-        self._btn(genrow2, "6 palabras",
-                  lambda e: self.generate("words", 6, event=e)).pack(side="left", padx=SM)
-
-        saverow = tk.Frame(add, bg=PANEL)
-        saverow.pack(fill="x", pady=(0, 8))
-        self.show_val_btn = self._btn(saverow, "Mostrar al teclear",
-                                      lambda e: self.toggle_show_value(event=e))
-        self.show_val_btn.pack(side="left", padx=SM)
-        self._btn(saverow, "Guardar", self.add_secret, accent=True).pack(side="right", padx=SM)
-        self.entropy_var = tk.StringVar(value="")
-        self.set_lang("es")
-        tk.Label(add, textvariable=self.entropy_var, fg=MUT, font=self.f_small,
-                 bg=PANEL).pack(anchor="w")
-        tk.Label(add, text="La sugerencia se escribe en el campo valor; hay que pulsar "
-                            "Guardar para que quede dentro del cofre.", fg=MUT,
-                 font=self.f_small, bg=PANEL).pack(anchor="w", pady=(4, 0))
 
         self.pinrow = tk.Frame(right, bg=PANEL)
         tk.Label(self.pinrow, text="PIN del cofre", fg=MUT, font=self.f_sub,
@@ -578,7 +516,7 @@ class CofreGUI:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Control-l>", lambda _e: self.lock())
         self.root.bind("<Control-f>", lambda _e: self.query_entry.focus_set())
-        self.root.bind("<Control-n>", lambda _e: self.name_entry.focus_set())
+        self.root.bind("<Control-n>", lambda _e: self._focus_new())
         # H3: Ctrl+C solo copia el secreto cuando NO estas tecleando en un
         # campo. Si el foco esta en un Entry/Text, ese Ctrl+C es el normal.
         self.root.bind("<Control-c>", self._on_copy_shortcut)
@@ -857,8 +795,12 @@ class CofreGUI:
         return ""
 
     def _focus_new(self, event=None):
-        self.name_entry.focus_set()
-        self.name_entry.icursor("end")
+        """Abrir la hoja de alta (E6)."""
+        if not self.session:
+            self.set_foot("abre el cofre antes de guardar un secreto")
+            return
+        from cofre.entry_sheet import EntrySheet
+        self._sheet_nueva = EntrySheet(self, mode="new")
         self.canvas.yview_moveto(1.0)
         self.set_foot("escribe el nombre (p. ej. TAVILY_API_KEY), el valor, y pulsa Guardar")
 
@@ -1455,6 +1397,10 @@ class CofreGUI:
         return ok
 
     def _update_strength(self, event=None) -> None:
+        """Sin formulario fijo (E6): la fortaleza se calcula en la hoja."""
+        return
+
+    def _update_strength_antiguo(self, event=None) -> None:
         value = self.val_var.get()
         if not value:
             self.strength_var.set("fuerza: sin valor")
@@ -1525,17 +1471,8 @@ class CofreGUI:
         if not self.selected or not self.session:
             self.set_foot("no hay seleccion")
             return
-        try:
-            value = self.vault.get(self.session, self.selected)
-        except Exception as exc:
-            self.set_foot(f"error al leer: {exc}")
-            return
-        self.name_var.set(self.selected)
-        self.val_var.set(value)
-        self.val_entry.configure(show="")
-        self.show_val_btn.label.configure(text="Ocultar al teclear")
-        self.set_foot(f"valor de '{self.selected}' cargado en el campo. Cambialo y "
-                     "pulsa Guardar para re-cifrarlo.")
+        from cofre.entry_sheet import EntrySheet
+        self._sheet_nueva = EntrySheet(self, mode="edit", nombre=self.selected)
         record(self.vault_path, "edit-load", self.gate, self.serial, name=self.selected)
 
     def stick_label(self) -> str:
@@ -1896,6 +1833,10 @@ class CofreGUI:
             pass
 
     def add_secret(self, event=None):
+        """Compatibilidad: el boton Guardar antiguo ahora abre la hoja."""
+        return self._focus_new(event)
+
+    def _add_secret_antiguo(self, event=None):
         name = self.name_var.get().strip()
         value = self.val_var.get()
         if not name or not value:
@@ -1919,22 +1860,14 @@ class CofreGUI:
         self.set_foot(f"guardado '{name}'")
 
     def set_lang(self, code: str, event=None):
+        """Guarda el idioma elegido. El texto de entropia lo pinta la hoja (E6)."""
         self.lang_var.set(code)
         try:
             words = int(self.words_var.get() or 5)
         except ValueError:
             words = 5
             self.words_var.set("5")
-        info = entropy(words=words, lang=code)
-        if not info.get("lista"):
-            self.entropy_var.set(
-                f"sin lista de palabras: password silabica de ~{info['bits']} bits "
-                "(no depende del numero de palabras). Genera la lista con "
-                "tools/build_wordlist.py")
-            return
-        self.entropy_var.set(
-            f"{info['palabras']} palabras x {info.get('bits_por_palabra', 0)} bits "
-            f"= {info['bits']} bits ({info['lista']} palabras en la lista)")
+        self._entropy_texto = entropy(words=words, lang=code)
 
     def generate(self, kind: str, words: int = 5, event=None):
         if kind == "machine":
