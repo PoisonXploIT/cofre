@@ -185,22 +185,24 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
                                      int(ev.get("seq", 0))))
             break
 
-    # re-anclaje: mueve el punto de exigencia de firma; siempre se avisa
-    for ev in nuevos:
-        if ev.get("ev") in ("reanchor", "fin-de-pruebas"):
-            encontradas.append(Alert("reanclaje", "media",
-                                     f"log re-anclado en la linea {ev.get('seq')} "
-                                     f"({ev.get('detail') or 'sin motivo escrito'})",
-                                     int(ev.get("seq", 0))))
-            break
+    # re-anclaje: solo el ultimo, no todos los historicos
+    anclas = [e for e in nuevos if e.get("ev") in ("reanchor", "fin-de-pruebas")]
+    if anclas:
+        ultimo = max(anclas, key=lambda e: int(e.get("seq", 0)))
+        encontradas.append(Alert("reanclaje", "media",
+                                 f"log re-anclado en la linea {ultimo.get('seq')} "
+                                 f"({ultimo.get('detail') or 'sin motivo escrito'})",
+                                 int(ultimo.get("seq", 0))))
 
-    # log manipulado: un evento que exige cofre abierto y va sin firma
-    for ev in nuevos:
-        if ev.get("ev") == "audit-verify" and not ev.get("ok"):
+    # log manipulado: cuenta el ULTIMO veredicto, no los historicos que ya se
+    # resolvieron con un re-anclaje
+    veredictos = [e for e in events if e.get("ev") == "audit-verify"]
+    if veredictos:
+        ultimo = veredictos[-1]
+        if not ultimo.get("ok"):
             encontradas.append(Alert("log-manipulado", "critica",
-                                     str(ev.get("detail", "el log no cuadra"))[:160],
-                                     int(ev.get("seq", 0))))
-            break
+                                     str(ultimo.get("detail", "el log no cuadra"))[:160],
+                                     int(ultimo.get("seq", 0))))
 
     return encontradas
 
