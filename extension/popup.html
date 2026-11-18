@@ -42,6 +42,14 @@
       padding: 7px 8px; border-radius: 6px; cursor: pointer;
     }
     .row:hover { background: var(--card); }
+    .row.sug { background: rgba(62, 156, 122, .10); }
+    .row.sug:hover { background: rgba(62, 156, 122, .18); }
+    .section {
+      color: var(--faint); font-size: 10px; text-transform: uppercase;
+      letter-spacing: .06em; padding: 10px 8px 4px;
+    }
+    .row .assign { color: var(--warn); border-color: var(--border); }
+    .row .assign:hover { border-color: var(--warn); color: var(--text); }
     .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .kind { color: var(--faint); font-size: 10px; }
     .row .fill {
@@ -77,7 +85,7 @@
     </div>
     <div id="list"></div>
   </main>
-  <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto.</footer>
+  <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto. Ctrl+Shift+L abre este aviso.</footer>
   <script src="popup.js"></script>
 </body>
 </html>

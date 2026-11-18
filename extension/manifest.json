@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COFRE - relleno de secretos",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Rellena contrasenas y claves solo cuando tu lo pides, en los dominios autorizados. El secreto nunca sale del equipo.",
   "permissions": [
     "activeTab",
@@ -19,5 +19,13 @@
     "default_popup": "popup.html",
     "default_title": "COFRE"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtmZsv1khv+jBAldABgeGxW+xIXyVLiJVIZ26nJU28w2JWJmIAsGRPt9LiiJZRmIZwALDIMftHLge8qR81cM7PUN0KkxICmY4fg11QJklui4gpR8zMutAjGSP+ZZkfHA0T+E9RIDvW4//6KBr9b+0g45Y+7Iq9j0Ct04jMQSlvv1rx+IwETlfX2oSNrVNS+L3APkIXC6li/nEx8BsvqIWuxJb6EItONqHJm4yzeGktNRwyn0g3Aw4M0yW4YSqWcFNMGXzrpJmCJyfXUlahYe0GbWpSVqXE3IaNQcVzBRbab4yWuFKmgDecnAzrDrFH++AmS0+nY+pSxCJGjA9cmB8lwIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtmZsv1khv+jBAldABgeGxW+xIXyVLiJVIZ26nJU28w2JWJmIAsGRPt9LiiJZRmIZwALDIMftHLge8qR81cM7PUN0KkxICmY4fg11QJklui4gpR8zMutAjGSP+ZZkfHA0T+E9RIDvW4//6KBr9b+0g45Y+7Iq9j0Ct04jMQSlvv1rx+IwETlfX2oSNrVNS+L3APkIXC6li/nEx8BsvqIWuxJb6EItONqHJm4yzeGktNRwyn0g3Aw4M0yW4YSqWcFNMGXzrpJmCJyfXUlahYe0GbWpSVqXE3IaNQcVzBRbab4yWuFKmgDecnAzrDrFH++AmS0+nY+pSxCJGjA9cmB8lwIDAQAB",
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Abrir COFRE"
+    }
+  }
 }

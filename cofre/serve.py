@@ -102,6 +102,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._status()
         elif self.path.startswith("/list"):
             self._list()
+        elif self.path.startswith("/match"):
+            self._match()
         else:
             self._reject(404, "ruta desconocida")
 
@@ -218,6 +220,38 @@ class _Handler(BaseHTTPRequestHandler):
         record(self.server.vault_path, "browser-list", self.server.gate, None,
                name=f"{len(items)} nombres", ok=True)
         self._send(200, {"ok": True, "items": items})
+
+
+    def _match(self) -> None:
+        """4.6: secretos que valen para este host, para el aviso del navegador."""
+        from cofre.hosts import host_matches
+        try:
+            self._session()
+        except GateUnavailable as exc:
+            self._reject(409, f"pendrive no disponible: {exc}")
+            return
+        from urllib.parse import parse_qs, urlsplit
+        consulta = parse_qs(urlsplit(self.path).query)
+        domain = str((consulta.get("domain") or [""])[0]).strip().lower()
+        if not domain:
+            self._reject(400, "falta el dominio")
+            return
+        vault = self._vault(None)
+        items = []
+        for nombre in vault.names():
+            try:
+                patrones = list(vault.urls(nombre) or [])
+            except Exception:                        # noqa: BLE001
+                continue
+            if patrones and host_matches(domain, patrones):
+                meta = dict(vault.meta(nombre) or {})
+                items.append({"name": nombre,
+                              "kind": meta.get("type") or "secret",
+                              "tags": list(meta.get("tags") or []),
+                              "exact": domain in [str(p).lower() for p in patrones]})
+        record(self.server.vault_path, "browser-list", self.server.gate, None,
+               name=f"{len(items)} para {domain}", ok=True, detail="match")
+        self._send(200, {"ok": True, "host": domain, "items": items})
 
 
 class SecretServer(ThreadingHTTPServer):

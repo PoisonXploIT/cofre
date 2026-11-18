@@ -5,7 +5,11 @@ Las reglas son las mismas que ya aplica serve.py y no se duplican aqui:
   - status: dice si el cofre esta abierto y cuantos secretos hay, sin valores;
   - list:   nombres, etiquetas y tipo, sin valores;
   - get:    exige que el host de la pestana este asignado a ESE secreto (R1),
-            y deja constancia en el log con el dominio y sin el valor.
+            y deja constancia en el log con el dominio y sin el valor;
+  - match:  nombres cuyos dominios encajan con el host de la pestana (4.6), para
+            que el aviso del navegador los ponga primero. Sin valores;
+  - assign: anadir el host actual a los dominios de un secreto (4.6). Pide
+            confirmacion en la GUI: una pagina no puede autorizarse sola.
 
 Se usa desde el hilo de la GUI (BridgeController.poll), asi que aqui si se puede
 leer el cofre con la sesion de la ventana.
@@ -156,5 +160,62 @@ def dispatch(app, message: dict) -> dict:
         from cofre.audit import stamp_vault
         stamp_vault(app.vault)
         return {"ok": True, "name": nombre, "value": valor}
+
+    if tipo == "match":
+        # 4.6: que secretos valen para esta pestana, para ponerlos primero.
+        domain = _domain(message)
+        if not domain:
+            return {"ok": False, "error": "falta el dominio"}
+        items = []
+        for nombre in app.vault.names():
+            try:
+                patrones = list(app.vault.urls(nombre) or [])
+            except Exception:                        # noqa: BLE001
+                continue
+            if patrones and host_matches(domain, patrones):
+                meta = dict(app.vault.meta(nombre) or {})
+                items.append({"name": nombre,
+                              "kind": meta.get("type") or "secret",
+                              "tags": list(meta.get("tags") or []),
+                              "exact": domain in [str(p).lower() for p in patrones]})
+        record(app.vault_path, "browser-list", app.gate, app.serial,
+               name=f"{len(items)} para {domain}", ok=True, detail="match")
+        return {"ok": True, "host": domain, "items": items}
+
+    if tipo == "assign":
+        # 4.6: asignar el sitio desde el aviso del navegador, con confirmacion en
+        # la ventana. Solo el host exacto: nada de comodines desde una pagina.
+        nombre = str(message.get("name", "")).strip()
+        domain = _domain(message)
+        if not nombre:
+            return {"ok": False, "error": "falta el nombre"}
+        if not domain or any(c in domain for c in "/*:? "):
+            record(app.vault_path, "host-assign", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"host inválido: {domain[:40] or '(vacio)'}")
+            return {"ok": False, "error": "el host de la pagina no vale para asignar"}
+        if nombre not in set(app.vault.names()):
+            return {"ok": False, "error": "no existe ese secreto"}
+        actuales = list(app.vault.urls(nombre) or [])
+        if domain in [str(u).lower() for u in actuales]:
+            return {"ok": True, "name": nombre, "urls": actuales, "changed": False}
+        otorgado = app.request_confirm(f"Navegador - {domain}",
+                                       f"asignar '{nombre}' a este sitio",
+                                       contexto=f"assign:{nombre}:{domain}")
+        if otorgado == "deny":
+            record(app.vault_path, "host-assign", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"{domain} confirmación denegada")
+            return {"ok": False, "error": "confirmación denegada en COFRE"}
+        nuevos = actuales + [domain]
+        try:
+            app.vault.set_urls(nombre, nuevos)
+        except Exception as exc:                     # noqa: BLE001
+            record(app.vault_path, "host-assign", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"no se pudo guardar: {type(exc).__name__}")
+            return {"ok": False, "error": "no se pudieron guardar los dominios"}
+        record(app.vault_path, "host-assign", app.gate, app.serial, name=nombre,
+               ok=True, detail=f"desde el navegador: +{domain}")
+        from cofre.audit import stamp_vault
+        stamp_vault(app.vault)
+        return {"ok": True, "name": nombre, "urls": nuevos, "changed": True}
 
     return {"ok": False, "error": f"tipo desconocido: {tipo or '(vacio)'}"}

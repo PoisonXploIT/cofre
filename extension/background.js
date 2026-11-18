@@ -4,6 +4,10 @@
 //
 // Si la via TCP esta activa (COFRE_BRIDGE=tcp en la GUI), basta con cambiar
 // USE_NATIVE a false: se conserva el codigo de fetch como respaldo.
+//
+// 2026-11-18 (4.6): el aviso pinta una insignia "off" cuando el cofre esta
+// cerrado, y admite `match` (sugeridos para el sitio) y `assign` (asignar este
+// sitio, que confirma la GUI).
 
 const USE_NATIVE = true;
 const HOST_NAME = "com.cofre.host";
@@ -39,16 +43,38 @@ async function callTcp(path, options = {}) {
 }
 
 function call(message) {
-  return USE_NATIVE ? sendNative(message) : callTcp("/" + message.type, {
+  if (USE_NATIVE) return sendNative(message);
+  if (message.type === "match") {
+    return callTcp("/match?domain=" + encodeURIComponent(message.domain || ""), {});
+  }
+  return callTcp("/" + message.type, {
     method: message.type === "get" ? "POST" : "GET",
     body: message.type === "get" ? JSON.stringify(message) : undefined,
   });
 }
 
+// Insignia: "off" cuando el cofre esta cerrado, vacia cuando esta abierto.
+async function updateBadge() {
+  const st = await call({ type: "status" });
+  const abierto = !!(st.ok && st.open);
+  try {
+    await chrome.action.setBadgeText({ text: abierto ? "" : "off" });
+    await chrome.action.setBadgeBackgroundColor({ color: abierto ? "#3E9C7A" : "#6B7787" });
+  } catch (e) {
+    // en algunos navegadores action no esta disponible en el worker: no es grave
+  }
+}
+
+chrome.runtime.onInstalled.addListener(updateBadge);
+chrome.runtime.onStartup.addListener(updateBadge);
+updateBadge();
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg?.type) return false;
-  if (!["status", "list", "get"].includes(msg.type)) return false;
-  call(msg).then(sendResponse).catch((e) =>
-    sendResponse({ ok: false, error: String(e) }));
+  if (!["status", "list", "get", "match", "assign"].includes(msg.type)) return false;
+  call(msg).then((r) => {
+    if (msg.type === "status" || msg.type === "assign") updateBadge();
+    sendResponse(r);
+  }).catch((e) => sendResponse({ ok: false, error: String(e) }));
   return true;
 });
