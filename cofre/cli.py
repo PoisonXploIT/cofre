@@ -829,7 +829,18 @@ def main(argv: list[str]) -> int:
                    ok=True, detail="asistida: verificado y guardado")
             from cofre.audit import stamp_vault
             stamp_vault(vault)
-            print("valor nuevo verificado y guardado. Despliegalo y despues revoca el viejo.")
+            consumidores = list(meta.get("consumers") or [])
+            if consumidores:
+                from cofre.consumers import deploy as desplegar
+                token_gh = ""
+                try:
+                    token_gh = vault.get(session, "GH_ADMIN_TOKEN")
+                except Exception:
+                    pass
+                resultados = desplegar(consumidores, nuevo, github_token=token_gh)
+                for etiqueta, ok, detalle in resultados:
+                    print(f"  {'OK   ' if ok else 'FALLA'} {etiqueta}: {detalle}")
+            print("valor nuevo verificado y guardado.")
             if args.revoke_old:
                 try:
                     proveedor.revoke(valor, "", meta)

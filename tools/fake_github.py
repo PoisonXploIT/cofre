@@ -23,6 +23,8 @@ class FakeGitHub:
         self.installation_token = "ghs_instalacion"
         self.app_jwt_esperado = None       # si se define, se comprueba tal cual
         self.llamadas: list[tuple[str, str]] = []
+        self.secretos: dict[str, str] = {}
+        self.clave_publica = None      # (b64, key_id) si se configura
         self.server: ThreadingHTTPServer | None = None
         self.revocados: list[str] = []
 
@@ -48,6 +50,9 @@ class FakeGitHub:
 
             def do_GET(self):
                 fake.llamadas.append(("GET", self.path))
+                if self.path.endswith("/secrets/public-key") and fake.clave_publica:
+                    clave, key_id = fake.clave_publica
+                    return self._json(200, {"key": clave, "key_id": key_id})
                 if self.path == "/user":
                     if self._auth() != fake.pat:
                         return self._json(401, {"message": "Bad credentials"})
@@ -74,6 +79,16 @@ class FakeGitHub:
                         return self._json(401, {"message": "A JSON web token could not be decoded"})
                     return self._json(201, {"token": fake.installation_token,
                                             "expires_at": "2026-11-17T23:00:00Z"})
+                return self._json(404, {"message": "Not Found"})
+
+            def do_PUT(self):
+                fake.llamadas.append(("PUT", self.path))
+                largo = int(self.headers.get("Content-Length", "0") or 0)
+                cuerpo = json.loads(self.rfile.read(largo) or b"{}")
+                if "/actions/secrets/" in self.path:
+                    nombre = self.path.rsplit("/", 1)[-1]
+                    fake.secretos[nombre] = json.dumps(cuerpo)
+                    return self._json(201, {})
                 return self._json(404, {"message": "Not Found"})
 
             def do_DELETE(self):

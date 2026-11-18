@@ -9,7 +9,7 @@ pushd "%~dp0"
 if not exist .venv\Scripts\python.exe (
     echo No existe el entorno .venv; creandolo...
     python -m venv .venv
-    .venv\Scripts\python -m pip install -q cryptography fido2
+    .venv\Scripts\python -m pip install -q cryptography fido2 pynacl
 )
 
 .venv\Scripts\python -m cofre.cli %*
