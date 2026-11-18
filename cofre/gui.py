@@ -609,30 +609,35 @@ class CofreGUI:
             side="right", padx=2)
 
         # E5: sitios asignados (dominios donde se puede rellenar)
-        cab_sitios = tk.Frame(right, bg=PANEL2)
+        tarjeta_sitios = tk.Frame(right, bg=CAMPO)
+        self.tarjeta_sitios = tarjeta_sitios
+        tarjeta_sitios.pack(fill="x", padx=16, pady=(0, 8))
+        cab_sitios = tk.Frame(tarjeta_sitios, bg=CAMPO)
         self.cab_sitios = cab_sitios
-        cab_sitios.pack(fill="x", padx=16, pady=(6, 0))
+        cab_sitios.pack(fill="x", padx=8, pady=(6, 0))
         tk.Label(cab_sitios, text="Sitios donde se puede rellenar", fg=FG,
                  font=self.f_sub, bg=PANEL2).pack(side="left")
         self._btn(cab_sitios, "Asignar sitio", self.assign_site).pack(side="right")
-        self.sites_box = tk.Frame(right, bg=PANEL2)
-        self.sites_box.pack(fill="x", padx=16, pady=(2, 6))
+        self.sites_box = tk.Frame(tarjeta_sitios, bg=CAMPO)
+        self.sites_box.pack(fill="x", padx=8, pady=(2, 8))
 
         # E5: usado en (consumidores) y ciclo de vida
+        # E8: sitios y "usado en" en una fila de dos tarjetas
         fila_info = tk.Frame(right, bg=PANEL2)
         self.fila_info = fila_info
         fila_info.pack(fill="x", padx=16, pady=(0, 8))
-        col_uso = tk.Frame(fila_info, bg=PANEL2)
-        col_uso.pack(side="left", fill="both", expand=True)
-        tk.Label(col_uso, text="Usado en", fg=FG, font=self.f_sub,
-                 bg=PANEL2, anchor="w").pack(fill="x")
-        self.consumers_box = tk.Frame(col_uso, bg=PANEL2)
+        col_uso = tk.Frame(fila_info, bg=CAMPO)
+        col_uso.pack(side="left", fill="both", expand=True, ipadx=8, ipady=6)
+        tk.Label(col_uso, text="USADO EN", fg=FAINT, font=self.f_small,
+                 bg=CAMPO, anchor="w").pack(fill="x")
+        self.consumers_box = tk.Frame(col_uso, bg=CAMPO)
         self.consumers_box.pack(fill="x")
-        col_vida = tk.Frame(fila_info, bg=PANEL2)
-        col_vida.pack(side="left", fill="both", expand=True, padx=(12, 0))
-        tk.Label(col_vida, text="Ciclo de vida", fg=FG, font=self.f_sub,
-                 bg=PANEL2, anchor="w").pack(fill="x")
-        self.life_box = tk.Frame(col_vida, bg=PANEL2)
+        col_vida = tk.Frame(fila_info, bg=CAMPO)
+        col_vida.pack(side="left", fill="both", expand=True, padx=(8, 0),
+                      ipadx=8, ipady=6)
+        tk.Label(col_vida, text="CICLO DE VIDA", fg=FAINT, font=self.f_small,
+                 bg=CAMPO, anchor="w").pack(fill="x")
+        self.life_box = tk.Frame(col_vida, bg=CAMPO)
         self.life_box.pack(fill="x")
 
         # Dos filas, no una. Regla medida: con etiquetas largas, nueve botones
@@ -699,9 +704,8 @@ class CofreGUI:
         self._btn(centro_vacio, "Nuevo secreto", self._focus_new,
                   accent=True).pack()
         self._detail_piezas = [self.detail_name, self.meta_label, self.chips_row,
-                               self.valor_label, self.campo_valor, self.sites_box,
-                               self.consumers_box, self.life_box, acciones,
-                               self.cab_sitios, self.fila_info]
+                               self.tarjeta_valor, self.tarjeta_sitios, acciones,
+                               self.fila_info]
         self._update_detail_visible()
 
         # ---------- pie ----------
@@ -2157,9 +2161,9 @@ class CofreGUI:
             tk.Label(self.sites_box, text="ningúno: este secreto no se rellena en ningúna web",
                      fg=FAINT, font=self.f_small, bg=PANEL2, anchor="w").pack(fill="x")
         for sitio in sitios:
-            fila = tk.Frame(self.sites_box, bg=PANEL2)
+            fila = tk.Frame(self.sites_box, bg=CAMPO)
             fila.pack(fill="x", pady=1)
-            tk.Label(fila, text=sitio, fg=FG, font=self.f_mono, bg=PANEL2,
+            tk.Label(fila, text=sitio, fg=FG, font=self.f_mono, bg=CAMPO,
                      anchor="w").pack(side="left")
             self._btn(fila, "Quitar",
                       lambda s=sitio: self.remove_site(s)).pack(side="right")
@@ -2167,10 +2171,10 @@ class CofreGUI:
         consumidores = list(meta.get("consumers") or [])
         if not consumidores:
             tk.Label(self.consumers_box, text="nada desplegado", fg=FAINT,
-                     font=self.f_small, bg=PANEL2, anchor="w").pack(fill="x")
+                     font=self.f_small, bg=CAMPO, anchor="w").pack(fill="x")
         for c in consumidores:
             tk.Label(self.consumers_box, text=str(c), fg=MUT, font=self.f_small,
-                     bg=PANEL2, anchor="w").pack(fill="x")
+                     bg=CAMPO, anchor="w").pack(fill="x")
 
         lineas = []
         if meta.get("provider"):
@@ -2185,7 +2189,7 @@ class CofreGUI:
             lineas.append("sin datos de ciclo de vida")
         for linea in lineas:
             tk.Label(self.life_box, text=linea, fg=MUT, font=self.f_small,
-                     bg=PANEL2, anchor="w").pack(fill="x")
+                     bg=CAMPO, anchor="w").pack(fill="x")
 
     def _chip(self, parent, texto: str, kind: str):
         """Chip pequeno sin depender del rediseño completo (E2 lo sustituye)."""
