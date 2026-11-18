@@ -925,7 +925,21 @@ class CofreGUI:
         self.refresh_sticks()
         self.refresh_wizard()
         self.refresh_list()
+        self._escribir_calendario()
         return True
+
+    def _escribir_calendario(self) -> None:
+        """5.8: resumen sin nombres para la tarea programada de Windows."""
+        try:
+            if not self.vault.is_v2():
+                return
+            store = self.vault._v2store()
+            if store.master is None:
+                return
+            from cofre import schedule
+            schedule.escribir(store)
+        except Exception:
+            pass
 
     def lock(self, event=None, motivo: str | None = None, detalle: str = ""):
         """Bloquear: se tira la clave de sesión de la RAM. Hace falta el
@@ -944,6 +958,8 @@ class CofreGUI:
         if self.session:
             record(self.vault_path, "lock", self.gate, self.serial, ok=True,
                    detail=detalle or "manual")
+        # el calendario se escribe antes de soltar la llave
+        self._escribir_calendario()
         audit_clear_key()
         self.session = None
         self.serial = None
@@ -1804,6 +1820,11 @@ class CofreGUI:
                     fila_vieja, "Revocar",
                     lambda n=nombre, d=str(pendiente.get("desde") or ""):
                     self._revocar_antigua(n, d)).pack(side="left", padx=(8, 0))
+                self._text_btn(
+                    fila_vieja, "Descartar",
+                    lambda n=nombre, d=str(pendiente.get("desde") or ""):
+                    self._descartar_antigua(n, d), danger=True).pack(
+                        side="left", padx=(6, 0))
 
 
         for datos in self.stick_report():
@@ -1889,6 +1910,32 @@ class CofreGUI:
                ok=True, detail=texto[:150])
         self.set_foot(f"{nombre}: {texto}")
         self._mostrar_vista("salud")
+        self._escribir_calendario()
+
+    def _descartar_antigua(self, nombre: str, desde: str = "") -> None:
+        """Quitar el aviso sin tocar el proveedor (la credencial ya no existe)."""
+        if not self.session:
+            self.set_foot("el cofre esta bloqueado")
+            return
+        aviso = (f"Se va a quitar el aviso de la credencial antigua de "
+                 f"'{nombre}'. No se toca el proveedor: si esa credencial sigue "
+                 "viva, seguira viva. Usalo solo si ya la revocaste a mano.")
+        if not self._confirmar_accion("Descartar aviso", aviso, "Descartar"):
+            return
+        try:
+            store = self.vault._v2store()
+            store.refresh()
+            from cofre import rotation as rot
+            texto = rot.descartar_antigua(store, store.master, nombre,
+                                          desde=desde or None)
+        except Exception as exc:                       # noqa: BLE001
+            self.set_foot(f"no se pudo descartar: {exc}")
+            return
+        record(self.vault_path, "discard", self.gate, self.serial, name=nombre,
+               ok=True, detail=texto[:150])
+        self.set_foot(f"{nombre}: {texto}")
+        self._mostrar_vista("salud")
+        self._escribir_calendario()
 
     def _mostrar_vista(self, vista: str) -> None:
         """Cambia entre el detalle normal y las vistas (salud)."""

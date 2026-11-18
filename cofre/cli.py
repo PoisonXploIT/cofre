@@ -34,6 +34,7 @@ Solo desbloquean los pendrives cuyo serial de volumen esta registrado en
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import secrets
@@ -194,6 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
                                     help="ver una rotación interrumpida y decidir"))
     rs.add_argument("--opcion", choices=["continuar", "deshacer"], default="")
     rs.add_argument("--si", action="store_true", help="no pedir confirmación")
+
+    du = with_common(sub.add_parser(
+        "due", help="recordatorios del calendario (sin abrir el cofre)"))
+    du.add_argument("--notify", action="store_true",
+                    help="mostrar el aviso si la fecha ya llego")
 
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
@@ -385,6 +391,12 @@ def prepare_audit(vault_path, gate: str, stick: str | None, allow_new: bool):
             store = vault._v2store()
             _set_key(store.master)
             bind_store(store)
+            # 5.8: el calendario se deja escrito sin nombres. Se refresca al
+            # abrir y otra vez al terminar el proceso (atexit), para que un
+            # cambio hecho por el comando quede reflejado.
+            from cofre import schedule
+            schedule.escribir(store)
+            atexit.register(schedule.escribir, store)
         return vault
     except Exception:
         return Vault(Path(vault_path))
@@ -407,6 +419,21 @@ def main(argv: list[str]) -> int:
                   f"-> {info['bits']} bits  {info['aviso']}")
             return 0
         print(machine_password() if args.machine else human_password(words=args.words, lang=args.lang))
+        return 0
+
+    if args.command == "due":
+        # El calendario no lleva nombres ni valores y se lee sin llave. El aviso
+        # va en su propio hilo, como el resto de alertas.
+        from cofre import schedule
+        datos = schedule.leer(vault_path)
+        if not args.notify:
+            print(schedule.describe(datos))
+            return 0
+        if schedule.toca(datos):
+            from cofre.alerts import show_message
+            show_message("COFRE - recordatorio", schedule.mensaje(datos))
+        else:
+            print(schedule.describe(datos))
         return 0
 
     if args.command == "log" and args.stats:

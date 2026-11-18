@@ -1,5 +1,6 @@
 cofre.json
 .cofre-salt
+cofre-schedule.json
 .cofre-sticks.json
 .cofre-access.log
 .cofre-access.log.old

@@ -293,6 +293,19 @@ def notify(alerts: list[Alert]) -> None:
     hilo.start()
 
 
+def show_message(titulo: str, texto: str) -> None:
+    """MessageBoxW en su propio hilo, esperando a que se cierre.
+
+    `due --notify` termina en cuanto se cierra el aviso; si el hilo fuera daemon
+    el proceso moriria antes de mostrarlo. Para la GUI existe `notify`, que no
+    espera para no bloquear a Tkinter.
+    """
+    hilo = threading.Thread(target=_messagebox, args=(titulo, texto),
+                            daemon=False)
+    hilo.start()
+    hilo.join()
+
+
 def describe(alerts: list[Alert]) -> str:
     if not alerts:
         return ""

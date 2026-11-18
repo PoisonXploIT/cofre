@@ -492,3 +492,86 @@ class TestAlertaDeLaAntigua(unittest.TestCase):
             self.assertEqual(evaluate_unrevoked(e.store, eventos), [])
         finally:
             e.cerrar()
+
+
+class TestHistorialFijado(unittest.TestCase):
+    """Los valores pendientes de revocar no salen del historial aunque se llene.
+
+    GitHub revoca por valor: si el valor se cae del historial, la credencial
+    vieja queda viva para siempre. Las versiones fijadas no cuentan para el
+    tope de 5 hasta que se revocan o se descartan.
+    """
+
+    def setUp(self):
+        self.e = Escenario()
+        R._actualizar_meta(self.e.store, self.e.master, "CF_API",
+                           {"provider": "github"})
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def _rotar(self, valor_nuevo: str) -> None:
+        resultado = R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "github", destinos=[],
+            desplegar=lambda d, v: None,
+            crear=lambda: (valor_nuevo, {}), ref_old={})
+        self.assertEqual(resultado, "completada")
+
+    def test_seis_rotaciones_sin_revocar_siguen_siendo_revocables(self):
+        for i in range(6):
+            self._rotar(f"valor-{i}")
+
+        antiguas = R._antiguas(R._meta(self.e.store, self.e.master, "CF_API"))
+        self.assertEqual(len(antiguas), 6)
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        historia = contenido["history"]
+        self.assertEqual(len(historia), 6,
+                         "las fijadas no cuentan para el tope de 5")
+        self.assertTrue(all(entrada.get("pinned") for entrada in historia))
+
+        # cada nota encuentra su valor, incluida la mas vieja
+        valores = [R._valor_de_la_antigua(self.e.store, self.e.master,
+                                          "CF_API", antigua)
+                   for antigua in antiguas]
+        self.assertNotIn("", valores)
+        self.assertEqual(set(valores),
+                         {"valor-viejo", "valor-0", "valor-1", "valor-2",
+                          "valor-3", "valor-4"})
+
+        from unittest import mock
+        with mock.patch("cofre.providers.github.revoke_credentials") as rev:
+            for pendiente in R.pendientes_de_revocar(self.e.store,
+                                                     self.e.master):
+                R.revocar_antigua(self.e.store, self.e.master, "CF_API",
+                                  desde=pendiente["desde"])
+        self.assertEqual(rev.call_count, 6)
+        revocados = {llamada.args[0][0] for llamada in rev.call_args_list}
+        self.assertEqual(revocados, set(valores))
+        self.assertEqual(R._antiguas(R._meta(self.e.store, self.e.master,
+                                            "CF_API")), [])
+        # ya sin fijar, el historial vuelve a su tope
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        self.assertEqual(len(contenido["history"]), 5)
+        self.assertNotIn("valor-viejo",
+                         [entrada["value"] for entrada in contenido["history"]])
+
+    def test_el_tope_recorta_solo_las_libres(self):
+        historia = [{"value": f"v{i}", "hid": f"h{i}", "pinned": i < 2}
+                    for i in range(8)]
+        contenido = {"value": "activo", "history": historia}
+        self.assertTrue(R._recortar_historial(contenido))
+        self.assertEqual([entrada["value"] for entrada in contenido["history"]],
+                         ["v0", "v1", "v3", "v4", "v5", "v6", "v7"])
+
+    def test_descartar_quita_la_nota_sin_tocar_el_proveedor(self):
+        self._rotar("valor-0")
+        antes = R._antiguas(R._meta(self.e.store, self.e.master, "CF_API"))
+        self.assertEqual(len(antes), 1)
+        texto = R.descartar_antigua(self.e.store, self.e.master, "CF_API",
+                                    desde=antes[0]["desde"])
+        self.assertIn("descartado", texto)
+        self.assertEqual(R._antiguas(R._meta(self.e.store, self.e.master,
+                                            "CF_API")), [])
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        self.assertFalse(any(entrada.get("pinned")
+                             for entrada in contenido["history"]))

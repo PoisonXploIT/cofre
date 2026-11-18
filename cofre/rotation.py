@@ -31,7 +31,9 @@ dias, salta una alerta baja.
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
+
 
 # El diario vive dentro del indice cifrado, no en un fichero aparte: si alguien
 # cambia el ID de la credencial nueva por el de otro token, el descifrado falla y
@@ -40,6 +42,11 @@ from datetime import datetime
 JOURNAL_KEY = "rotation"
 MARGEN_ALERTA_HORAS = 24
 DIAS_SIN_REVOCAR = 7
+# El historial guarda 5 versiones normales. Las que estan pendientes de revocar
+# se quedan fijadas y NO cuentan para ese tope: si salieran del historial, en
+# GitHub (que revoca por valor) ya no se podrian revocar.
+MAX_HISTORIAL = 5
+
 
 FASES = ("comenzada", "pendiente_creada", "desplegando", "desplegada",
          "promovida", "revocada")
@@ -191,6 +198,7 @@ def pendientes_de_revocar(store, master: bytes) -> list[dict]:
                 "proveedor": str(meta.get("provider") or ""),
                 "ref": dict(dato.get("ref") or {}),
                 "desde": str(dato.get("desde") or ""),
+                "hid": str(dato.get("hid") or ""),
                 "history": dato.get("history"),
             })
     return sorted(salida, key=lambda p: p["desde"])
@@ -202,6 +210,65 @@ def dias_desde(desde: str) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, (datetime.now() - cuando).days)
+
+
+def _recortar_historial(contenido: dict) -> bool:
+    """Dejar 5 versiones normales; las fijadas no cuentan ni se tiran."""
+    historia = contenido.get("history")
+    if not isinstance(historia, list):
+        return False
+    libres = [i for i, entrada in enumerate(historia)
+              if isinstance(entrada, dict) and not entrada.get("pinned")]
+    sobran = set(libres[:-MAX_HISTORIAL]) if len(libres) > MAX_HISTORIAL else set()
+    if not sobran:
+        return False
+    contenido["history"] = [entrada for i, entrada in enumerate(historia)
+                            if i not in sobran]
+    return True
+
+
+def _desfijar_historial(store, master: bytes, nombre: str, hid: str) -> None:
+    """La credencial ya no esta pendiente: su versión vuelve a contar normal."""
+    if not hid:
+        return
+    contenido = store._vault.blob(store._data, master, nombre)
+    cambiado = False
+    for entrada in contenido.get("history") or []:
+        if (isinstance(entrada, dict) and entrada.get("hid") == hid
+                and entrada.get("pinned")):
+            entrada["pinned"] = False
+            cambiado = True
+    if not cambiado:
+        return
+    _recortar_historial(contenido)
+    store._vault.set_blob(store._data, master, nombre, contenido)
+    store.save(store._data)
+
+
+def _valor_de_la_antigua(store, master: bytes, nombre: str,
+                         dato: dict) -> str:
+    """Valor viejo para los proveedores que revocan por valor (GitHub).
+
+    Se busca por `hid` (estable aunque el historial se recorte); se admite el
+    indice antiguo por compatibilidad.
+    """
+    hid = str(dato.get("hid") or "")
+    indice = dato.get("history")
+    if not hid and indice is None:
+        return ""
+    contenido = store._vault.blob(store._data, master, nombre)
+    historia = list(contenido.get("history") or [])
+    if hid:
+        for entrada in historia:
+            if isinstance(entrada, dict) and entrada.get("hid") == hid:
+                return str(entrada.get("value") or "")
+        return ""
+    try:
+        if 0 <= int(indice) < len(historia):
+            return str(historia[int(indice)].get("value") or "")
+    except (TypeError, ValueError):
+        pass
+    return ""
 
 
 def revocar_antigua(store, master: bytes, nombre: str, admin_value: str = "",
@@ -228,15 +295,7 @@ def revocar_antigua(store, master: bytes, nombre: str, admin_value: str = "",
     ref = dict(elegida.get("ref") or {})
     objetivo = str(ref.get("token_id") or "")
     if not objetivo:
-        idx_hist = elegida.get("history")
-        if idx_hist is not None:
-            contenido = store._vault.blob(store._data, master, nombre)
-            historia = list(contenido.get("history") or [])
-            try:
-                if 0 <= int(idx_hist) < len(historia):
-                    objetivo = str(historia[int(idx_hist)].get("value") or "")
-            except (TypeError, ValueError):
-                objetivo = ""
+        objetivo = _valor_de_la_antigua(store, master, nombre, elegida)
     if not objetivo:
         raise ProviderError("no se sabe que credencial antigua revocar")
 
@@ -244,9 +303,41 @@ def revocar_antigua(store, master: bytes, nombre: str, admin_value: str = "",
     proveedor = provider_get(str(meta.get("provider") or ""))
     proveedor.revoke(objetivo, admin_value, meta)
 
+    # primero se quita la fijacion y luego la nota; si desfijar fallara, la nota
+    # se iria igual: el proveedor ya la revoco
+    try:
+        _desfijar_historial(store, master, nombre, str(elegida.get("hid") or ""))
+    except Exception:                              # noqa: BLE001
+        pass
     resto = [a for a in antiguas if a is not elegida]
     _guardar_antiguas(store, master, nombre, resto)
     return "credencial antigua revocada"
+
+
+def descartar_antigua(store, master: bytes, nombre: str,
+                      desde: str | None = None) -> str:
+    """Quitar la nota sin tocar el proveedor.
+
+    Para cuando la credencial ya se revoco a mano en el panel del proveedor: no
+    se puede volver a revocar (daria 404) y la nota quedaria para siempre.
+    """
+    antiguas = _antiguas(_meta(store, master, nombre))
+    if not antiguas:
+        return "no hay credencial antigua pendiente"
+    if desde:
+        elegida = next((a for a in antiguas if str(a.get("desde") or "") == desde),
+                       None)
+        if elegida is None:
+            return "no hay credencial antigua pendiente con esa fecha"
+    else:
+        elegida = antiguas[0]
+    try:
+        _desfijar_historial(store, master, nombre, str(elegida.get("hid") or ""))
+    except Exception:                              # noqa: BLE001
+        pass
+    resto = [a for a in antiguas if a is not elegida]
+    _guardar_antiguas(store, master, nombre, resto)
+    return "aviso descartado (no se toco el proveedor)"
 
 
 def _olvidar_antigua(store, master: bytes, nombre: str, desde: str = "") -> None:
@@ -255,9 +346,17 @@ def _olvidar_antigua(store, master: bytes, nombre: str, desde: str = "") -> None
     if not antiguas:
         return
     if desde:
+        elegida = next((a for a in antiguas if str(a.get("desde") or "") == desde),
+                       None)
         resto = [a for a in antiguas if str(a.get("desde") or "") != desde]
     else:
-        resto = antiguas[1:]
+        elegida, resto = antiguas[0], antiguas[1:]
+    if elegida is not None:
+        try:
+            _desfijar_historial(store, master, nombre,
+                                str(elegida.get("hid") or ""))
+        except Exception:                          # noqa: BLE001
+            pass
     _guardar_antiguas(store, master, nombre, resto)
 
 
@@ -345,10 +444,14 @@ def _promover(store, master: bytes, diario: Journal) -> str:
     indice_historial = None
     if pendiente is not None:
         historia = contenido.setdefault("history", [])
+        hid = secrets.token_hex(8)
         historia.append({"value": str(contenido.get("value") or ""),
-                         "replaced": _ahora()})
+                         "replaced": _ahora(), "hid": hid, "pinned": True})
         indice_historial = len(historia) - 1
         contenido["value"] = str(pendiente.get("value") or "")
+        # el valor que hay que poder revocar no se tira aunque el historial
+        # crezca: queda fijado hasta que se revoque o se descarte
+        _recortar_historial(contenido)
         store._vault.set_blob(store._data, master, nombre, contenido)
         store.save(store._data)
 
@@ -359,7 +462,8 @@ def _promover(store, master: bytes, diario: Journal) -> str:
         cambios["provider_ref"] = ref_nueva
     if indice_historial is not None:
         desde = _ahora()
-        nueva = {"ref": dict(diario.datos.get("ref_old") or {}), "desde": desde}
+        nueva = {"ref": dict(diario.datos.get("ref_old") or {}),
+                 "desde": desde, "hid": hid}
         nueva["history"] = indice_historial
         cambios["old_unrevoked"] = _antiguas(_meta(store, master, nombre)) + [nueva]
         diario.datos["promovida_desde"] = desde
