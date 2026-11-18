@@ -557,8 +557,6 @@ def close_segment(vault_path: str | Path, new_master: bytes, motivo: str = "",
 def retired_report(vault_path: str | Path) -> tuple[bool, str]:
     """Comprobar los tramos retirados contra su ancla (hash, no firma)."""
     archivos = _segmentos_retirados(vault_path)
-    if not archivos:
-        return True, ""
     anclas: dict[str, tuple[str, str, str]] = {}
     for ev in _events(vault_path):
         if ev.get("ev") != "audit-start":
@@ -583,6 +581,11 @@ def retired_report(vault_path: str | Path) -> tuple[bool, str]:
                     otro, sha_otro = trozo.split("=", 1)
                     anclas.setdefault(otro, (sha_otro, str(ev.get("ts") or "")[:10],
                                              motivo))
+    for nombre in anclas:
+        if not nombre.startswith(SEGMENT_PREFIX):
+            continue
+        if not (Path(vault_path).parent / nombre).exists():
+            return False, f"{nombre}: falta el tramo retirado anclado"
     partes = []
     for archivo in archivos:
         ancla = anclas.get(archivo.name)

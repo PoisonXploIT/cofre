@@ -215,6 +215,18 @@ class TestSegmentos(unittest.TestCase):
         self.assertIn(Path(seg1["archivo"]).name, detalle)
         self.assertIn(Path(seg2["archivo"]).name, detalle)
 
+    def test_un_tramo_retirado_borrado_se_detecta(self):
+        seg = audit.close_segment(self.vault, self.nueva, motivo="prueba")
+        archivo = Path(seg["archivo"])
+        import os
+        import stat
+        os.chmod(archivo, stat.S_IWRITE)
+        archivo.unlink()
+        audit.set_key(self.nueva)
+        ok, detalle = audit.verify(self.vault)
+        self.assertFalse(ok)
+        self.assertIn("falta el tramo retirado", detalle)
+
     def test_sin_log_no_hay_nada_que_cerrar(self):
         audit.clear_key()
         audit.audit_path(self.vault).unlink(missing_ok=True)
