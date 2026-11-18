@@ -271,7 +271,8 @@ class TestFalloEnCadaFase(unittest.TestCase):
         return R.run_rotation(
             self.e.store, self.e.master, "CF_API", "cloudflare", "valor-nuevo",
             {"token_id": "nuevo"}, self.destinos, desplegar, revocar,
-            revocar_viejo=revocar_viejo), desplegados, revocados
+            revocar_viejo=revocar_viejo,
+            ref_old={"token_id": "viejo"}), desplegados, revocados
 
     def test_fallo_al_desplegar_deja_fase_intermedia(self):
         resultado, desplegados, _ = self._correr("desplegar")
@@ -295,9 +296,199 @@ class TestFalloEnCadaFase(unittest.TestCase):
         self.assertEqual(revocados, [])
         self.assertEqual(len(desplegados), 2)
         self.assertEqual(self.e.valor(), "valor-nuevo")
+        # la vieja sigue viva en el proveedor: queda anotada con su referencia
+        antiguas = R._antiguas(R._meta(self.e.store, self.e.master, "CF_API"))
+        self.assertEqual(len(antiguas), 1)
+        self.assertEqual(antiguas[0]["ref"]["token_id"], "viejo")
+        self.assertTrue(antiguas[0]["desde"])
 
     def test_ciclo_completo_cierra_el_diario(self):
         resultado, _, revocados = self._correr("nada")
         self.assertEqual(resultado, "completada")
         self.assertEqual(revocados, ["viejo"])
         self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
+        self.assertEqual(R._antiguas(R._meta(self.e.store, self.e.master,
+                                            "CF_API")), [])
+
+
+class TestCrearYVerificar(unittest.TestCase):
+    """Faltaban dos casos: fallo al crear y fallo al verificar lo desplegado."""
+
+    def setUp(self):
+        self.e = Escenario()
+        self.destinos = ["cfw:cuenta:worker:U", "cfw:cuenta:worker:V"]
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def test_fallo_al_crear_no_deja_nada(self):
+        tocados = []
+
+        def crear():
+            raise RuntimeError("fallo simulado al crear")
+
+        def desplegar(destinos, valor):
+            tocados.append(destinos[0])
+
+        resultado = R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "cloudflare",
+            destinos=self.destinos, desplegar=desplegar, crear=crear)
+
+        self.assertTrue(resultado.startswith("no-creada"), resultado)
+        # ni diario abierto, ni pendiente, ni destinos tocados
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
+        self.assertIsNone(R.Journal.cargar(self.e.store, self.e.master))
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        self.assertNotIn("pending", contenido)
+        self.assertEqual(contenido["value"], "valor-viejo")
+        self.assertEqual(self.e.valor(), "valor-viejo")
+        self.assertEqual(tocados, [])
+
+    def test_fallo_al_verificar_tras_desplegar_deja_desplegada(self):
+        tocados = []
+
+        def crear():
+            return "valor-nuevo", {"token_id": "nuevo"}
+
+        def desplegar(destinos, valor):
+            tocados.append((destinos[0], valor))
+
+        def verificar(valor):
+            raise RuntimeError("el valor nuevo no verifica")
+
+        resultado = R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "cloudflare",
+            destinos=self.destinos, desplegar=desplegar, crear=crear,
+            verificar=verificar)
+
+        self.assertIn("interrumpida", resultado)
+        plan = R.plan_resume(self.e.store, self.e.master)
+        self.assertEqual(plan["fase"], "desplegada")
+        self.assertEqual(plan["recomendada"], "deshacer")
+        self.assertEqual(len(tocados), 2, "se desplego en los dos destinos")
+        # aun no se promovio: el activo sigue siendo el viejo
+        self.assertEqual(self.e.valor(), "valor-viejo")
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        self.assertIn("pending", contenido)
+
+    def test_sin_crear_no_escribe_nada(self):
+        def crear():
+            return "", {}
+
+        resultado = R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "cloudflare",
+            destinos=self.destinos, desplegar=lambda d, v: None, crear=crear)
+        self.assertTrue(resultado.startswith("no-creada"))
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
+
+
+class TestAntiguaSinRevocar(unittest.TestCase):
+    """Al cerrar sin revocar, la credencial vieja no se olvida."""
+
+    def setUp(self):
+        self.e = Escenario()
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def _ciclo(self, revocar_viejo: bool, ref_old: dict | None = None):
+        return R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "cloudflare",
+            destinos=[], desplegar=lambda d, v: None,
+            crear=lambda: ("valor-nuevo", {"token_id": "id-nuevo"}),
+            revocar=lambda: None, revocar_viejo=revocar_viejo,
+            ref_old=ref_old or {"token_id": "id-viejo"})
+
+    def test_sin_revocar_guarda_ref_y_fecha(self):
+        self.assertEqual(self._ciclo(False), "completada")
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
+        meta = R._meta(self.e.store, self.e.master, "CF_API")
+        antiguas = R._antiguas(meta)
+        self.assertEqual(len(antiguas), 1)
+        self.assertEqual(antiguas[0]["ref"]["token_id"], "id-viejo")
+        self.assertTrue(antiguas[0]["desde"])
+        self.assertEqual(meta["provider_ref"]["token_id"], "id-nuevo")
+
+    def test_revocar_limpia_la_nota(self):
+        self.assertEqual(self._ciclo(True), "completada")
+        meta = R._meta(self.e.store, self.e.master, "CF_API")
+        self.assertEqual(R._antiguas(meta), [])
+
+    def test_dos_rotaciones_sin_revocar_no_se_pisan(self):
+        self.assertEqual(self._ciclo(False), "completada")
+        self.assertEqual(self._ciclo(False), "completada")
+        antiguas = R._antiguas(R._meta(self.e.store, self.e.master, "CF_API"))
+        self.assertEqual(len(antiguas), 2)
+
+
+class TestRevocarLaAntigua(unittest.TestCase):
+    def setUp(self):
+        self.e = Escenario()
+        self.e.fake.add_token("valor-viejo", "tok-viejo", "viejo")
+        self.e.fake.add_token(self.e.fake.admin_token, "tok-admin", "admin")
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def _anotar(self, dato: dict) -> None:
+        R._actualizar_meta(self.e.store, self.e.master, "CF_API",
+                           {"provider": "cloudflare", "old_unrevoked": [dato]})
+
+    def test_revoca_por_id_y_limpia(self):
+        self._anotar({"ref": {"token_id": "tok-viejo"},
+                      "desde": "2026-11-01T10:00:00"})
+        texto = R.revocar_antigua(self.e.store, self.e.master, "CF_API",
+                                  self.e.fake.admin_token)
+        self.assertIn("revocada", texto)
+        self.assertIsNone(self.e.fake.by_id("tok-viejo"))
+        self.assertEqual(R._antiguas(R._meta(self.e.store, self.e.master,
+                                            "CF_API")), [])
+
+    def test_github_revoca_por_el_valor_del_historial(self):
+        from unittest import mock
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
+        contenido["history"] = [{"value": "ghp_viejo", "replaced": "2026-11-01"}]
+        self.e.v2.set_blob(self.e.store._data, self.e.master, "CF_API", contenido)
+        self.e.v2.save(self.e.store._data)
+        R._actualizar_meta(self.e.store, self.e.master, "CF_API", {
+            "provider": "github",
+            "old_unrevoked": [{"ref": {}, "history": 0,
+                               "desde": "2026-11-01T10:00:00"}]})
+        with mock.patch("cofre.providers.github.revoke_credentials") as rev:
+            texto = R.revocar_antigua(self.e.store, self.e.master, "CF_API")
+        rev.assert_called_once_with(["ghp_viejo"])
+        self.assertIn("revocada", texto)
+        self.assertEqual(R._antiguas(R._meta(self.e.store, self.e.master,
+                                            "CF_API")), [])
+
+
+class TestAlertaDeLaAntigua(unittest.TestCase):
+    """A los 7 días, una alerta baja (y no se repite en cada pasada)."""
+
+    def test_avisa_a_los_siete_dias_una_sola_vez(self):
+        from datetime import datetime, timedelta
+
+        from cofre.alerts import evaluate_unrevoked
+
+        e = Escenario()
+        try:
+            viejo = (datetime.now() - timedelta(days=8)).isoformat(timespec="seconds")
+            reciente = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+            R._actualizar_meta(e.store, e.master, "CF_API", {
+                "provider": "cloudflare",
+                "old_unrevoked": [
+                    {"ref": {"token_id": "viejo"}, "desde": viejo},
+                    {"ref": {"token_id": "otro"}, "desde": reciente},
+                ]})
+            alertas = evaluate_unrevoked(e.store, [])
+            self.assertEqual(len(alertas), 1)
+            alerta = alertas[0]
+            self.assertEqual(alerta.rule, "credencial-sin-revocar")
+            self.assertEqual(alerta.severity, "baja")
+            self.assertIn("CF_API", alerta.text)
+            # ya escrito en el log: no se repite
+            eventos = [{"ev": "alert", "name": "credencial-sin-revocar",
+                        "detail": f"baja: {alerta.text}"}]
+            self.assertEqual(evaluate_unrevoked(e.store, eventos), [])
+        finally:
+            e.cerrar()

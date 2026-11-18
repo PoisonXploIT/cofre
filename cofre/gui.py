@@ -1483,6 +1483,16 @@ class CofreGUI:
             eventos = alerts_mod.events_of(self.vault_path)
             cfg = alerts_mod.load_settings(self.vault_path)
             nuevas = alerts_mod.evaluate(eventos, cfg, self.alert_state)
+            try:
+                # credenciales viejas sin revocar: salen del indice, no de un
+                # evento, y solo avisan a partir de los 7 dias
+                if self.vault.is_v2():
+                    store = self.vault._v2store()
+                    if store.master is not None:
+                        nuevas.extend(
+                            alerts_mod.evaluate_unrevoked(store, eventos))
+            except Exception:
+                pass
             nuevas = alerts_mod.apply_cooldown(nuevas, self.alert_state, cfg)
             if not nuevas:
                 return
@@ -1703,6 +1713,12 @@ class CofreGUI:
         panel = tk.Frame(self.right, bg=PANEL2)
         self._salud_frame = panel
         panel.pack(fill="both", expand=True, padx=16, pady=12)
+        # la GUI cachea el cofre: se relee antes de contar (una rotacion hecha
+        # desde la CLI no se veria)
+        try:
+            self.vault.refresh()
+        except Exception:
+            pass
         tk.Label(panel, text="Salud del cofre", fg=FG, bg=PANEL2,
                  font=self.f_h2, anchor="w").pack(fill="x")
 
@@ -1759,6 +1775,37 @@ class CofreGUI:
                                                                   padx=(6, 10))
             self._text_btn(fila_pend, "Sellar", self._sellar_registro).pack(side="left")
 
+        # Credenciales viejas que se quedaron vivas al cerrar una rotacion sin
+        # revocar. Se recuerdan en la entrada (indice cifrado): aqui se ven y se
+        # pueden revocar sin volver a rotar.
+        try:
+            from cofre import rotation as rot
+            store = self.vault._v2store() if self.vault.is_v2() else None
+            viejas = (rot.pendientes_de_revocar(store, store.master)
+                      if store is not None and store.master is not None else [])
+        except Exception:
+            viejas = []
+        if viejas:
+            cuanto = ("1 credencial antigua sin revocar" if len(viejas) == 1
+                      else f"{len(viejas)} credenciales antiguas sin revocar")
+            tk.Label(panel, text=cuanto, fg=WARNFG, bg=PANEL2,
+                     font=self.f_sub, anchor="w").pack(fill="x", pady=(10, 2))
+            for pendiente in viejas:
+                nombre = str(pendiente.get("nombre") or "")
+                dias = rot.dias_desde(str(pendiente.get("desde") or ""))
+                fila_vieja = tk.Frame(panel, bg=PANEL2)
+                fila_vieja.pack(fill="x", pady=(2, 0))
+                tk.Label(fila_vieja,
+                         text=(f"{nombre} · {pendiente.get('proveedor') or 'sin proveedor'}"
+                               f" · hace {dias} d"),
+                         fg=MUT, bg=PANEL2, font=self.f_small,
+                         anchor="w").pack(side="left")
+                self._text_btn(
+                    fila_vieja, "Revocar",
+                    lambda n=nombre, d=str(pendiente.get("desde") or ""):
+                    self._revocar_antigua(n, d)).pack(side="left", padx=(8, 0))
+
+
         for datos in self.stick_report():
             estado = "conectada" if datos.get("present") else "no conectada"
             if getattr(self, "stick", None):
@@ -1776,6 +1823,71 @@ class CofreGUI:
         except Exception:
             hecho = False
         self.set_foot("registro sellado" if hecho else "no se pudo sellar")
+        self._mostrar_vista("salud")
+
+    def _confirmar_accion(self, titulo: str, texto: str, etiqueta: str) -> bool:
+        """Confirmacion explicita para una accion destructiva de la GUI."""
+        win = self._sheet(titulo)
+        win.geometry("500x220")
+        tk.Label(win, text=texto, fg=FG, bg=PANEL, font=self.f_body,
+                 wraplength=450, justify="left", anchor="w").pack(
+            fill="x", padx=18, pady=(18, 12))
+        salida = {"ok": False}
+
+        def aceptar():
+            salida["ok"] = True
+            win.destroy()
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=8)
+        self._btn(fila, "Cancelar", win.destroy).pack(side="right")
+        self._btn(fila, etiqueta, aceptar, accent=True).pack(side="right", padx=8)
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.focus_force()
+        self.root.wait_window(win)
+        return salida["ok"]
+
+    def _revocar_antigua(self, nombre: str, desde: str = "") -> None:
+        """Revocar en el proveedor una credencial vieja que se quedo viva.
+
+        No toca la credencial activa: la que usa COFRE es otra.
+        """
+        if not self.session:
+            self.set_foot("el cofre esta bloqueado")
+            return
+        try:
+            store = self.vault._v2store()
+            store.refresh()
+        except Exception as exc:                       # noqa: BLE001
+            self.set_foot(f"no se pudo releer el cofre: {exc}")
+            return
+        if store.master is None:
+            self.set_foot("el cofre esta bloqueado")
+            return
+        meta = dict(self.vault.meta(nombre) or {})
+        proveedor = str(meta.get("provider") or "")
+        aviso = (f"Se va a revocar en {proveedor or 'el proveedor'} la credencial "
+                 f"antigua de '{nombre}'. La que COFRE usa ahora no se toca.")
+        if not self._confirmar_accion("Revocar credencial antigua", aviso,
+                                     "Revocar"):
+            return
+        admin_valor = ""
+        if proveedor == "cloudflare":
+            try:
+                admin_valor = self.vault.get(self.session, "CLOUDFLARE_TOKEN_ADMIN")
+            except Exception:
+                self.set_foot("falta CLOUDFLARE_TOKEN_ADMIN para revocar en Cloudflare")
+                return
+        try:
+            from cofre import rotation as rot
+            texto = rot.revocar_antigua(store, store.master, nombre,
+                                        admin_valor, desde=desde or None)
+        except Exception as exc:                       # noqa: BLE001
+            self.set_foot(f"no se pudo revocar: {exc}")
+            return
+        record(self.vault_path, "revoke", self.gate, self.serial, name=nombre,
+               ok=True, detail=texto[:150])
+        self.set_foot(f"{nombre}: {texto}")
         self._mostrar_vista("salud")
 
     def _mostrar_vista(self, vista: str) -> None:

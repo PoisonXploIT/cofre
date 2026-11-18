@@ -229,6 +229,45 @@ def apply_cooldown(alerts: list[Alert], state: AlertState, settings: dict,
     return salida
 
 
+def evaluate_unrevoked(store, events: list[dict],
+                       days: int | None = None) -> list[Alert]:
+    """Credenciales viejas que siguen vivas demasiado tiempo.
+
+    No sale de un evento sino del indice cifrado (la entrada recuerda la
+    credencial que no se revoco al cerrar la rotacion). Para no repetir el
+    aviso en cada pasada se mira si ya hay un evento con ese nombre y fecha.
+    """
+    from cofre.rotation import DIAS_SIN_REVOCAR, dias_desde, pendientes_de_revocar
+
+    if store is None or getattr(store, "master", None) is None:
+        return []
+    limite = DIAS_SIN_REVOCAR if days is None else int(days)
+    salida: list[Alert] = []
+    for pendiente in pendientes_de_revocar(store, store.master):
+        dias = dias_desde(pendiente.get("desde"))
+        if dias < limite:
+            continue
+        nombre = str(pendiente.get("nombre") or "")
+        desde = str(pendiente.get("desde") or "")[:10]
+        if _aviso_ya_escrito(events, nombre, desde):
+            continue
+        texto = (f"'{nombre}': credencial antigua sin revocar desde "
+                 f"{desde} ({dias} días)")
+        salida.append(Alert("credencial-sin-revocar", "baja", texto))
+    return salida
+
+
+def _aviso_ya_escrito(events: list[dict], nombre: str, desde: str) -> bool:
+    for event in events:
+        if event.get("ev") != "alert" or event.get("name") != "credencial-sin-revocar":
+            continue
+        detalle = str(event.get("detail") or "")
+        if nombre and nombre in detalle and desde and desde in detalle:
+            return True
+    return False
+
+
+
 # ---------------------------------------------------------------- avisos
 
 MessageBoxW = None

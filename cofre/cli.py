@@ -396,7 +396,7 @@ def main(argv: list[str]) -> int:
     vault = Vault(vault_path)
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
-                  "migrate", "stick-add-v2", "check", "list"}
+                  "migrate", "stick-add-v2", "check", "list", "resume"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -619,11 +619,32 @@ def main(argv: list[str]) -> int:
             if sys.stdin.readline().strip() != opcion.upper():
                 print("cancelado: no se ha tocado nada")
                 return 1
-        # el motor no ejecuta solo: aqui se aplica la opcion elegida
+        # el motor no ejecuta solo: aqui se aplica la opcion elegida. Para
+        # Cloudflare hace falta el token administrador; sin el, deshacer no
+        # podria borrar la credencial nueva ni continuar revocar la vieja.
+        admin_valor = ""
+        if str(plan.get("proveedor") or "") == "cloudflare":
+            try:
+                admin_valor = vault.get(None, "CLOUDFLARE_TOKEN_ADMIN")
+            except Exception:
+                admin_valor = ""
+        token_gh = ""
+        if any(str(d).startswith("gha") for d in plan.get("destinos") or {}):
+            try:
+                token_gh = vault.get(None, "GH_ADMIN_TOKEN")
+            except Exception:
+                token_gh = ""
         if opcion == "deshacer":
-            rot.deshacer(store, store.master, opcion_confirmada=True)
+            rot.deshacer(store, store.master, opcion_confirmada=True,
+                         admin_value=admin_valor, github_token=token_gh)
         else:
-            rot.continuar(store, store.master, opcion_confirmada=True)
+            salida = rot.continuar(store, store.master, opcion_confirmada=True,
+                                   admin_value=admin_valor)
+            if salida.startswith("interrumpida"):
+                print(salida, file=sys.stderr)
+                record(str(vault_path), "rotate", args.gate, None,
+                       name=plan["nombre"], ok=False, detail=salida[:150])
+                return 1
         print(f"hecho: {opcion}")
         record(str(vault_path), "rotate", args.gate, None, name=plan["nombre"],
                ok=True, detail=f"reanudada: {opcion}")
@@ -663,6 +684,7 @@ def main(argv: list[str]) -> int:
 
     if args.command == "alerts":
         # las alertas se firman: hay que tener el cofre abierto y la clave
+        store = None
         try:
             from cofre.audit import bind_store, set_key as _set_key
             material = material_for(args.gate, str(vault_path), args.stick,
@@ -687,6 +709,12 @@ def main(argv: list[str]) -> int:
         cfg = alerts_mod.load_settings(str(vault_path))
         nuevas = alerts_mod.apply_cooldown(
             alerts_mod.evaluate(eventos, cfg, estado), estado, cfg)
+        # credenciales viejas sin revocar: no salen de un evento sino del indice
+        if store is not None:
+            try:
+                nuevas.extend(alerts_mod.evaluate_unrevoked(store, eventos))
+            except Exception:
+                pass
         if not nuevas:
             print("sin alertas nuevas")
         for a in nuevas:
@@ -803,10 +831,7 @@ def main(argv: list[str]) -> int:
             print(f"gate no disponible: {exc}", file=sys.stderr)
             return 1
         from cofre.providers import get as provider_get
-        try:
-            from cofre.providers.http import ProviderError
-        except Exception:
-            ProviderError = RuntimeError
+        from cofre.providers.http import ProviderError
         material = material_for(args.gate, str(vault_path), args.stick,
                                 args.allow_new_stick)
         vault.bind_material(material)
@@ -824,9 +849,40 @@ def main(argv: list[str]) -> int:
         token_id = str(ref.get("token_id") or "")
         consumidores = list(meta.get("consumers") or [])
         admin_nombre = args.admin or "CLOUDFLARE_TOKEN_ADMIN"
-        admin_valor = ""
         via_manual = args.manual or not getattr(proveedor, "can_auto_rotate", False)
-        if not args.dry_run and not via_manual:
+
+        verificacion = proveedor.verify(valor, meta)
+        print(f"estado del token: {'activo' if verificacion.ok else 'NO válido'}"
+              + (f" (caduca {verificacion.expires_at})" if verificacion.expires_at else "")
+              + (f" - {verificacion.detail}" if verificacion.detail else ""))
+        modo = "B (crear reemplazo y desplegar)" if consumidores else "A (roll del valor)"
+        if via_manual:
+            modo = "asistida (pegar el valor nuevo)"
+        print(f"modo de rotación: {modo}")
+        if consumidores:
+            print("consumidores que habria que actualizar: " + ", ".join(consumidores))
+
+        if args.dry_run:
+            print("dry-run: no se ha tocado nada")
+            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                   ok=True, detail="dry-run")
+            return 0
+
+        # La rotacion pasa por el motor con diario (5.7). El diario vive en el
+        # indice cifrado, asi que hace falta un cofre v2 abierto. Sin destinos y
+        # con proveedor automatico, la variante A (roll) no tiene vuelta atras y
+        # se queda fuera del motor.
+        store = vault._v2store() if vault.is_v2() else None
+        con_motor = via_manual or bool(consumidores)
+        if con_motor and (store is None or store.master is None):
+            print("la rotación con diario necesita un cofre v2 abierto: usa 'migrate'",
+                  file=sys.stderr)
+            return 1
+
+        necesita_admin = (not via_manual) or any(
+            str(c).startswith("cfw:") for c in consumidores)
+        admin_valor = ""
+        if necesita_admin:
             # la rotacion real necesita el token administrador, que pide confirmacion
             meta_admin = dict(vault.meta(admin_nombre) or {})
             if not meta_admin:
@@ -841,107 +897,127 @@ def main(argv: list[str]) -> int:
                     return 1
             admin_valor = vault.get(session, admin_nombre)
 
-        verificacion = proveedor.verify(valor, meta)
-        print(f"estado del token: {'activo' if verificacion.ok else 'NO válido'}"
-              + (f" (caduca {verificacion.expires_at})" if verificacion.expires_at else "")
-              + (f" - {verificacion.detail}" if verificacion.detail else ""))
-        modo = "B (crear reemplazo y desplegar)" if consumidores else "A (roll del valor)"
-        print(f"modo de rotación: {modo}")
-        if consumidores:
-            print("consumidores que habria que actualizar: " + ", ".join(consumidores))
-        if args.manual or not getattr(proveedor, "can_auto_rotate", False):
-            # GitHub y similares: se crea a mano en la web. Dos fases: primero se
-            # comprueba el valor nuevo y solo entonces se guarda.
-            url = proveedor.manual_url(meta)
-            print(f"crea el valor nuevo en: {url}")
-            nuevo = read_secret("valor nuevo: ")
-            if not nuevo:
-                print("sin valor: no se ha tocado nada", file=sys.stderr)
-                return 1
-            verif_nuevo = proveedor.verify(nuevo, meta)
-            if not verif_nuevo.ok:
-                print(f"el valor nuevo NO es válido ({verif_nuevo.detail}). "
-                      "No se guarda nada: el viejo sigue intacto.", file=sys.stderr)
-                record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                       ok=False, detail="valor nuevo inválido")
-                return 1
-            verif_viejo = proveedor.verify(valor, meta)
-            if verif_viejo.ok and "usuario " in verif_viejo.detail                     and "usuario " in verif_nuevo.detail:
-                usuario_viejo = verif_viejo.detail.split("usuario ", 1)[1].split(",")[0]
-                usuario_nuevo = verif_nuevo.detail.split("usuario ", 1)[1].split(",")[0]
-                if usuario_viejo != usuario_nuevo:
-                    print(f"el valor nuevo es de '{usuario_nuevo}' y el viejo de "
-                          f"'{usuario_viejo}'. No se guarda nada.", file=sys.stderr)
-                    record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                           ok=False, detail="valor nuevo de otro usuario")
-                    return 1
-            vault.add(session, args.name, nuevo, meta.get("tags", []),
-                      meta.get("urls", []))
-            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                   ok=True, detail="asistida: verificado y guardado")
-            from cofre.audit import stamp_vault
-            stamp_vault(vault)
-            consumidores = list(meta.get("consumers") or [])
-            if consumidores:
-                from cofre.consumers import deploy as desplegar
-                token_gh = ""
-                try:
-                    token_gh = vault.get(session, "GH_ADMIN_TOKEN")
-                except Exception:
-                    pass
-                resultados = desplegar(consumidores, nuevo, github_token=token_gh)
-                for etiqueta, ok, detalle in resultados:
-                    print(f"  {'OK   ' if ok else 'FALLA'} {etiqueta}: {detalle}")
-            print("valor nuevo verificado y guardado.")
-            if args.revoke_old:
-                try:
-                    proveedor.revoke(valor, "", meta)
-                    print("valor viejo revocado")
-                except ProviderError as exc:
-                    print(f"no se pudo revocar el viejo: {exc}", file=sys.stderr)
-            return 0
-
-        if args.dry_run:
-            print("dry-run: no se ha tocado nada")
-            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                   ok=True, detail="dry-run")
-            return 0
-        try:
-            if not consumidores:
+        if not con_motor:
+            # Variante A: mismo token, valor nuevo. El viejo muere en el acto y
+            # no hay nada que deshacer, por eso no toca el motor ni el diario.
+            try:
                 nuevo = proveedor.roll_value(token_id, admin_valor, meta)
                 vault.add(session, args.name, nuevo, meta.get("tags", []),
                           meta.get("urls", []))
+                record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                       ok=True, detail="roll")
+                from cofre.audit import stamp_vault
+                stamp_vault(vault)
                 print("rotado: valor nuevo guardado en el cofre (no se muestra)")
-            else:
-                nuevo, ref_nuevo = proveedor.create_replacement(meta, admin_valor)
-                print("creado el token nuevo. Pasos siguientes, a mano:")
-                for c in consumidores:
-                    print(f"  - actualizar {c}")
-                vault.add(session, args.name, nuevo, meta.get("tags", []),
-                          meta.get("urls", []))
-                meta["provider_ref"] = ref_nuevo
-                if vault.is_v2():
-                    store = vault._v2store()
-                    idx = store.index(store._data, store.master)
-                    idx["entries"][args.name]["provider_ref"] = ref_nuevo
-                    store._write_index(store._data, store.master, idx)
-                    store.save(store._data)
-                if args.revoke_old and token_id:
-                    proveedor.revoke(token_id, admin_valor, meta)
-                    print("token viejo revocado")
-                else:
-                    print("el token viejo SIGUE activo: revocalo cuando los consumidores "
-                          "usen el nuevo (o repite con --revoke-old)")
+                return 0
+            except ProviderError as exc:
+                print(f"la rotación fallo: {exc}", file=sys.stderr)
+                record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                       ok=False, detail=str(exc)[:150])
+                return 1
+
+        # Destinos de GitHub: el despliegue necesita un token con permiso de
+        # secretos. Se avisa antes de empezar, no a mitad.
+        token_gh = ""
+        if any(str(c).startswith("gha") for c in consumidores):
+            try:
+                token_gh = vault.get(session, "GH_ADMIN_TOKEN")
+            except Exception:
+                print("aviso: falta GH_ADMIN_TOKEN; los destinos de GitHub Actions "
+                      "fallaran al desplegar", file=sys.stderr)
+
+        def desplegar(destinos: list[str], valor_nuevo: str) -> None:
+            from cofre.consumers import deploy
+            resultados = deploy(destinos, valor_nuevo, github_token=token_gh,
+                                cloudflare_token=admin_valor)
+            fallos = [f"{etiqueta}: {detalle}" for etiqueta, ok, detalle
+                      in resultados if not ok]
+            if fallos:
+                raise ProviderError("; ".join(fallos)[:200])
+
+        def crear():
+            if via_manual:
+                # GitHub y similares: se crea a mano en la web. Se comprueba
+                # ANTES de escribir nada (ni diario, ni pendiente).
+                url = proveedor.manual_url(meta)
+                print(f"crea el valor nuevo en: {url}")
+                nuevo = read_secret("valor nuevo: ")
+                if not nuevo:
+                    raise ProviderError("sin valor: no se ha tocado nada")
+                verif_nuevo = proveedor.verify(nuevo, meta)
+                if not verif_nuevo.ok:
+                    raise ProviderError(
+                        f"el valor nuevo NO es válido ({verif_nuevo.detail}). "
+                        "No se guarda nada: el viejo sigue intacto.")
+                verif_viejo = proveedor.verify(valor, meta)
+                if (verif_viejo.ok and "usuario " in verif_viejo.detail
+                        and "usuario " in verif_nuevo.detail):
+                    usuario_viejo = verif_viejo.detail.split("usuario ", 1)[1].split(",")[0]
+                    usuario_nuevo = verif_nuevo.detail.split("usuario ", 1)[1].split(",")[0]
+                    if usuario_viejo != usuario_nuevo:
+                        raise ProviderError(
+                            f"el valor nuevo es de '{usuario_nuevo}' y el viejo de "
+                            f"'{usuario_viejo}'. No se guarda nada.")
+                ref_nuevo = dict(ref)
+                if verif_nuevo.token_id:
+                    # si el proveedor da el id (Cloudflare), se guarda el nuevo:
+                    # dejar el viejo apuntaria a un token que ya no es el activo
+                    ref_nuevo["token_id"] = verif_nuevo.token_id
+                return nuevo, ref_nuevo
+            nuevo, ref_nuevo = proveedor.create_replacement(meta, admin_valor)
+            return nuevo, dict(ref_nuevo)
+
+        def verificar(valor_nuevo: str) -> None:
+            # Despues de desplegar: si el proveedor no acepta el valor nuevo,
+            # el diario se queda en "desplegada" y lo recomendado es deshacer.
+            comprobacion = proveedor.verify(valor_nuevo, meta)
+            if not comprobacion.ok:
+                raise ProviderError(
+                    f"el valor nuevo no verifica: {comprobacion.detail}")
+
+        def revocar() -> None:
+            # GitHub revoca por valor; Cloudflare, por id de token.
+            objetivo = valor if getattr(proveedor, "name", "") == "github" else token_id
+            if not objetivo:
+                raise ProviderError("no se sabe que credencial vieja revocar")
+            proveedor.revoke(objetivo, admin_valor, meta)
+
+        from cofre import rotation as rot
+        resultado = rot.run_rotation(
+            store, store.master, args.name, proveedor_nombre,
+            valor_nuevo="", ref_nueva=None, destinos=consumidores,
+            desplegar=desplegar, revocar=revocar,
+            revocar_viejo=bool(args.revoke_old), ref_old=ref,
+            crear=crear, verificar=verificar)
+
+        from cofre.audit import stamp_vault
+        if resultado == "completada":
             record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                   ok=True, detail=("consumidores" if consumidores else "roll"))
-            from cofre.audit import stamp_vault
+                   ok=True, detail=("consumidores" if consumidores else "asistida"))
             stamp_vault(vault)
+            if consumidores:
+                print("rotación completada: valor nuevo desplegado")
+            else:
+                print("valor nuevo verificado y guardado.")
+            if args.revoke_old:
+                print("valor viejo revocado")
+            else:
+                print("la credencial vieja sigue activa: se puede revocar desde "
+                      "Salud (COFRE lo recuerda y avisa a los 7 días)")
             return 0
-        except ProviderError as exc:
-            print(f"la rotación fallo: {exc}", file=sys.stderr)
+        mensaje = resultado.split(": ", 1)[-1]
+        if resultado.startswith("no-creada"):
+            print(f"no se creo la credencial nueva: {mensaje}", file=sys.stderr)
             record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                   ok=False, detail=str(exc)[:150])
+                   ok=False, detail=("no creada: " + mensaje)[:150])
             return 1
+        print(f"rotación interrumpida: {mensaje}", file=sys.stderr)
+        print("no queda nada a medias: el valor viejo sigue siendo el activo. "
+              "Ejecuta 'resume' para continuar o deshacer.", file=sys.stderr)
+        record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+               ok=False, detail=("interrumpida: " + mensaje)[:150])
+        stamp_vault(vault)
+        return 1
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))

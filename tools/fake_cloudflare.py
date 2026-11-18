@@ -26,6 +26,15 @@ class FakeCloudflare:
         self.secretos: dict[str, dict[str, str]] = {}   # script -> {nombre: valor}
         self.fallar_verify = False
         self.fallar_roll = False
+        # inyeccion de fallos para las pruebas del motor (no se usa en real):
+        # crear la credencial, verificar lo creado, desplegar el enesimo destino
+        # y revocar el viejo
+        self.fallar_create = False
+        self.fallar_verificar_creados = False
+        self.fallar_delete = False
+        self.fallar_deploy_en = 0
+        self.puestos = 0
+        self.creados: set[str] = set()
         self.contador = 0
         self.server: ThreadingHTTPServer | None = None
         self.hilo: threading.Thread | None = None
@@ -83,6 +92,9 @@ class FakeCloudflare:
                         return self._json(403, {"success": False,
                                                 "errors": [{"message": "token inválido"}]})
                     cabecera = self.headers.get("Authorization", "").replace("Bearer ", "")
+                    if fake.fallar_verificar_creados and cabecera in fake.creados:
+                        return self._json(403, {"success": False,
+                                                "errors": [{"message": "token nuevo inválido"}]})
                     datos = fake.tokens.get(cabecera)
                     if not datos:
                         return self._json(403, {"success": False,
@@ -109,6 +121,10 @@ class FakeCloudflare:
             def do_PUT(self):
                 fake.llamadas.append(("PUT", self.path))
                 if "/workers/scripts/" in self.path and self.path.endswith("/secrets"):
+                    fake.puestos += 1
+                    if fake.fallar_deploy_en and fake.puestos == fake.fallar_deploy_en:
+                        return self._json(400, {"success": False,
+                                                "errors": [{"message": "despliegue rechazado"}]})
                     largo = int(self.headers.get("Content-Length", "0") or 0)
                     cuerpo = json.loads(self.rfile.read(largo) or b"{}")
                     script = self.path.split("/workers/scripts/")[1].split("/")[0]
@@ -142,6 +158,9 @@ class FakeCloudflare:
                 if not self._auth():
                     return self._json(403, {"success": False,
                                             "errors": [{"message": "sin permiso"}]})
+                if fake.fallar_create:
+                    return self._json(400, {"success": False,
+                                            "errors": [{"message": "no se pudo crear"}]})
                 cuerpo = self._body()
                 fake.contador += 1
                 nuevo_id = f"id-nuevo-{fake.contador}"
@@ -152,6 +171,7 @@ class FakeCloudflare:
                                       "expires_on": cuerpo.get("expires_on", ""),
                                       "policies": cuerpo.get("policies", []),
                                       "condition": cuerpo.get("condition", {})}
+                fake.creados.add(valor)
                 return self._json(200, {"success": True,
                                         "result": {"id": nuevo_id, "value": valor}})
 
@@ -160,6 +180,9 @@ class FakeCloudflare:
                 if not self._auth():
                     return self._json(403, {"success": False,
                                             "errors": [{"message": "sin permiso"}]})
+                if fake.fallar_delete:
+                    return self._json(400, {"success": False,
+                                            "errors": [{"message": "no se pudo revocar"}]})
                 token_id = self.path.rsplit("/", 1)[-1]
                 datos = fake.by_id(token_id)
                 if datos:

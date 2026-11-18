@@ -56,7 +56,7 @@ PRIVILEGED = {
     "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
     "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
-    "copy-exec", "edit-load", "bridge-start", "canary-access",
+    "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
