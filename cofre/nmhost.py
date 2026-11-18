@@ -317,7 +317,7 @@ def wait_for_data(handle, timeout_ms: int) -> int:
     return 0
 
 
-def forward(message: dict) -> dict:
+def forward(message: dict, reply_timeout_ms: int = REPLY_TIMEOUT_MS) -> dict:
     info = read_pipe_info()
     if not info:
         return error("cofre cerrado")
@@ -356,7 +356,7 @@ def forward(message: dict) -> dict:
                 f"error {ctypes.get_last_error()}")
             return error("no se pudo enviar al cofre")
 
-        if wait_for_data(handle, REPLY_TIMEOUT_MS) <= 0:
+        if wait_for_data(handle, reply_timeout_ms) <= 0:
             log("el servidor no respondio a tiempo")
             return error("sin respuesta del cofre")
 

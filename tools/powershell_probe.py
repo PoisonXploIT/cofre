@@ -1,4 +1,8 @@
-"""Sonda de las funciones de PowerShell (paso 7.4)."""
+"""Sonda de las funciones de PowerShell (paso 7.4).
+
+Usa -ExecutionPolicy Bypass solo para no depender de la politica de esta
+maquina. La configuracion recomendada del usuario es RemoteSigned una vez (M10).
+"""
 
 from __future__ import annotations
 

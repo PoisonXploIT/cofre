@@ -939,7 +939,9 @@ class CofreGUI:
         self.refresh_wizard()
         self.refresh_list()
         self._escribir_calendario()
-        if getattr(self, "_bridge_on_start", False) and not self.bridge:
+        # La tuberia sirve al navegador y al ayudante de git: se levanta con
+        # el cofre abierto. El interruptor de Ajustes la puede parar.
+        if self.bridge_ctl is None and self.bridge is None:
             try:
                 self.start_bridge()
             except Exception:
@@ -1224,9 +1226,8 @@ class CofreGUI:
 
 
     def toggle_browser(self) -> None:
-        if self.bridge:
+        if self.bridge or self.bridge_ctl:
             self.stop_bridge()
-            self.set_foot("puente del navegador cerrado")
         else:
             self.start_bridge()
 
@@ -1266,12 +1267,10 @@ class CofreGUI:
 
         from cofre import bridge_ops
         from cofre.pipe_server import BridgeController
-        from cofre.serve import allowed_origins_for
 
-        if not allowed_origins_for():
-            self.set_foot("el navegador necesita la extension: ejecuta "
-                          "tools/install_extension.py una vez")
-            return
+        # La misma tuberia sirve al navegador y al ayudante de git. No se exige
+        # la extension: git tambien la usa, y sin ella el navegador simplemente
+        # no tiene cliente.
         if self.bridge_ctl is None:
             self.bridge_ctl = BridgeController(
                 self.root,
@@ -1284,10 +1283,9 @@ class CofreGUI:
             self.bridge_ctl = None
             return
         self.browser_on = True
-        self.set_foot("navegador conectado por tubería local")
-        record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True)
-        self.set_foot("navegador conectado por tuberia local "
-                      "(solo mientras el cofre este abierto)")
+        self.set_foot("tubería local lista (navegador y git)")
+        record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True,
+               detail="tuberia")
         self._pump_bridge()
 
     def _pump_bridge(self) -> None:
@@ -1314,7 +1312,7 @@ class CofreGUI:
                 pass
             self.bridge_ctl = None
         self.browser_on = False
-        self.set_foot("navegador desconectado")
+        self.set_foot("tubería local cerrada (navegador y git)")
 
     def _current_salt(self) -> bytes | None:
         """La sal del cofre, para guardarla dentro de cofre.json (H9)."""
@@ -1494,15 +1492,30 @@ class CofreGUI:
         except Exception:
             return {}
 
-    def request_confirm(self, who: str, what: str) -> str:
-        """Pregunta a la persona (2.4). Se llama desde el hilo del puente."""
+    def request_confirm(self, who: str, what: str, contexto: str | None = None) -> str:
+        """Pregunta a la persona (2.4). Se llama desde el hilo del puente.
+
+        `contexto` permite que el permiso de 5 minutos sea por host en git;
+        el navegador sigue usando el secreto seleccionado.
+        """
         if not self.confirm_queue:
             return "deny"
-        clave = (self.selected or what, who.split(" - ")[0])
+        clave = (contexto or self.selected or what, who.split(" - ")[0])
         hasta = self.confirm_grants.get(clave)
         if hasta and hasta > __import__("time").time():
             return "grant"
-        resultado = self.confirm_queue.ask(who, what)
+        # Si ya estamos en el hilo de Tk (el despacho del puente), abrir el
+        # dialogo directamente: bloquear con la cola dejaria a Tk sin poder
+        # pintarlo. En un hilo servidor (TCP) se usa la cola.
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            try:
+                from cofre.gui_confirm import ConfirmDialog
+                resultado = ConfirmDialog(self.root, who, what).wait()
+            except Exception:
+                resultado = "deny"
+        else:
+            resultado = self.confirm_queue.ask(who, what)
         if resultado == "grant":
             self.confirm_grants[clave] = __import__("time").time() + 300
         return resultado
@@ -2754,13 +2767,6 @@ class CofreGUI:
         campo(izq, msg("ajustes.rotación"), v_rot)
 
         seccion(der, msg("ajustes.navegador"))
-        fila_puente = tk.Frame(der, bg=PANEL)
-        fila_puente.pack(fill="x", pady=2)
-        tk.Label(fila_puente, text=msg("ajustes.puente"),
-                 fg=MUT, bg=PANEL, font=self.f_small, anchor="w").pack(
-            side="left", fill="x", expand=True)
-        W.Switch(fila_puente, v_bridge, bg=PANEL).pack(side="right")
-
         v_nav = tk.BooleanVar(value=bool(self.browser_on))
         fila_nav = tk.Frame(der, bg=PANEL)
         fila_nav.pack(fill="x", pady=(6, 2))

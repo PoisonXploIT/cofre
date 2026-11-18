@@ -1,4 +1,7 @@
 # COFRE - funciones de PowerShell (paso 7.4).
+# Configuracion recomendada, UNA sola vez (M10):
+#   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+# Permite tus scripts locales y sigue exigiendo firma a los descargados.
 # Cargalas desde tu perfil:  . "C:\Users\Sammi\AI\cofre\tools\cofre.ps1"
 # No guardan valores: solo llaman a run.cmd.
 

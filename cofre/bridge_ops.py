@@ -52,6 +52,48 @@ def dispatch(app, message: dict) -> dict:
                name=f"{len(items)} nombres", ok=True)
         return {"ok": True, "items": items}
 
+    if tipo == "git":
+        # El ayudante de git pasa por aqui, no abre el cofre. Primera vez por
+        # host: confirmacion en pantalla; "Permitir 5 minutos" se cachea por
+        # host. El cliente de la tuberia ya lo identifico el servidor.
+        if not app.session:
+            return {"ok": False, "error": "cofre cerrado"}
+        host = _domain({"domain": message.get("host", "")})
+        if not host:
+            return {"ok": False, "error": "falta el host"}
+        from cofre import git_cred
+        encontrado = git_cred.buscar(app.vault, host)
+        if encontrado is None:
+            record(app.vault_path, "git-get", app.gate, app.serial, name="-",
+                   ok=False, detail=f"git:{host} sin coincidencia")
+            return {"ok": False, "error": "no hay credencial para ese host"}
+        nombre, meta = encontrado
+        permitido, motivo = git_cred.permitido(meta)
+        if not permitido:
+            record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"git:{host} politica")
+            return {"ok": False, "error": motivo}
+        otorgado = app.request_confirm(f"git - {host}", nombre,
+                                       contexto=f"git:{host}")
+        if otorgado == "deny":
+            record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"git:{host} confirmación denegada")
+            return {"ok": False, "error": "confirmación denegada en COFRE"}
+        try:
+            valor = app.vault.get(app.session, nombre)
+        except Exception:                              # noqa: BLE001
+            record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"git:{host} no se pudo leer")
+            return {"ok": False, "error": "no se pudo leer la credencial"}
+        usuario = git_cred.usuario(app.vault, nombre, host)
+        cliente = message.get("_client") if isinstance(message.get("_client"), dict) else {}
+        extra = f" pid={cliente.get('pid')}" if cliente.get("pid") else ""
+        record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
+               ok=True, detail=f"git:{host}{extra}")
+        from cofre.audit import stamp_vault
+        stamp_vault(app.vault)
+        return {"ok": True, "username": usuario, "password": valor}
+
     if tipo == "get":
         nombre = str(message.get("name", "")).strip()
         if not nombre:

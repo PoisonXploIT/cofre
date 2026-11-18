@@ -47,4 +47,6 @@ def cofre_temporal(secretos=None) -> tuple[Path, Path, Path]:
     v2.save(data)
     register_stick(str(vault), serial, drive)
     aislar(vault)
+    import os as _os
+    _os.environ["COFRE_PIPE_INFO"] = str(tmp / "pipe-name")
     return vault, llave, tmp

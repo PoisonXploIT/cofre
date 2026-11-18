@@ -197,6 +197,7 @@ class PipeServer:
         self._stop = threading.Event()
         self._first_instance_used = False
         self._sid = ""
+        self._last_client: dict = {}
         self._thread: threading.Thread | None = None
 
     # ---------------------------------------------------------------- ciclo
@@ -264,6 +265,7 @@ class PipeServer:
         sid = process_sid(int(pid.value))
         if not sid or sid != (self._sid or process_sid(os.getpid())):
             return False, "el cliente es de otro usuario"
+        self._last_client = {"pid": int(pid.value), "image": image}
         return True, f"pid {pid.value}"
 
     def _run(self) -> None:
@@ -292,6 +294,8 @@ class PipeServer:
                 if message is None:
                     self.log("mensaje ilegible del cliente")
                     continue
+                if isinstance(message, dict):
+                    message["_client"] = dict(self._last_client)
                 try:
                     reply = self.handler(message)
                 except Exception as exc:                     # noqa: BLE001
@@ -350,7 +354,7 @@ class BridgeController:
                 done.set()
 
         self.requests.put(run)
-        if not done.wait(timeout=10):
+        if not done.wait(timeout=30):
             return {"ok": False, "error": "el cofre no respondio a tiempo"}
         return box.get("reply") or {"ok": False, "error": "sin respuesta"}
 

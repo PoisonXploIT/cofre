@@ -109,6 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
     ds = with_common(sub.add_parser(
         "describe", help="JSON de secretos y salud, nunca valores"))
     ds.add_argument("--json", action="store_true", help="salida JSON (siempre)")
+    ds.add_argument("--minimal", action="store_true",
+                    help="solo nombre, tipo y salud (recomendado para agentes)")
 
     sv = sub.add_parser("serve", help="puente para el navegador (solo 127.0.0.1)")
     sv.add_argument("--port", type=int, default=47653)
@@ -733,6 +735,15 @@ def main(argv: list[str]) -> int:
         salida = []
         for nombre in vault.names():
             meta = dict(vault.meta(nombre) or {})
+            if args.minimal:
+                # lo que puede acabar en un modelo de fuera: sin repos, Workers
+                # ni dominios; solo que existe y como esta
+                salida.append({
+                    "name": nombre,
+                    "type": meta.get("type") or "api_key",
+                    "health": meta.get("health") or "sin_comprobar",
+                })
+                continue
             salida.append({
                 "name": nombre,
                 "type": meta.get("type") or "api_key",

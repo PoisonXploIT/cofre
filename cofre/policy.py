@@ -24,7 +24,7 @@ una `policy` explicita:
 
 from __future__ import annotations
 
-CHANNELS = ("browser", "exec", "clipboard", "reveal")
+CHANNELS = ("browser", "exec", "clipboard", "reveal", "git")
 
 
 def _defaults(meta: dict) -> dict:
@@ -34,21 +34,21 @@ def _defaults(meta: dict) -> dict:
         # un senuelo no se entrega NUNCA, ni siquiera confirmando: si alguien lo
         # pide, lo que toca es alertar, no preguntar
         return {"confirm": False, "browser": False, "exec": False,
-                "clipboard": False, "reveal": False}
+                "clipboard": False, "reveal": False, "git": False}
     if tipo == "private_key" or "admin" in tags:
         return {"confirm": True, "browser": False, "exec": False,
-                "clipboard": True, "reveal": True}
+                "clipboard": True, "reveal": True, "git": False}
     if tipo == "password":
         return {"confirm": False, "browser": True, "exec": False,
-                "clipboard": True, "reveal": True}
+                "clipboard": True, "reveal": True, "git": True}
     if tipo in ("api_key", "api_token", "oauth_app"):
         return {"confirm": False, "browser": False, "exec": True,
-                "clipboard": True, "reveal": True}
+                "clipboard": True, "reveal": True, "git": True}
     if tipo == "note":
         return {"confirm": False, "browser": False, "exec": False,
-                "clipboard": True, "reveal": True}
+                "clipboard": True, "reveal": True, "git": False}
     return {"confirm": False, "browser": False, "exec": True,
-            "clipboard": True, "reveal": True}
+            "clipboard": True, "reveal": True, "git": True}
 
 
 def effective(meta: dict) -> dict:
@@ -56,7 +56,8 @@ def effective(meta: dict) -> dict:
     base = _defaults(meta)
     extra = meta.get("policy") or {}
     if isinstance(extra, dict):
-        for clave in ("confirm", "browser", "exec", "clipboard", "reveal"):
+        for clave in ("confirm", "browser", "exec", "clipboard", "reveal",
+                  "git"):
             if clave in extra:
                 base[clave] = bool(extra[clave])
     return base
@@ -79,6 +80,8 @@ def allowed(meta: dict, channel: str) -> tuple[bool, str]:
             return False, f"'{nombre}' no se puede copiar (politica)"
         if channel == "reveal":
             return False, f"'{nombre}' no se puede mostrar (politica)"
+        if channel == "git":
+            return False, f"'{nombre}' no se puede usar como credencial de git (politica)"
     return True, ""
 
 

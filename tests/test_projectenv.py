@@ -150,6 +150,16 @@ class TestCli(Base):
         self.assertNotIn("tvly-x", r.stdout)
         self.assertTrue(all("value" not in d for d in datos))
 
+    def test_describe_minimal_sin_infraestructura(self):
+        r = self.correr("describe", "--minimal")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        datos = json.loads(r.stdout)
+        self.assertTrue(datos)
+        for entrada in datos:
+            self.assertEqual(set(entrada), {"name", "type", "health"})
+        self.assertNotIn("app.example", r.stdout)
+        self.assertNotIn("urls", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
