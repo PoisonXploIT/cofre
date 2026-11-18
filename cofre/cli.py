@@ -197,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--manual", action="store_true",
                     help="rotación asistida: abrir la web y pegar el token nuevo")
 
+    fl = with_common(sub.add_parser(
+        "field", help="guardar un campo de una entrada v2 (para #campo)"))
+    fl.add_argument("name")
+    fl.add_argument("campo")
+
     ti = with_common(sub.add_parser("token-info",
                                     help="id, estado y caducidad de un token (sin el valor)"))
     ti.add_argument("name")
@@ -547,7 +552,7 @@ def main(argv: list[str]) -> int:
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
                   "migrate", "stick-add-v2", "check", "list", "resume",
-                  "health", "panic", "rekey", "run", "describe"}
+                  "health", "panic", "rekey", "run", "describe", "field"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -982,6 +987,41 @@ def main(argv: list[str]) -> int:
             record(str(vault_path), "alert", args.gate, None, name=a.rule,
                    ok=False, detail=f"{a.severity}: {a.text}"[:150])
         estado_path.write_text(json.dumps(estado.to_dict(), indent=2), encoding="utf-8")
+        return 0
+
+    if args.command == "field":
+        try:
+            session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        if not vault.is_v2():
+            print("los campos solo existen en cofre v2", file=sys.stderr)
+            return 1
+        store = vault._v2store()
+        if store.master is None:
+            print("el cofre esta cerrado", file=sys.stderr)
+            return 1
+        try:
+            contenido = store._vault.blob(store._data, store.master, args.name)
+        except KeyError:
+            print(f"no existe el secreto '{args.name}'", file=sys.stderr)
+            return 1
+        valor = read_secret(f"valor de {args.campo}: ")
+        if not valor:
+            print("sin valor: no se ha guardado nada", file=sys.stderr)
+            return 1
+        contenido.setdefault("fields", {})[args.campo] = valor
+        store._vault.set_blob(store._data, store.master, args.name, contenido)
+        store.save(store._data)
+        record(str(vault_path), "edit", args.gate, serial, name=args.name,
+               ok=True, detail=f"campo {args.campo}")
+        print(f"{args.name}: campo '{args.campo}' guardado (el valor no se muestra)")
         return 0
 
     if args.command == "health":
