@@ -31,16 +31,7 @@ ICON_FONT = "Segoe Fluent Icons"
 GLIFO_CANDADO = "\ue72e"
 GLIFO_LLAVE = "\ue8d7"
 
-TEXTO_BIENVENIDA = (
-    "COFRE guarda tus contraseñas y claves en un fichero cifrado que vive en "
-    "este equipo. Nadie puede abrirlo sin tu pendrive o el código de "
-    "recuperación de papel.\n\n"
-    "COFRE solo se conecta a internet cuando tú compruebas o rotas una clave "
-    "de un proveedor, y nunca envía tus secretos a otro sitio que ese "
-    "proveedor.\n\n"
-    "Vamos a preparar la llave del pendrive, el cofre, el código de "
-    "recuperación y, si quieres, una reserva."
-)
+TEXTO_BIENVENIDA = msg("primer_uso.bienvenida_texto")
 
 
 def crear_cofre(vault_path, drive: str, clave: str | Path | None = None,
@@ -200,9 +191,7 @@ class Wizard:
         self._limpiar()
         self._indicador(2)
         self._titulo(msg("primer_uso.pendrive"))
-        self._texto("Se escribirá COFRE.KEY en esa unidad y se creará el cofre "
-                    "allí donde apunta COFRE_VAULT. No se toca nada hasta que "
-                    "confirmes el código del paso siguiente.")
+        self._texto(msg("primer_uso.pendrive_texto"))
         sistema = (os.environ.get("SystemDrive", "C:") + "\\").upper()
         letras = [d for d in drive_letters()
                   if drive_kind(d) in (DRIVE_REMOVABLE, DRIVE_FIXED)
@@ -238,23 +227,26 @@ class Wizard:
         self._limpiar()
         self._indicador(3, "código de recuperación")
         self._titulo("Código de recuperación")
-        self._texto("Estas 25 palabras son la única forma de abrir el cofre si "
-                    "pierdes el pendrive. Se muestran UNA vez. Apúntalas en "
-                    "papel, en este orden; no hay botón de copiar porque el "
-                    "portapapeles guarda historial.")
+        self._texto(msg("primer_uso.codigo_texto"))
         # pie fijo abajo: se empaqueta antes que la cuadricula para que nunca
         # quede fuera (el boton de seguir se perdia en ventanas bajas)
         pie = tk.Frame(self.cuerpo, bg=C["surface"])
         pie.pack(side="bottom", fill="x", pady=(10, 0))
         if self.datos is None:
             self.app._btn(pie, msg("comun.atras"),
-                          self._paso_pendrive).pack(side="left")
+                          self._volver_al_pendrive).pack(side="left")
         self.app._btn(pie, msg("primer_uso.imprimir"),
                       self._imprimir).pack(side="left", padx=(8, 0))
         self.app._btn(pie, msg("primer_uso.apuntado"),
                       self._paso_confirmar,
                       accent=True).pack(side="right")
         W.CodeGrid(self.cuerpo, self.codigo).pack(fill="x", pady=8)
+
+    def _volver_al_pendrive(self, event=None) -> None:
+        """Volver antes de crear: el código anterior deja de valer."""
+        self.codigo = ""
+        self.preguntas = []
+        self._paso_pendrive()
 
     def _imprimir(self, event=None) -> None:
         """TXT temporal numerado, dialogo de impresion y borrado posterior."""
@@ -277,9 +269,7 @@ class Wizard:
         self._limpiar()
         self._indicador(3, "confirmación")
         self._titulo("Confirma que lo tienes")
-        self._texto("Escribe las dos palabras que se piden, tal como las has "
-                    "apuntado. Hasta que no coincidan no se escribe nada en el "
-                    "pendrive.")
+        self._texto(msg("primer_uso.confirmar_texto"))
         if not self.preguntas:
             self.preguntas = sorted(secrets.SystemRandom().sample(range(1, 25), 2))
         self.campos = []
@@ -328,9 +318,7 @@ class Wizard:
         self._limpiar()
         self._indicador(4)
         self._titulo(msg("primer_uso.reserva"))
-        self._texto("Una segunda llave evita quedarte fuera si falla el "
-                    "principal. Se escribe en otra unidad; el cofre recibirá "
-                    "una ranura nueva probada antes de guardarse.")
+        self._texto(msg("primer_uso.reserva_texto"))
         actual = str(self.drive)[:3].upper()
         letras = [d for d in drive_letters()
                   if drive_kind(d) in (DRIVE_REMOVABLE, DRIVE_FIXED)
@@ -375,11 +363,7 @@ class Wizard:
         self._limpiar()
         self._indicador(5)
         self._titulo(msg("primer_uso.extension"))
-        self._texto("La extensión solo rellena cuando tú pulsas su botón y solo "
-                    "en los dominios asignados a cada secreto. Se instala desde "
-                    "la carpeta 'extension' del repositorio; la guía explica "
-                    "cómo cargarla en el navegador.\n\n"
-                    "Puedes terminar ahora y hacerlo cuando quieras.")
+        self._texto(msg("primer_uso.extension_texto"))
         fila = self._botonera(siguiente=self._terminar,
                               texto_sig=msg("primer_uso.terminar"))
         self.app._btn(fila, msg("primer_uso.abrir_guia"),

@@ -140,6 +140,7 @@ MSG = {
     "ajustes.copias": "Copias",
     "ajustes.acerca": "Acerca de",
     "ajustes.emergencia": "Emergencia",
+    "ajustes.panico": "Botón de pánico",
     "ajustes.inactividad": "Bloquear por inactividad (min)",
     "ajustes.maximo": "Tiempo máximo de sesión (h)",
     "ajustes.portapapeles": "Vaciar el portapapeles (s; 0 = nunca)",
@@ -149,8 +150,8 @@ MSG = {
     "ajustes.idioma": "Idioma",
     "ajustes.rafaga": "Lecturas para una ráfaga",
     "ajustes.rafaga_min": "Minutos de la ráfaga",
-    "ajustes.desde": "Hora rara: desde",
-    "ajustes.hasta": "Hora rara: hasta",
+    "ajustes.desde": "Horario inusual: desde",
+    "ajustes.hasta": "Horario inusual: hasta",
     "ajustes.pausa": "Pausa entre alertas (min)",
     "ajustes.fallos": "Fallos de apertura seguidos",
     "ajustes.rotación": "Horas para rotación colgada",
@@ -168,6 +169,66 @@ MSG = {
     "ajustes.emparejar_aviso": "Se va a registrar el host de mensajería nativa "
                                "para el navegador. Cierra el navegador si el "
                                "instalador lo pide.",
+    "primer_uso.bienvenida_texto": (
+        "COFRE guarda tus contraseñas y claves en un fichero cifrado que vive en "
+        "este equipo. Nadie puede abrirlo sin tu pendrive o el código de "
+        "recuperación de papel.\n\n"
+        "COFRE solo se conecta a internet cuando tú compruebas o rotas una clave "
+        "de un proveedor, y nunca envía tus secretos a otro sitio que ese "
+        "proveedor.\n\n"
+        "Vamos a preparar la llave del pendrive, el cofre, el código de "
+        "recuperación y, si quieres, una reserva."
+    ),
+    "primer_uso.pendrive_texto": (
+        "Se escribirá COFRE.KEY en esa unidad y se creará el cofre allí donde "
+        "apunta COFRE_VAULT. No se toca nada hasta que confirmes el código del "
+        "paso siguiente."
+    ),
+    "primer_uso.codigo_texto": (
+        "Estas 25 palabras son la única forma de abrir el cofre si pierdes el "
+        "pendrive. Se muestran UNA vez. Apúntalas en papel, en este orden; no "
+        "hay botón de copiar porque el portapapeles guarda historial."
+    ),
+    "primer_uso.confirmar_texto": (
+        "Escribe las dos palabras que se piden, tal como las has apuntado. "
+        "Hasta que no coincidan no se escribe nada en el pendrive."
+    ),
+    "primer_uso.reserva_texto": (
+        "Una segunda llave evita quedarte fuera si falla el principal. Se "
+        "escribe en otra unidad; el cofre recibirá una ranura nueva probada "
+        "antes de guardarse."
+    ),
+    "primer_uso.extension_texto": (
+        "La extensión solo rellena cuando tú pulsas su botón y solo en los "
+        "dominios asignados a cada secreto. Se instala desde la carpeta "
+        "'extension' del repositorio; la guía explica cómo cargarla en el "
+        "navegador.\n\n"
+        "Puedes terminar ahora y hacerlo cuando quieras."
+    ),
+
+    "comun.cancelar": "Cancelar",
+    "llaves.baja_pendrive": "Vas a quitar la ranura del pendrive {donde}.",
+    "llaves.otro_pendrive": "abre el cofre con el otro pendrive y vuelve a intentarlo",
+    "llaves.error_quitar": "no se pudo quitar la ranura: {error}",
+    "llaves.ranura_ausente": "esa ranura ya no estaba",
+    "llaves.error_leer": "no se pudieron leer las llaves: {error}",
+    "llaves.papel": "Papel",
+    "llaves.sin_ranura": "Sin ranura",
+    "llaves.rekey_titulo": "Cambiar la clave maestra",
+    "llaves.error_rekey_ejecutar": "no se pudo cambiar la clave maestra: {error}",
+    "llaves.error_crear": "no se pudo crear la llave: {error}",
+    "llaves.sin_v2": "abre un cofre v2 para generar el código",
+    "llaves.codigo_titulo": "Código de recuperación nuevo",
+    "llaves.codigo_hecho": "código nuevo generado; el anterior ya no abre",
+    "llaves.error_codigo": "no se pudo generar el código: {error}",
+    "llaves.anadir_cofre": "Añadir un pendrive al cofre",
+    "ajustes.conectado": "Conectado",
+    "ajustes.desconectado": "Desconectado",
+    "ajustes.conectar": "Conectar",
+    "ajustes.copia_error": "no se pudo copiar: {error}",
+    "ajustes.emparejar_titulo": "Emparejar el navegador",
+    "ajustes.emparejar_error": "no se pudo ejecutar el instalador: {error}",
+
 }
 
 

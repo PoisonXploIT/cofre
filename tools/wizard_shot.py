@@ -59,9 +59,6 @@ def main() -> int:
     win.geometry("760x580+80+60")
     ruta1 = captura(win, "cofre_6_8_bienvenida.png")
     wizard.codigo = estado["código"]
-    wizard.datos = estado["data"]
-    wizard.master = estado["master"]
-    wizard.llave = estado["llave"]
     wizard.drive = estado["drive"]
     wizard._paso_codigo()
     win.update_idletasks()
