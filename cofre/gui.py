@@ -590,12 +590,14 @@ class CofreGUI:
         self.chips_row = tk.Frame(right, bg=PANEL2)
         self.chips_row.pack(fill="x", padx=16, pady=(0, 6))
 
-        self.valor_label = tk.Label(right, text="valor", fg=MUT, font=self.f_small,
-                                    bg=PANEL2, anchor="w")
+        self.tarjeta_valor = tk.Frame(right, bg=CAMPO)
+        self.tarjeta_valor.pack(fill="x", padx=16, pady=(2, 8))
+        self.valor_label = tk.Label(self.tarjeta_valor, text="VALOR", fg=FAINT,
+                                    font=self.f_small, bg=CAMPO, anchor="w")
         self.valor_label.pack(fill="x", padx=16)
-        campo_valor = tk.Frame(right, bg=CAMPO)
+        campo_valor = tk.Frame(self.tarjeta_valor, bg=CAMPO)
         self.campo_valor = campo_valor
-        campo_valor.pack(fill="x", padx=16, pady=(2, 6))
+        campo_valor.pack(fill="x", padx=8, pady=(2, 8))
         self.value_box = tk.Text(campo_valor, height=1, bg=CAMPO, fg=FG,
                                  font=self.f_mono, relief="flat", borderwidth=0,
                                  highlightthickness=0, wrap="none", padx=10, pady=10)
