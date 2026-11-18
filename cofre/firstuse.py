@@ -17,6 +17,7 @@ import tempfile
 import tkinter as tk
 from pathlib import Path
 
+from cofre.messages import msg
 from cofre.theme import COLORS as C
 from cofre.usb import KEY_FILENAME, register_stick, volume_serial
 from cofre.v2 import VaultV2, new_recovery_slot, new_usb_slot
@@ -93,7 +94,7 @@ class Wizard:
 
     def __init__(self, app):
         self.app = app
-        self.win = app._sheet("COFRE - primera vez")
+        self.win = app._sheet(msg("primer_uso.titulo"))
         self.win.geometry("760x580")
         self.win.minsize(680, 520)
         self.cuerpo = None
@@ -137,7 +138,7 @@ class Wizard:
         fila = tk.Frame(self.cuerpo, bg=C["surface"])
         fila.pack(fill="x", side="bottom", pady=(16, 0))
         if atras is not None:
-            self.app._btn(fila, "Atrás", atras).pack(side="left")
+            self.app._btn(fila, msg("comun.atras"), atras).pack(side="left")
         if siguiente is not None:
             self.app._btn(fila, texto_sig, siguiente,
                           accent=not danger).pack(side="right")
@@ -155,13 +156,13 @@ class Wizard:
             "asignes.\n\n"
             "Vamos a preparar la llave del pendrive, el cofre, el código de "
             "recuperación y, si quieres, una reserva.")
-        self._botonera(siguiente=self._paso_pendrive, texto_sig="Empezar")
+        self._botonera(siguiente=self._paso_pendrive, texto_sig=msg("primer_uso.empezar"))
 
     def _paso_pendrive(self, event=None) -> None:
         import tkinter as tk
         from cofre.usb import DRIVE_FIXED, DRIVE_REMOVABLE, drive_kind, drive_letters
         self._limpiar()
-        self._titulo("1. Elige el pendrive principal")
+        self._titulo(msg("primer_uso.pendrive"))
         self._texto("Se escribirá COFRE.KEY en esa unidad y se creará el cofre "
                     "allí donde apunta COFRE_VAULT. Si ya hay una llave o un "
                     "cofre, no se toca nada.")
@@ -170,8 +171,7 @@ class Wizard:
                   if drive_kind(d) in (DRIVE_REMOVABLE, DRIVE_FIXED)
                   and d.upper() != sistema]
         if not letras:
-            self._texto("No hay ninguna unidad conectada. Enchufa el pendrive "
-                        "y vuelve a abrir este asistente.")
+            self._texto(msg("primer_uso.sin_unidades"))
             self._botonera(atras=self._paso_bienvenida)
             return
         lista = tk.Listbox(self.cuerpo, bg=C["card"],
@@ -194,7 +194,7 @@ class Wizard:
             try:
                 estado = crear_cofre(self.app.vault_path, drive)
             except Exception as exc:               # noqa: BLE001
-                aviso.configure(text=f"no se pudo crear: {exc}")
+                aviso.configure(text=msg("primer_uso.error_crear", error=exc))
                 return
             self.datos = estado["data"]
             self.codigo = estado["código"]
@@ -205,12 +205,12 @@ class Wizard:
 
         self._botonera(atras=self._paso_bienvenida,
                        siguiente=lambda _e=None: crear(),
-                       texto_sig="Crear llave y cofre")
+                       texto_sig=msg("primer_uso.crear"))
 
     def _paso_codigo(self, event=None) -> None:
         import tkinter as tk
         self._limpiar()
-        self._titulo("2. El código de recuperación")
+        self._titulo(msg("primer_uso.código"))
         self._texto("Estas 25 palabras son la única forma de abrir el cofre si "
                     "pierdes el pendrive. Se muestran UNA vez. Apúntalas en "
                     "papel; no las guardes en el mismo equipo ni en una foto.")
@@ -222,13 +222,13 @@ class Wizard:
         caja.configure(state="disabled")
         fila = tk.Frame(self.cuerpo, bg=C["surface"])
         fila.pack(fill="x")
-        self.app._btn(fila, "Imprimir",
+        self.app._btn(fila, msg("primer_uso.imprimir"),
                       self._imprimir).pack(side="left")
-        self.app._btn(fila, "Copiar",
+        self.app._btn(fila, msg("comun.copiar"),
                       lambda _e=None: self.app._copiar_texto(self.codigo)).pack(
             side="left", padx=8)
         self._botonera(siguiente=self._paso_confirmar,
-                       texto_sig="Ya lo he apuntado")
+                       texto_sig=msg("primer_uso.apuntado"))
 
     def _imprimir(self, event=None) -> None:
         """TXT temporal, dialogo de impresion y borrado posterior."""
@@ -237,14 +237,14 @@ class Wizard:
             ruta.write_text(self.codigo + "\n", encoding="utf-8")
             os.startfile(str(ruta), "print")       # noqa: S606
             self.win.after(60000, lambda: ruta.unlink(missing_ok=True))
-            self.app.set_foot("código enviado a imprimir; el temporal se borra en un minuto")
+            self.app.set_foot(msg("primer_uso.impreso"))
         except Exception as exc:                   # noqa: BLE001
-            self.app.set_foot(f"no se pudo imprimir: {exc}")
+            self.app.set_foot(msg("primer_uso.error_imprimir", error=exc))
 
     def _paso_confirmar(self, event=None) -> None:
         import tkinter as tk
         self._limpiar()
-        self._titulo("3. Confirma que lo tienes")
+        self._titulo(msg("primer_uso.confirmar"))
         self._texto("Escribe las dos palabras que se piden, tal como las has "
                     "apuntado.")
         if not self.preguntas:
@@ -253,7 +253,7 @@ class Wizard:
         for indice in self.preguntas:
             fila = tk.Frame(self.cuerpo, bg=C["surface"])
             fila.pack(fill="x", pady=4)
-            tk.Label(fila, text=f"palabra {indice}", fg=C["muted"],
+            tk.Label(fila, text=msg("primer_uso.palabra", numero=indice), fg=C["muted"],
                      bg=C["surface"], font=self.app.f_small,
                      width=12, anchor="w").pack(side="left")
             var = tk.StringVar()
@@ -272,20 +272,19 @@ class Wizard:
         def comprobar() -> None:
             respuestas = {indice: var.get() for indice, var in self.campos}
             if not confirmar_palabras(self.codigo, respuestas):
-                self.aviso.configure(text="no coincide. Revisa las palabras y "
-                                           "vuelve a probar.")
+                self.aviso.configure(text=msg("comun.no_coincide"))
                 return
             self._paso_reserva()
 
         self._botonera(atras=self._paso_codigo,
                        siguiente=lambda _e=None: comprobar(),
-                       texto_sig="Confirmar")
+                       texto_sig=msg("primer_uso.confirmar_boton"))
 
     def _paso_reserva(self, event=None) -> None:
         import tkinter as tk
         from cofre.usb import DRIVE_FIXED, DRIVE_REMOVABLE, drive_kind, drive_letters
         self._limpiar()
-        self._titulo("4. Pendrive de reserva (recomendado)")
+        self._titulo(msg("primer_uso.reserva"))
         self._texto("Una segunda llave evita quedarte fuera si falla el "
                     "principal. Se escribe en otra unidad; el cofre recibirá "
                     "una ranura nueva probada antes de guardarse.")
@@ -297,8 +296,7 @@ class Wizard:
                          bg=C["surface"], font=self.app.f_small, anchor="w")
         aviso.pack(fill="x")
         if not letras:
-            aviso.configure(text="No hay otra unidad conectada; puedes saltar "
-                                 "este paso y añadirla después en Llaves.")
+            aviso.configure(text=msg("primer_uso.sin_reserva"))
             self._botonera(atras=self._paso_confirmar, siguiente=self._paso_extension,
                            texto_sig="Saltar")
             return
@@ -319,25 +317,25 @@ class Wizard:
                 agregar_reserva(self.app.vault_path, self.datos, self.master,
                                 letras[sel[0]])
             except Exception as exc:               # noqa: BLE001
-                aviso.configure(text=f"no se pudo añadir la reserva: {exc}")
+                aviso.configure(text=msg("primer_uso.error_reserva", error=exc))
                 return
             self._paso_extension()
 
         fila = self._botonera(atras=self._paso_confirmar, siguiente=agregar,
-                              texto_sig="Añadir reserva")
-        self.app._btn(fila, "Saltar", self._paso_extension).pack(side="right",
+                              texto_sig=msg("primer_uso.anadir_reserva"))
+        self.app._btn(fila, msg("primer_uso.saltar"), self._paso_extension).pack(side="right",
                                                                  padx=8)
 
     def _paso_extension(self, event=None) -> None:
         self._limpiar()
-        self._titulo("5. La extensión del navegador (opcional)")
+        self._titulo(msg("primer_uso.extension"))
         self._texto("La extensión solo rellena cuando tú pulsas su botón y solo "
                     "en los dominios asignados a cada secreto. Se instala desde "
                     "la carpeta 'extension' del repositorio; la guía explica "
                     "cómo cargarla en el navegador.\n\n"
                     "Puedes terminar ahora y hacerlo cuando quieras.")
-        fila = self._botonera(siguiente=self._terminar, texto_sig="Terminar")
-        self.app._btn(fila, "Abrir la guía",
+        fila = self._botonera(siguiente=self._terminar, texto_sig=msg("primer_uso.terminar"))
+        self.app._btn(fila, msg("primer_uso.abrir_guia"),
                       self.app.open_guide).pack(side="left", padx=8)
 
     def _terminar(self, event=None) -> None:
@@ -351,7 +349,7 @@ class Wizard:
             self.app.vault.reset_store()
             self.app.unlock()
         except Exception as exc:                   # noqa: BLE001
-            self.app.set_foot(f"el cofre está creado, pero no se pudo abrir: {exc}")
+            self.app.set_foot(msg("primer_uso.error_abrir", error=exc))
 
     def cerrar(self) -> None:
         self.codigo = ""

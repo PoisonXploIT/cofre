@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from cofre.messages import msg
 from cofre.theme import COLORS as C
 from cofre.theme import dark_titlebar
 from cofre.v2.recovery import normalize
@@ -32,24 +33,25 @@ def _puede_rotar(meta: dict) -> bool:
 def catalogo(app) -> list[tuple[str, object]]:
     """Lista de (texto, accion). Las acciones se ejecutan en el hilo de Tk."""
     items: list[tuple[str, object]] = []
-    items.append(("Bloquear el cofre", app.lock))
-    items.append(("Comprobar salud de las credenciales",
+    items.append((msg("paleta.bloquear"), app.lock))
+    items.append((msg("paleta.salud"),
                   lambda: (app.open_health(), app._comprobar_salud())))
-    items.append(("Nuevo secreto", app._focus_new))
-    items.append(("Ajustes", app.open_settings))
-    items.append(("Llaves y recuperación", app.open_keys))
-    items.append(("Registro de accesos", app.open_audit))
-    items.append(("Guía de uso", app.open_guide))
-    items.append(("Atajos de teclado", app.open_shortcuts))
-    items.append(("Buscar en la lista", lambda: app.query_entry.focus_set()))
+    items.append((msg("paleta.nuevo"), app._focus_new))
+    items.append((msg("paleta.ajustes"), app.open_settings))
+    items.append((msg("paleta.llaves"), app.open_keys))
+    items.append((msg("paleta.registro"), app.open_audit))
+    items.append((msg("paleta.guia"), app.open_guide))
+    items.append((msg("paleta.atajos"), app.open_shortcuts))
+    items.append((msg("paleta.buscar"), lambda: app.query_entry.focus_set()))
     if getattr(app, "session", None):
         for nombre in app.vault.names():
             meta = dict(app.vault.meta(nombre) or {})
-            items.append((f"Abrir {nombre}", lambda n=nombre: app.select(n)))
-            items.append((f"Copiar {nombre}",
+            items.append((msg("paleta.abrir", nombre=nombre),
+                          lambda n=nombre: app.select(n)))
+            items.append((msg("paleta.copiar", nombre=nombre),
                           lambda n=nombre: _copiar(app, n)))
             if _puede_rotar(meta):
-                items.append((f"Rotar {nombre}",
+                items.append((msg("paleta.rotar", nombre=nombre),
                               lambda n=nombre: app._rotar_para_paleta(n)))
     return items
 
@@ -74,7 +76,7 @@ class Palette:
         self.items = catalogo(app)
         self.visibles = list(self.items)
         self.win = tk.Toplevel(app.root)
-        self.win.title("COFRE - comandos")
+        self.win.title(msg("paleta.titulo"))
         self.win.configure(bg=C["surface"])
         self.win.geometry("660x440")
         self.win.transient(app.root)
@@ -85,7 +87,7 @@ class Palette:
 
         cabecera = tk.Frame(self.win, bg=C["surface"])
         cabecera.pack(fill="x", padx=14, pady=(12, 6))
-        tk.Label(cabecera, text="Buscar secretos y acciones", fg=C["muted"],
+        tk.Label(cabecera, text=msg("paleta.campo"), fg=C["muted"],
                  bg=C["surface"], font=app.f_small, anchor="w").pack(fill="x")
         self.entrada = tk.Entry(cabecera, bg=C["card"], fg=C["text"],
                                 font=app.f_body, relief="flat", bd=0,
@@ -110,7 +112,7 @@ class Palette:
         self.aviso = tk.Label(self.win, text="", fg=C["muted"],
                               bg=C["surface"], font=app.f_small, anchor="w")
         self.aviso.pack(fill="x", padx=14)
-        tk.Label(self.win, text="Enter ejecuta  ·  flechas mueven  ·  Esc cierra",
+        tk.Label(self.win, text=msg("paleta.pie"),
                  fg=C["faint"], bg=C["surface"], font=app.f_small,
                  anchor="w").pack(fill="x", padx=14, pady=(0, 10))
 
@@ -152,7 +154,7 @@ class Palette:
             self.lista.selection_set(0)
             self.lista.activate(0)
             self.lista.see(0)
-        self.aviso.configure(text="" if self.visibles else "sin resultados")
+        self.aviso.configure(text="" if self.visibles else msg("paleta.sin_resultados"))
 
     def _mover(self, delta: int) -> str:
         if not self.visibles:
@@ -177,7 +179,7 @@ class Palette:
         try:
             accion()
         except Exception as exc:                   # noqa: BLE001
-            self.app.set_foot(f"no se pudo ejecutar: {exc}")
+            self.app.set_foot(msg("paleta.error", error=exc))
         return "break"
 
     def cerrar(self) -> None:
