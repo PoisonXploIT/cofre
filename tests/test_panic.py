@@ -39,12 +39,15 @@ class TestPanico(unittest.TestCase):
         self.master = secrets.token_bytes(32)
         self.serial = volume_serial(str(self.tmp.drive) + "\\")
         self.codigo_viejo = new_code()
+        self.otro_serial = 222
 
         v2 = VaultV2(self.vault)
         datos = v2.create(self.master, new_usb_slot(
             self.master, self.llave.read_bytes(), self.serial, "principal", ""))
         datos["slots"].append(new_recovery_slot(self.master, self.codigo_viejo,
                                                 "recuperacion"))
+        datos["slots"].append(new_usb_slot(self.master, secrets.token_bytes(32),
+                                           self.otro_serial, "reserva", ""))
         v2.put(datos, self.master, "CLOUDFLARE_TOKEN_ADMIN", "admin-falso",
                ["admin"], [], kind="api_token")
         v2.put(datos, self.master, "CF_DNS", "cf-dns", [], [], kind="api_token")
@@ -55,6 +58,7 @@ class TestPanico(unittest.TestCase):
         v2.put(datos, self.master, "AWS_KEY", "aws-secreta", [], [], kind="api_token")
         v2.save(datos)
         register_stick(str(self.vault), self.serial, str(self.tmp.drive) + "\\")
+        register_stick(str(self.vault), self.otro_serial, "F:\\", role="reserva")
 
         self.fake = FakeCloudflare()
         base = self.fake.start()
@@ -70,7 +74,9 @@ class TestPanico(unittest.TestCase):
         for nombre, extra in (
                 ("CLOUDFLARE_TOKEN_ADMIN", ["--provider", "cloudflare",
                                             "--token-id", "tok-admin"]),
-                ("CF_DNS", ["--provider", "cloudflare", "--token-id", "tok-dns"]),
+                ("CF_DNS", ["--provider", "cloudflare", "--token-id", "tok-dns",
+                            "--consumer", "cfw:cuenta:worker:API",
+                            "--consumer", "cfw:cuenta"]),
                 ("GH_PAT", ["--provider", "github"]),
                 ("AWS_KEY", ["--provider", "aws"])):
             subprocess.run(self.cmd + ["meta", nombre, *extra],
@@ -80,6 +86,12 @@ class TestPanico(unittest.TestCase):
     def tearDown(self):
         self.fake.stop()
         self.fake_gh.stop()
+        import stat
+        for archivo in self.tmp.glob(".cofre-audit-retirado-*.jsonl"):
+            try:
+                os.chmod(archivo, stat.S_IWRITE)
+            except OSError:
+                pass
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -132,6 +144,11 @@ class TestPanico(unittest.TestCase):
                          ["tok-dns", "tok-admin"])
         # GitHub: revocado por valor
         self.assertEqual(self.fake_gh.revocados, ["ghp_prueba"])
+        # el roll de CF_DNS intento desplegar en sus dos destinos: uno bien, otro mal
+        self.assertIn("desplegado en 1/2 consumidores", r.stdout)
+        self.assertIn("FALLA", r.stdout)
+        self.assertIn("cfw:cuenta", r.stdout)
+        self.assertEqual(self.fake.secretos["worker"]["API"], "valor-rotado-1")
         # el señuelo y la clave privada no se tocan
         self.assertIn("SENUELO", r.stdout)
         self.assertIn("regenerar la clave privada", r.stdout)
@@ -156,10 +173,18 @@ class TestPanico(unittest.TestCase):
         with self.assertRaises(Exception):
             VaultV2(self.vault).index(viejos, nuevo_master)
 
-        # el registro sigue cuadrando tras re-firmarlo con la clave nueva
+        # el registro sigue cuadrando: tramo viejo archivado y anclado por hash
         ver = self.correr("log", "verify")
         self.assertEqual(ver.returncode, 0, ver.stdout + ver.stderr)
         self.assertNotIn("manipulad", (ver.stdout + ver.stderr).lower())
+        self.assertIn("clave retirada", ver.stdout + ver.stderr)
+        retirados = list(self.tmp.glob(".cofre-audit-retirado-*.jsonl"))
+        self.assertEqual(len(retirados), 1)
+
+        # el informe avisa de F: y de como volver a anadirlo
+        self.assertIn("F:", r.stdout)
+        self.assertIn("stick-add-v2", r.stdout)
+        self.assertIn("COFRE.KEY.nuevo", r.stdout)
 
     def test_el_codigo_se_muestra_una_sola_vez(self):
         r = self.correr("panic", "--si")

@@ -132,9 +132,11 @@ class TestRekey(unittest.TestCase):
                          .get("entries").keys())
 
 
-class TestRekeyLog(unittest.TestCase):
+class TestSegmentos(unittest.TestCase):
+    """El tramo viejo no se re-firma: se archiva y se ancla por hash."""
+
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-rekey-log-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-seg-"))
         self.vault = self.tmp / "cofre.json"
         self.vault.write_text("{}", encoding="utf-8")
         self.vieja = secrets.token_bytes(32)
@@ -145,36 +147,78 @@ class TestRekeyLog(unittest.TestCase):
         for i in range(3):
             audit.record(self.vault, "get", "usb", self.serial,
                          name=f"S{i}", ok=True)
-        audit.clear_key()
 
     def tearDown(self):
         audit.clear_key()
+        import os
+        import stat
+        for archivo in self.tmp.glob(audit.SEGMENT_PREFIX + "*.jsonl"):
+            try:
+                os.chmod(archivo, stat.S_IWRITE)
+            except OSError:
+                pass
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_rekey_del_log_conserva_la_cadena(self):
-        lineas = audit.rekey_log(self.vault, self.vieja, self.nueva)
-        self.assertEqual(lineas, 3)
+    def _archivos(self):
+        return sorted(self.tmp.glob(audit.SEGMENT_PREFIX + "*.jsonl"))
+
+    def test_cierra_archiva_y_ancla_sin_refirmar(self):
+        log = audit.audit_path(self.vault)
+        texto_viejo = log.read_text(encoding="utf-8")
+        seg = audit.close_segment(self.vault, self.nueva, motivo="prueba",
+                                  gate="usb", serial=self.serial)
+        self.assertIsNotNone(seg)
+        archivo = Path(seg["archivo"])
+        self.assertTrue(archivo.exists())
+        self.assertEqual(archivo.read_text(encoding="utf-8"), texto_viejo,
+                         "el tramo viejo no se re-firma")
+        # solo lectura
+        import os
+        self.assertEqual(os.stat(archivo).st_mode & 0o222, 0)
+
+        # el tramo nuevo se verifica con la clave nueva
         audit.set_key(self.nueva)
         ok, detalle = audit.verify(self.vault)
         self.assertTrue(ok, detalle)
+        self.assertIn("clave retirada", detalle)
+        self.assertIn(archivo.name, detalle)
+
+        # la clave vieja ya no verifica el ancla nueva
         audit.set_key(self.vieja)
         ok, detalle = audit.verify(self.vault)
         self.assertFalse(ok)
         self.assertIn("firma incorrecta", detalle)
 
-    def test_una_firma_manipulada_aborta_sin_escribir(self):
-        p = audit.audit_path(self.vault)
-        antes = p.read_text(encoding="utf-8")
-        lineas = antes.splitlines()
-        datos = json.loads(lineas[1])
-        datos["mac"] = "0" * 64
-        lineas[1] = json.dumps(datos, sort_keys=True, separators=(",", ":"))
-        p.write_text("\n".join(lineas) + "\n", encoding="utf-8")
-        manipulado = p.read_text(encoding="utf-8")
-        with self.assertRaises(RuntimeError):
-            audit.rekey_log(self.vault, self.vieja, self.nueva)
-        self.assertEqual(p.read_text(encoding="utf-8"), manipulado)
+    def test_un_tramo_retirado_editado_se_detecta(self):
+        seg = audit.close_segment(self.vault, self.nueva, motivo="prueba")
+        archivo = Path(seg["archivo"])
+        import os
+        import stat
+        os.chmod(archivo, stat.S_IWRITE)
+        with archivo.open("a", encoding="utf-8") as fh:
+            fh.write("\n")
+        audit.set_key(self.nueva)
+        ok, detalle = audit.verify(self.vault)
+        self.assertFalse(ok)
+        self.assertIn("se ha editado", detalle)
+
+    def test_dos_tramos_retirados_se_heredan(self):
+        seg1 = audit.close_segment(self.vault, self.nueva, motivo="prueba")
+        audit.set_key(self.nueva)
+        audit.record(self.vault, "get", "usb", self.serial, name="S3", ok=True)
+        tercera = secrets.token_bytes(32)
+        seg2 = audit.close_segment(self.vault, tercera, motivo="prueba2")
+        audit.set_key(tercera)
+        ok, detalle = audit.verify(self.vault)
+        self.assertTrue(ok, detalle)
+        self.assertIn(Path(seg1["archivo"]).name, detalle)
+        self.assertIn(Path(seg2["archivo"]).name, detalle)
+
+    def test_sin_log_no_hay_nada_que_cerrar(self):
+        audit.clear_key()
+        audit.audit_path(self.vault).unlink(missing_ok=True)
+        self.assertIsNone(audit.close_segment(self.vault, self.nueva))
 
 
 if __name__ == "__main__":

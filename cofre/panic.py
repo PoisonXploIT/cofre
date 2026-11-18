@@ -146,8 +146,8 @@ def _marcar(store, master: bytes, nombre: str, estado: str, detalle: str,
     store.save(store._data)
 
 
-def ejecutar(store, master: bytes, plan: Plan,
-             admin_valor: str = "") -> list[tuple[Accion, bool, str]]:
+def ejecutar(store, master: bytes, plan: Plan, admin_valor: str = "",
+             token_gh: str = "") -> list[tuple[Accion, bool, str]]:
     """Ejecutar los roll y las revocaciones. El rekey lo hace el CLI despues."""
     from cofre.providers import get as provider_get
 
@@ -163,7 +163,35 @@ def ejecutar(store, master: bytes, plan: Plan,
             nuevo = provider_get("cloudflare").roll_value(
                 accion.token_id, admin_valor, meta)
             _guardar_valor(store, master, accion.nombre, nuevo)
-            resultados.append((accion, True, "valor nuevo guardado"))
+            if accion.admin:
+                # el token viejo acaba de morir: los despliegues del propio
+                # administrador usan el valor nuevo
+                admin_valor = nuevo
+            detalle = "valor nuevo guardado"
+            consumidores = [str(c) for c in (meta.get("consumers") or [])]
+            if consumidores:
+                # el roll invalida el valor viejo en el acto: se intenta dejar
+                # los destinos al dia una vez, sin bloquear el resto del panico
+                try:
+                    from cofre.consumers import deploy
+                    despliegue = deploy(consumidores, nuevo,
+                                        github_token=token_gh,
+                                        cloudflare_token=admin_valor)
+                    hechos = [et for et, ok, det in despliegue
+                              if ok and det == "desplegado"]
+                    fallos = [f"{et}: {det}" for et, ok, det in despliegue
+                              if not ok]
+                    manuales = [c for c in consumidores
+                                if c.startswith("manual:")]
+                    detalle = (f"desplegado en {len(hechos)}/"
+                               f"{len(consumidores)} consumidores")
+                    if manuales:
+                        detalle += f"; a mano: {len(manuales)}"
+                    if fallos:
+                        detalle += "; FALLA " + "; ".join(fallos)[:110]
+                except Exception as exc:           # noqa: BLE001
+                    detalle += f"; no se pudo desplegar: {exc}"
+            resultados.append((accion, True, detalle))
         except Exception as exc:                   # noqa: BLE001
             resultados.append((accion, False, str(exc)))
 

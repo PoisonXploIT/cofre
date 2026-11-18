@@ -462,53 +462,141 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
             detalle += f" (líneas 1-{ultima_ancla - 1} exentas de firma)"
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
+    ok_tramos, detalle_tramos = retired_report(vault_path)
+    if not ok_tramos:
+        return False, detalle_tramos
+    if detalle_tramos:
+        detalle += "; " + detalle_tramos
     return True, detalle
 
 
-def rekey_log(vault_path: str | Path, old_master: bytes,
-              new_master: bytes) -> int:
-    """Re-firmar el log con la clave nueva, tras verificar la vieja.
+SEGMENT_PREFIX = ".cofre-audit-retirado-"
 
-    Conserva eventos, seq y el `prev` de la primera linea (que puede apuntar a
-    una linea ya archivada); recalcula las firmas y la cadena. Si una linea no
-    cuadra con la clave vieja, aborta sin escribir nada: el rekey no puede
-    tapar una manipulacion previa.
+
+def _segmentos_retirados(vault_path: str | Path) -> list[Path]:
+    base = Path(vault_path).parent
+    return sorted(base.glob(SEGMENT_PREFIX + "*.jsonl"))
+
+
+def close_segment(vault_path: str | Path, new_master: bytes, motivo: str = "",
+                  gate: str = "-", serial: int | None = None,
+                  actor: str = "cli") -> dict | None:
+    """Cerrar el tramo actual, archivarlo en solo lectura y anclar el nuevo.
+
+    El tramo viejo NO se re-firma: se guarda tal cual, con las firmas de la clave
+    que se retira. El tramo nuevo empieza con un `audit-start` firmado con la
+    clave NUEVA que ancla por SHA-256 el archivo retirado. Quien llama debe
+    haber escrito antes el evento de cierre con la clave vieja.
     """
+    import stat
+
     p = audit_path(vault_path)
-    if not p.exists():
-        return 0
-    vieja = _subkey(old_master)
-    nueva = _subkey(new_master)
-    salida: list[str] = []
-    prev_original = None      # hash de la linea anterior tal como estaba
-    prev_nuevo = None         # hash de la linea anterior ya re-firmada
-    for numero, texto in enumerate(p.read_text(encoding="utf-8").splitlines(),
-                                   start=1):
-        try:
-            ev = json.loads(texto)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"línea {numero}: no es JSON") from exc
-        if prev_original is not None and ev.get("prev") != prev_original:
-            raise RuntimeError(f"línea {numero}: la cadena no cuadra")
-        mac = ev.pop("mac", None)
-        if mac is not None:
-            esperado = hmac.new(vieja, _canonical(ev), hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(mac, esperado):
-                raise RuntimeError(f"línea {numero}: la firma vieja no cuadra")
-        # la cadena nueva empieza en el prev de la primera linea (puede apuntar
-        # a una linea archivada); a partir de ahi, cada prev es el hash nuevo
-        if prev_nuevo is not None:
-            ev["prev"] = prev_nuevo
-        if mac is not None:
-            ev["mac"] = hmac.new(nueva, _canonical(ev), hashlib.sha256).hexdigest()
-        else:
-            ev["mac"] = None
-        nuevo_texto = json.dumps(ev, sort_keys=True, separators=(",", ":"))
-        salida.append(nuevo_texto)
-        prev_original = _line_hash(texto)
-        prev_nuevo = _line_hash(nuevo_texto)
-    atomic_write(p, "\n".join(salida) + "\n")
-    return len(salida)
+    if not p.exists() or p.stat().st_size == 0:
+        return None
+    texto = p.read_text(encoding="utf-8")
+    lineas = texto.splitlines()
+    ok_viejo, detalle_viejo = verify(vault_path)
+    marca = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = Path(vault_path).parent
+    destino = base / f"{SEGMENT_PREFIX}{marca}.jsonl"
+    n = 2
+    while destino.exists():
+        destino = base / f"{SEGMENT_PREFIX}{marca}-{n}.jsonl"
+        n += 1
+    atomic_write(destino, texto)
+    try:
+        os.chmod(destino, stat.S_IREAD)
+    except OSError:
+        pass
+    huella = _sha256_file(destino)
+    aviso = "" if ok_viejo else f" (el tramo viejo no verificaba: {detalle_viejo[:80]})"
+    # un rekey puede ocurrir varias veces: los anclas anteriores se heredan en
+    # el ancla nueva, firmada con la clave nueva
+    heredados: list[str] = []
+    for ev in _events(vault_path):
+        if ev.get("ev") != "audit-start":
+            continue
+        detalle_prev = str(ev.get("detail") or "")
+        nombre_prev = str(ev.get("name") or "")
+        sha_prev = ""
+        for trozo in detalle_prev.split():
+            if trozo.startswith("sha256="):
+                sha_prev = trozo.split("=", 1)[1]
+                break
+        if nombre_prev and sha_prev:
+            heredados.append(f"{nombre_prev}={sha_prev}")
+        if "anteriores=" in detalle_prev:
+            lista = detalle_prev.split("anteriores=", 1)[1].split()[0]
+            heredados.extend(t for t in lista.split(",") if "=" in t)
+    heredados = sorted(set(heredados))
+    cola = (" anteriores=" + ",".join(heredados)) if heredados else ""
+    payload = {
+        "seq": 1,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "ev": "audit-start",
+        "entry": "-",
+        "name": destino.name,
+        "actor": actor,
+        "ok": True,
+        "stick": str(serial) if serial is not None else "-",
+        "gate": gate,
+        "detail": (f"tramo retirado sha256={huella} motivo={motivo or 'rekey'}"
+                   f"{aviso}{cola}"),
+        "prev": GENESIS,
+    }
+    mac = hmac.new(_subkey(new_master), _canonical(payload),
+                   hashlib.sha256).hexdigest()
+    payload["mac"] = mac
+    linea = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    atomic_write(p, linea + "\n")
+    return {"archivo": str(destino), "nombre": destino.name, "sha256": huella,
+            "líneas": len(lineas), "verificaba": ok_viejo,
+            "detalle": detalle_viejo, "seq": 1, "hash": _line_hash(linea)}
+
+
+def retired_report(vault_path: str | Path) -> tuple[bool, str]:
+    """Comprobar los tramos retirados contra su ancla (hash, no firma)."""
+    archivos = _segmentos_retirados(vault_path)
+    if not archivos:
+        return True, ""
+    anclas: dict[str, tuple[str, str, str]] = {}
+    for ev in _events(vault_path):
+        if ev.get("ev") != "audit-start":
+            continue
+        nombre = str(ev.get("name") or "")
+        if not nombre.startswith(SEGMENT_PREFIX):
+            continue
+        detalle = str(ev.get("detail") or "")
+        sha = ""
+        for trozo in detalle.split():
+            if trozo.startswith("sha256="):
+                sha = trozo.split("=", 1)[1]
+                break
+        motivo = ""
+        if "motivo=" in detalle:
+            motivo = detalle.split("motivo=", 1)[1].split()[0]
+        anclas[nombre] = (sha, str(ev.get("ts") or "")[:10], motivo)
+        if "anteriores=" in detalle:
+            lista = detalle.split("anteriores=", 1)[1].split()[0]
+            for trozo in lista.split(","):
+                if "=" in trozo:
+                    otro, sha_otro = trozo.split("=", 1)
+                    anclas.setdefault(otro, (sha_otro, str(ev.get("ts") or "")[:10],
+                                             motivo))
+    partes = []
+    for archivo in archivos:
+        ancla = anclas.get(archivo.name)
+        if not ancla:
+            return False, (f"{archivo.name}: tramo retirado sin ancla en el "
+                           "registro actual")
+        sha, fecha, motivo = ancla
+        actual = _sha256_file(archivo)
+        if not sha or not hmac.compare_digest(actual, sha):
+            return False, (f"{archivo.name}: el tramo retirado se ha editado "
+                           "(el hash no coincide con el ancla)")
+        partes.append(f"{archivo.name}: firmado con la clave retirada en el "
+                      f"{motivo or 'cambio'} del {fecha}, anclado por hash")
+    return True, "; ".join(partes)
 
 
 def pending_unsigned(vault_path: str | Path) -> int:
