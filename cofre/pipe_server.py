@@ -1,4 +1,4 @@
-"""COFRE - servidor de la tuberia con nombre (plan 4.0.b, lado GUI).
+r"""COFRE - servidor de la tuberia con nombre (plan 4.0.b, lado GUI).
 
 La GUI es la unica que tiene la sesion abierta. Este servidor:
 
@@ -279,42 +279,65 @@ class PipeServer:
                 if not kernel32.ConnectNamedPipe(handle, None):
                     err = ctypes.get_last_error()
                     if err not in (ERROR_PIPE_CONNECTED, 0):
+                        kernel32.CloseHandle(handle)
                         if self._stop.is_set():
                             break
                         self.log(f"ConnectNamedPipe error {err}")
                         continue
                 if self._stop.is_set():
+                    kernel32.DisconnectNamedPipe(handle)
+                    kernel32.CloseHandle(handle)
                     break
                 ok, motivo = self._client_ok(handle)
                 if not ok:
                     self.log(f"cliente rechazado: {motivo}")
                     kernel32.DisconnectNamedPipe(handle)
+                    kernel32.CloseHandle(handle)
                     continue
-                message = read_frame(handle)
-                if message is None:
-                    self.log("mensaje ilegible del cliente")
-                    continue
-                if isinstance(message, dict):
-                    message["_client"] = dict(self._last_client)
+                # Una conexion = un hilo. Si el despacho pide confirmacion y
+                # espera 20 s, las demas peticiones no se quedan detras:
+                # mientras el dialogo esta abierto, el cofre sigue contestando
+                # a `status` y a las peticiones de un host ya permitido.
+                cliente = dict(self._last_client)
+                obrero = threading.Thread(target=self._serve, args=(handle, cliente),
+                                          daemon=True, name="cofre-pipe-conn")
+                obrero.start()
+            except Exception as exc:                         # noqa: BLE001
+                self.log(f"fallo al aceptar la conexion: {type(exc).__name__}")
                 try:
-                    reply = self.handler(message)
-                except Exception as exc:                     # noqa: BLE001
-                    self.log(f"el manejador fallo: {type(exc).__name__}")
-                    reply = {"ok": False, "error": "fallo interno del cofre"}
-                if not write_frame(handle, reply or {"ok": False, "error": "sin respuesta"}):
-                    self.log("no se pudo escribir la respuesta")
-                else:
-                    # Sin esto, DisconnectNamedPipe tira los datos antes de que
-                    # el cliente los lea (ERROR_PIPE_NOT_CONNECTED en el host).
-                    kernel32.FlushFileBuffers(handle)
-            finally:
-                kernel32.DisconnectNamedPipe(handle)
-                kernel32.CloseHandle(handle)
+                    kernel32.DisconnectNamedPipe(handle)
+                    kernel32.CloseHandle(handle)
+                except Exception:
+                    pass
         # limpieza final
         try:
             pipe_info_path().unlink(missing_ok=True)
         except OSError:
             pass
+
+    def _serve(self, handle, cliente: dict) -> None:
+        """Atiende una conexion ya aceptada y validada (hilo propio)."""
+        try:
+            message = read_frame(handle)
+            if message is None:
+                self.log("mensaje ilegible del cliente")
+                return
+            if isinstance(message, dict):
+                message["_client"] = dict(cliente)
+            try:
+                reply = self.handler(message)
+            except Exception as exc:                         # noqa: BLE001
+                self.log(f"el manejador fallo: {type(exc).__name__}")
+                reply = {"ok": False, "error": "fallo interno del cofre"}
+            if not write_frame(handle, reply or {"ok": False, "error": "sin respuesta"}):
+                self.log("no se pudo escribir la respuesta")
+            else:
+                # Sin esto, DisconnectNamedPipe tira los datos antes de que
+                # el cliente los lea (ERROR_PIPE_NOT_CONNECTED en el host).
+                kernel32.FlushFileBuffers(handle)
+        finally:
+            kernel32.DisconnectNamedPipe(handle)
+            kernel32.CloseHandle(handle)
 
     def write_pipe_info(self, extra: dict | None = None) -> Path:
         """Nombre y PID. Solo eso: nada que sirva para abrir el cofre."""
@@ -328,46 +351,37 @@ class PipeServer:
 
 
 class BridgeController:
-    """Puente entre el hilo de la tuberia y el de Tkinter.
+    """Puente entre los hilos de la tuberia y la GUI (corregido 2026-11-18).
 
-    El hilo de la tuberia NO toca la ventana: encola y espera. El hilo de la GUI
-    llama a `poll()` periodicamente (after), ejecuta el manejador y despierta.
+    El despacho corre en el hilo de la tuberia, **nunca en el de Tkinter**:
+    aqui se lee el cofre y, cuando hace falta confirmar, se encola en la
+    ConfirmQueue; el unico hilo que espera es este. Lo que haya que pintar va
+    al hilo de la ventana con `ui_call`.
+
+    Antes el despacho se hacia en el hilo de Tk: al pedir confirmacion se abria
+    un `wait_window()` dentro del propio sondeo y Tk se quedaba sin vaciar la
+    cola. Ahora el sondeo solo atiende `ui_call` y confirmaciones.
     """
 
     def __init__(self, root, dispatch, log=None):
         self.root = root
-        self.dispatch = dispatch          # se ejecuta en el hilo de Tkinter
+        self.dispatch = dispatch          # corre en el hilo de la tuberia
         self.log = log or (lambda msg: None)
         self.requests: queue.Queue = queue.Queue()
         self.server: PipeServer | None = None
 
     def _handler(self, message: dict) -> dict:
-        done = threading.Event()
-        box: dict = {}
-
-        def run() -> None:
-            try:
-                box["reply"] = self.dispatch(message)
-            except Exception as exc:                     # noqa: BLE001
-                box["reply"] = {"ok": False, "error": f"fallo: {type(exc).__name__}"}
-            finally:
-                done.set()
-
-        self.requests.put(run)
-        if not done.wait(timeout=30):
-            return {"ok": False, "error": "el cofre no respondio a tiempo"}
-        return box.get("reply") or {"ok": False, "error": "sin respuesta"}
-
-    def poll(self) -> None:
-        """Llamar desde el hilo de Tkinter con after(50, poll)."""
         try:
-            while True:
-                run = self.requests.get_nowait()
-                run()
-        except queue.Empty:
-            pass
-        except Exception as exc:                             # noqa: BLE001
-            self.log(f"poll fallo: {exc}")
+            respuesta = self.dispatch(message)
+        except Exception as exc:                              # noqa: BLE001
+            self.log(f"fallo al despachar: {type(exc).__name__}")
+            return {"ok": False, "error": f"fallo: {type(exc).__name__}"}
+        return respuesta or {"ok": False, "error": "sin respuesta"}
+
+    def poll(self) -> bool:
+        """Se mantiene por compatibilidad: el despacho ya no pasa por aquí."""
+        return False
+
 
     def start(self, expected_client_exe: str | None = None) -> None:
         self.server = PipeServer(self._handler, expected_client_exe=expected_client_exe,

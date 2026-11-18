@@ -26,6 +26,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import tkinter as tk
@@ -38,6 +39,7 @@ from cofre.gate import GateUnavailable, material_for, resolve_session_key
 from cofre.gen import entropy, human_password, machine_password
 from cofre.messages import msg
 from cofre.paths import default_vault
+from cofre.threads import assert_main, is_main
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
                          dark_titlebar, enable_dpi_awareness)
 from cofre.usb import (KEY_FILENAME, DRIVE_FIXED, DRIVE_REMOVABLE, copy_key_to,
@@ -96,6 +98,8 @@ class CofreGUI:
         self.session_obj = None
         self.confirm_queue = None
         self.confirm_grants: dict[tuple[str, str], float] = {}
+        # llamadas a Tk desde otros hilos: se encolan y las pinta el sondeo
+        self._ui_cola: queue.Queue = queue.Queue()
         self.alert_state = None
         self.browser_on = False
         from cofre import settings as _settings
@@ -288,6 +292,7 @@ class CofreGUI:
 
     def _draw_pill(self) -> None:
         """Pildora redondeada: fondo ok_bg, texto corto y punto de estado."""
+        assert_main("_draw_pill")
         if not hasattr(self, "pill"):
             return
         from cofre import widgets as W
@@ -389,6 +394,14 @@ class CofreGUI:
         self.query_entry.bind("<FocusOut>", lambda _e: caja_buscar.configure(
             highlightbackground=LINE))
         self.query_entry.bind("<Down>", self._enfocar_lista)
+
+        # ---------- permisos temporales (2026-11-18) ----------
+        # La tuberia esta abierta siempre que el cofre lo esta. Mientras dura un
+        # "Permitir 5 minutos", se ve aqui y se puede retirar con un clic.
+        self.grants_row = tk.Frame(header, bg=PANEL)
+        self._grants_widgets: list = []
+        self._grants_firma: tuple | None = None
+
 
         # ---------- banda de alertas (E7) ----------
         self.alert_band = tk.Frame(self.root, bg=WARNBG)
@@ -759,6 +772,8 @@ class CofreGUI:
         from cofre.gui_confirm import ConfirmQueue
         self.confirm_queue = ConfirmQueue(self.root)
         self.root.after(200, self._pump_confirm)
+        self.root.after(50, self._pump_ui)
+        self.root.after(1000, self._pump_grants)
         from cofre.lock_screen import LockScreen
         self.lock_screen = LockScreen(self.root, self)
         self.lock_screen.mostrar("abriendo el cofre...")
@@ -770,7 +785,36 @@ class CofreGUI:
 
     # ---------- estado ----------
 
+    def ui_call(self, fn, *args, **kwargs) -> None:
+        """Pintar desde cualquier hilo: aqui, o encolado al hilo de Tkinter.
+
+        Tkinter no es seguro entre hilos. Los hilos de la tuberia y del TCP
+        nunca tocan widgets: encolan y el sondeo los ejecuta en el principal.
+        """
+        if is_main():
+            fn(*args, **kwargs)
+            return
+        self._ui_cola.put((fn, args, kwargs))
+
+    def _pump_ui(self) -> None:
+        """Vaciar la cola de pintado. Solo en el hilo de Tkinter."""
+        assert_main("_pump_ui")
+        for _ in range(50):
+            try:
+                fn, args, kwargs = self._ui_cola.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                fn(*args, **kwargs)
+            except Exception:
+                pass
+        try:
+            self.root.after(50, self._pump_ui)
+        except Exception:
+            pass
+
     def set_status(self, text, warn=False):
+        assert_main("set_status")
         self.status_var.set(text)
         self._draw_pill()
         try:
@@ -787,6 +831,7 @@ class CofreGUI:
 
     def set_foot(self, text, ttl: int = 8000):
         """Aviso breve en el pie. Se borra solo, o al cambiar de estado."""
+        assert_main("set_foot")
         self.foot_var.set(text)
         self.refresh_log()
         if getattr(self, "_foot_id", None):
@@ -801,6 +846,100 @@ class CofreGUI:
     def _clear_foot(self) -> None:
         self._foot_id = None
         self.foot_var.set("")
+
+    # ---------- permisos temporales a la vista ----------
+
+    def _grants_activos(self) -> list[tuple[tuple[str, str], float]]:
+        """Los permisos de 5 minutos que siguen vivos, de mas antiguo a mas nuevo."""
+        ahora = time.time()
+        vivos: dict[tuple[str, str], float] = {}
+        for clave, hasta in list(self.confirm_grants.items()):
+            try:
+                restante = float(hasta) - ahora
+            except (TypeError, ValueError):
+                continue
+            if restante > 0:
+                vivos[clave] = float(hasta)
+        self.confirm_grants = vivos
+        return sorted(vivos.items(), key=lambda kv: kv[1])
+
+    @staticmethod
+    def _grant_texto(clave) -> str:
+        """'git: github.com' o 'navegador: NOMBRE' a partir de la clave."""
+        contexto, quien = (clave if isinstance(clave, tuple) else (clave, ""))
+        contexto, quien = str(contexto), str(quien)
+        if contexto.lower().startswith("git:"):
+            return f"git: {contexto[4:]}"
+        if quien.lower().startswith("navegador"):
+            return f"navegador: {contexto}"
+        return f"{quien.lower()}: {contexto}" if quien else contexto
+
+    def _pump_grants(self) -> None:
+        """Cada segundo: cuenta atras y limpieza de permisos caducados."""
+        assert_main("_pump_grants")
+        self._refrescar_grants()
+        try:
+            self.root.after(1000, self._pump_grants)
+        except Exception:
+            pass
+
+    def _refrescar_grants(self) -> None:
+        assert_main("_refrescar_grants")
+        filas = []
+        for clave, hasta in self._grants_activos():
+            resta = max(0, int(round(hasta - time.time())))
+            filas.append((clave, f"{self._grant_texto(clave)} permitido "
+                                 f"{resta // 60}:{resta % 60:02d}"))
+        firma = tuple(texto for _clave, texto in filas)
+        if firma == self._grants_firma:
+            return
+        self._grants_firma = firma
+        self._dibujar_grants(filas)
+
+    def _dibujar_grants(self, filas: list) -> None:
+        for widget in self._grants_widgets:
+            try:
+                widget.destroy()
+            except Exception:
+                pass
+        self._grants_widgets = []
+        if not filas:
+            try:
+                self.grants_row.pack_forget()
+            except Exception:
+                pass
+            return
+        try:
+            self.grants_row.pack(fill="x", padx=16, pady=(0, 6))
+        except Exception:
+            pass
+        etiqueta = tk.Label(self.grants_row, text=msg("permisos.titulo"),
+                            fg=MUT, bg=PANEL, font=self.f_small)
+        etiqueta.pack(side="left")
+        self._grants_widgets.append(etiqueta)
+        for clave, texto in filas:
+            caja = tk.Frame(self.grants_row, bg=PANEL2)
+            caja.pack(side="left", padx=(8, 0))
+            lab = tk.Label(caja, text=texto, fg=OK, bg=PANEL2, font=self.f_small)
+            lab.pack(side="left", padx=(8, 4), pady=2)
+            boton = self._text_btn(caja, msg("permisos.retirar"),
+                                   lambda c=clave: self.revocar_permiso(c))
+            boton.pack(side="left", padx=(0, 6))
+            self._grants_widgets.extend([caja, lab, boton])
+
+    def revocar_permiso(self, clave) -> None:
+        """Retirar un permiso temporal antes de que caduque."""
+        assert_main("revocar_permiso")
+        if self.confirm_grants.pop(clave, None) is None:
+            return
+        texto = self._grant_texto(clave)
+        nombre = str(clave[0] if isinstance(clave, tuple) else clave)[:60]
+        record(self.vault_path, "grant-revoke", self.gate, self.serial,
+               name=nombre, ok=True, detail=f"permiso retirado a mano: {texto}"[:150])
+        self._grants_firma = None
+        self._refrescar_grants()
+        self.set_foot(msg("permisos.retirado", texto=texto))
+
 
     def stick_report(self) -> list[dict]:
         """Pendrives autorizados, con letra, rol y si estan conectados ahora."""
@@ -973,6 +1112,11 @@ class CofreGUI:
         # los permisos de 5 minutos (2.4) no sobreviven al bloqueo, por el
         # motivo que sea: a mano, por inactividad o por suspension
         self.confirm_grants.clear()
+        self._grants_firma = None
+        try:
+            self._refrescar_grants()          # la barra de permisos se vacia ya
+        except Exception:
+            pass
         # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
         # existe si el cofre estaba abierto. Y si no habia sesión no se escribe
         # nada: bloquear un cofre ya cerrado no es un evento.
@@ -1275,7 +1419,9 @@ class CofreGUI:
             self.bridge_ctl = BridgeController(
                 self.root,
                 lambda msg: bridge_ops.dispatch(self, msg),
-                log=lambda m: self.set_foot(f"puente: {m}"))
+                # el despacho ya no corre en el hilo de Tk: lo que se pinte,
+                # a la cola del hilo principal
+                log=lambda m: self.ui_call(self.set_foot, f"puente: {m}"))
         try:
             self.bridge_ctl.start()
         except Exception as exc:                      # noqa: BLE001
@@ -1286,17 +1432,18 @@ class CofreGUI:
         self.set_foot("tubería local lista (navegador y git)")
         record(self.vault_path, "bridge-start", self.gate, self.serial, ok=True,
                detail="tuberia")
-        self._pump_bridge()
 
     def _pump_bridge(self) -> None:
-        """Atiende las peticiones del navegador en el hilo de Tkinter."""
+        """Se conserva por compatibilidad: el despacho pasa por los hilos de la
+        tuberia; aqui solo se comprueba que el servidor sigue vivo."""
         if not self.bridge_ctl:
             return
         try:
             self.bridge_ctl.poll()
         except Exception:
             pass
-        self.root.after(60, self._pump_bridge)
+        self.root.after(2000, self._pump_bridge)
+
 
     def stop_bridge(self) -> None:
         if self.bridge:
@@ -1311,6 +1458,13 @@ class CofreGUI:
             except Exception:
                 pass
             self.bridge_ctl = None
+        # al cerrar el puente no queda nadie que conteste: se deniega lo
+        # pendiente y se cierra el dialogo, si habia uno abierto
+        if self.confirm_queue:
+            try:
+                self.confirm_queue.cancelar()
+            except Exception:
+                pass
         self.browser_on = False
         self.set_foot("tubería local cerrada (navegador y git)")
 
@@ -1493,43 +1647,48 @@ class CofreGUI:
             return {}
 
     def request_confirm(self, who: str, what: str, contexto: str | None = None) -> str:
-        """Pregunta a la persona (2.4). Se llama desde el hilo del puente.
+        """Pregunta a la persona (2.4).
 
-        `contexto` permite que el permiso de 5 minutos sea por host en git;
-        el navegador sigue usando el secreto seleccionado.
+        Dos caminos, y solo dos:
+
+          - hilo de la GUI (una accion de la ventana): dialogo modal directo,
+            como el resto de hojas; `wait_window` corre su propio bucle de Tk;
+          - cualquier otro hilo (tuberia, TCP): se encola y **espera aqui**;
+            el sondeo abre el dialogo sin bloquearse y le pasa la respuesta.
+
+        `contexto` permite que el permiso de 5 minutos sea por host en git; el
+        navegador sigue usando el secreto seleccionado.
         """
         if not self.confirm_queue:
             return "deny"
         clave = (contexto or self.selected or what, who.split(" - ")[0])
+        self._grants_activos()          # limpia caducados antes de mirar
         hasta = self.confirm_grants.get(clave)
-        if hasta and hasta > __import__("time").time():
+        if hasta and hasta > time.time():
             return "grant"
-        # Si ya estamos en el hilo de Tk (el despacho del puente), abrir el
-        # dialogo directamente: bloquear con la cola dejaria a Tk sin poder
-        # pintarlo. En un hilo servidor (TCP) se usa la cola.
-        import threading
-        if threading.current_thread() is threading.main_thread():
+        if is_main():
             try:
                 from cofre.gui_confirm import ConfirmDialog
                 resultado = ConfirmDialog(self.root, who, what).wait()
             except Exception:
                 resultado = "deny"
         else:
-            resultado = self.confirm_queue.ask(who, what)
+            resultado = self.confirm_queue.ask(who, what, timeout=30)
         if resultado == "grant":
-            self.confirm_grants[clave] = __import__("time").time() + 300
+            self.confirm_grants[clave] = time.time() + 300
         return resultado
 
     def _pump_confirm(self) -> None:
         if not self.confirm_queue:
             return
+        assert_main("_pump_confirm")
         try:
-            if self.confirm_queue.poll():
+            if self.confirm_queue.pump():
                 self.root.after(10, self._pump_confirm)
                 return
         except Exception:
             pass
-        self.root.after(200, self._pump_confirm)
+        self.root.after(100, self._pump_confirm)
 
     def _check_rotation(self) -> None:
         """Si hay una rotación interrumpida, avisar en la banda (no ejecutar)."""
@@ -3553,9 +3712,17 @@ class CofreGUI:
             return False
 
     def _canary_alert(self, name: str, canal: str) -> None:
-        """3.2: leer un senuelo es lo mas grave que puede pasar aquí."""
+        """3.2: leer un senuelo es lo mas grave que puede pasar aquí.
+
+        Puede llegar desde el hilo de la tuberia o del TCP: el registro si se
+        escribe aqui (con su cerrojo) y lo que pinta se encola al hilo de Tk.
+        """
         record(self.vault_path, "canary-access", self.gate, self.serial,
                name=name, ok=False, detail=f"canal={canal}")
+        self.ui_call(self._canary_alert_ui, name, canal)
+
+    def _canary_alert_ui(self, name: str, canal: str) -> None:
+        assert_main("_canary_alert_ui")
         self.set_status("ALERTA: alguien ha pedido un senuelo", warn=True)
         self.set_foot(f"ALERTA: '{name}' es un senuelo. No se entrega. "
                       f"Canal: {canal}. Queda anotado.")

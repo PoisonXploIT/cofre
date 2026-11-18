@@ -38,7 +38,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 CLIENT = r'''
-import json, struct, sys
+import json, struct, sys, time
 sys.path.insert(0, r"C:\Users\Sammi\AI\cofre")
 import ctypes
 from ctypes import wintypes
@@ -47,7 +47,29 @@ from cofre.pipe_server import kernel32, GENERIC_READ, GENERIC_WRITE, OPEN_EXISTI
 name = sys.argv[1]
 msg = json.loads(sys.argv[2])
 full = "\\\\.\\pipe\\" + name
-h = kernel32.CreateFileW(full, GENERIC_READ | GENERIC_WRITE, 0, None, OPEN_EXISTING, 0, None)
+kernel32.WaitNamedPipeW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+
+
+def abrir():
+    # una conexion por hilo: entre instancias puede dar BUSY o "no existe"
+    plazo = time.time() + 5
+    while True:
+        h = kernel32.CreateFileW(full, GENERIC_READ | GENERIC_WRITE, 0, None,
+                                 OPEN_EXISTING, 0, None)
+        if h and h != INVALID_HANDLE:
+            return h
+        err = ctypes.get_last_error()
+        if err == 231:                              # ERROR_PIPE_BUSY
+            kernel32.WaitNamedPipeW(full, 3000)
+        elif err == 2 and time.time() < plazo:      # ERROR_FILE_NOT_FOUND
+            time.sleep(0.02)
+        else:
+            return h
+        if time.time() >= plazo:
+            return h
+
+
+h = abrir()
 if not h or h == INVALID_HANDLE:
     print(json.dumps({"error": "no se pudo abrir", "code": ctypes.get_last_error()}))
     raise SystemExit(1)

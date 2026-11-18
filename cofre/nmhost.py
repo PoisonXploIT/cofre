@@ -45,6 +45,12 @@ GENERIC_WRITE = 0x40000000
 OPEN_EXISTING = 3
 ERROR_PIPE_BUSY = 231
 ERROR_FILE_NOT_FOUND = 2
+
+# El servidor atiende una conexion por hilo: entre una y otra hay un instante
+# sin instancia creada y CreateFile puede devolver "no existe". Se reintenta un
+# poco; solo eso, para que el ayudante no se quede esperando si no hay GUI.
+ESPERA_INSTANCIA_MS = 2000
+ERROR_FILE_NOT_FOUND = 2
 ERROR_PIPE_NOT_CONNECTED = 233
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -325,16 +331,23 @@ def forward(message: dict, reply_timeout_ms: int = REPLY_TIMEOUT_MS) -> dict:
     pipe = str(info["pipe"])
     name = pipe if pipe.startswith("\\\\") else f"\\\\.\\pipe\\{pipe}"
 
-    handle = kernel32.CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, None,
-                                  OPEN_EXISTING, 0, None)
-    if handle in (None, wintypes.HANDLE(-1).value):
+    plazo = time.time() + ESPERA_INSTANCIA_MS / 1000
+    while True:
+        handle = kernel32.CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, None,
+                                      OPEN_EXISTING, 0, None)
+        if handle not in (None, wintypes.HANDLE(-1).value):
+            break
         err = ctypes.get_last_error()
         if err == ERROR_PIPE_BUSY:
             kernel32.WaitNamedPipeW(name, CONNECT_TIMEOUT_MS)
-            handle = kernel32.CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, None,
-                                          OPEN_EXISTING, 0, None)
-        if handle in (None, wintypes.HANDLE(-1).value):
-            log(f"no se pudo abrir la tuberia {name}: error {ctypes.get_last_error()}")
+        elif err == ERROR_FILE_NOT_FOUND and time.time() < plazo:
+            # la instancia anterior se esta cerrando: se espera un instante
+            time.sleep(0.02)
+        else:
+            log(f"no se pudo abrir la tuberia {name}: error {err}")
+            return error("cofre cerrado")
+        if time.time() >= plazo:
+            log(f"no se pudo abrir la tuberia {name}: sin instancia libre")
             return error("cofre cerrado")
 
     try:

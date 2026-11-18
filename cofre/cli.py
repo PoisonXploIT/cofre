@@ -52,6 +52,7 @@ from cofre.usb import (KEY_FILENAME, StickNotFound, StickNotRegistered, key_driv
                        copy_key_to, create_key_on, find_stick, keys_to_try,
                        load_registry, read_key, register_stick, revoke_stick,
                        set_role, usb_session_key, volume_serial)
+from cofre import __version__
 from cofre.salt import SaltMismatch, SaltMissing, show as salt_show
 
 DEFAULT_VAULT = default_vault()
@@ -59,6 +60,9 @@ DEFAULT_VAULT = default_vault()
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Cofre - bóveda de secretos")
+    # el nombre de la opcion y el de la accion son identificadores: sin tildes
+    p.add_argument("--version", "-V", action="version",   # no-tildes
+                   version=f"COFRE {__version__}")
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     p.add_argument("--gate", default="usb", choices=["pin", "hid", "usb", "usb-pin"])
     p.add_argument("--stick", help="ruta explicita del fichero clave del USB")
@@ -66,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="aceptar un pendrive cuyo serial no esta registrado")
     p.add_argument("--allow-pipe", action="store_true",
                    help="permitir que get/export escriba secretos a un pipe o fichero")
+    p.add_argument("--recovery", action="store_true",
+                   help="abrir con el código de recuperación de papel (se pide por consola)")
     sub = p.add_subparsers(dest="command", required=True)
 
     def with_common(sp):
@@ -75,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--stick", default=argparse.SUPPRESS)
         sp.add_argument("--allow-new-stick", action="store_true", default=argparse.SUPPRESS)
         sp.add_argument("--allow-pipe", action="store_true", default=argparse.SUPPRESS)
+        sp.add_argument("--recovery", action="store_true", default=argparse.SUPPRESS)
         return sp
 
     with_common(sub.add_parser("init"))
@@ -250,6 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
+    with_common(sub.add_parser("version",   # no-tildes: el nombre del comando
+                               help="versión de COFRE y del entorno"))
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
     mg = with_common(sub.add_parser("migrate", help="pasar el cofre v1 al formato v2"))
     mg.add_argument("--dry-run", action="store_true", help="decir que haria, sin escribir")
@@ -448,6 +457,45 @@ def prepare_audit(vault_path, gate: str, stick: str | None, allow_new: bool):
         return Vault(Path(vault_path))
 
 
+def prepare_recovery(vault_path, gate: str):
+    """Abrir el cofre con el código de recuperación, sin pendrive.
+
+    El código se pide por consola, no se escribe en el registro ni en ningun
+    fichero y no queda en el historial. Es el camino del simulacro de
+    restauracion (paso 8.3) y el de la pantalla de bloqueo.
+    """
+    from cofre.audit import bind_store, set_key as _set_key
+    vault = Vault(Path(vault_path))
+    if not vault.is_v2():
+        print("el código de recuperación solo abre cofres v2", file=sys.stderr)
+        return vault
+    print("Pega el código de recuperación (25 palabras) y pulsa Enter.",
+          file=sys.stderr)
+    print("No se guarda en ningún fichero y no se escribe en el registro.",
+          file=sys.stderr)
+    print("código: ", end="", file=sys.stderr, flush=True)
+    try:
+        codigo = input().strip()          # el aviso va a stderr: stdout es el valor
+    except EOFError:
+        return vault
+    if not codigo:
+        return vault
+    try:
+        vault.bind_recovery(codigo)
+        store = vault._v2store()
+        if store.master is None:
+            raise RuntimeError("el código no abre este cofre")
+        _set_key(store.master)
+        bind_store(store)
+        from cofre import schedule
+        schedule.escribir(store)
+        atexit.register(schedule.escribir, store)
+        print("cofre abierto con el código de recuperación", file=sys.stderr)
+    except Exception as exc:                      # noqa: BLE001
+        print(f"no se pudo abrir con ese código: {exc}", file=sys.stderr)
+    return vault
+
+
 def rekey_vivo(vault, vault_path, material, motivo: str = "manual",
                gate: str = "-", serial: int | None = None,
                actor: str = "cli"):
@@ -555,8 +603,20 @@ def main(argv: list[str]) -> int:
                   "host-list", "get", "add", "del", "rename", "exec", "export",
                   "migrate", "stick-add-v2", "check", "list", "resume",
                   "health", "panic", "rekey", "run", "describe", "field"}
+    con_codigo = bool(getattr(args, "recovery", False))
+    session, serial = None, None
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
+
+    if args.command == "version":                    # no-tildes
+        import platform
+        import tkinter
+        print(f"COFRE {__version__}")
+        print(f"Python {platform.python_version()}  Tk {tkinter.TkVersion}"
+              f"  {platform.platform()}")
+        print(f"cofre: {Path(__file__).resolve().parent}")
+        print(f"datos: {vault_path}")
+        return 0
 
     if args.command == "gen":
         if args.entropy:
@@ -690,22 +750,40 @@ def main(argv: list[str]) -> int:
         return serve_main(["--port", str(args.port)])
 
     if args.command == "check":
-        if not vault.load().get("wrapper"):
-            print("el cofre no esta inicializado", file=sys.stderr)
-            return 1
-        try:
-            session, serial = resolve_session_key(args.gate, str(vault_path),
-                                                 stick=args.stick,
-                                                 allow_new=args.allow_new_stick)
-        except (GateUnavailable, EOFError) as exc:
-            record(str(vault_path), "check", args.gate, None, ok=False, detail=str(exc))
-            print("gate no disponible:", exc, file=sys.stderr)
-            return 1
-        try:
-            vault.unlock(session)
-        except Exception:
-            print("la clave de sesión no corresponde a este cofre", file=sys.stderr)
-            return 1
+        # v2 no tiene `wrapper`: se abre con la llave del pendrive (o el código)
+        if vault.is_v2():
+            if con_codigo:
+                vault = prepare_recovery(vault_path, args.gate)
+                if not vault.is_v2() or vault._v2store().master is None:
+                    return 1
+                serial = None
+            else:
+                material = material_for(args.gate, str(vault_path), args.stick,
+                                        args.allow_new_stick)
+                vault.bind_material(material)
+                if not material:
+                    print("el cofre v2 necesita el pendrive de una de sus ranuras",
+                          file=sys.stderr)
+                    return 1
+                serial = material.get("serial")
+        else:
+            if not vault.load().get("wrapper"):
+                print("el cofre no esta inicializado", file=sys.stderr)
+                return 1
+            try:
+                session, serial = resolve_session_key(args.gate, str(vault_path),
+                                                     stick=args.stick,
+                                                     allow_new=args.allow_new_stick)
+            except (GateUnavailable, EOFError) as exc:
+                record(str(vault_path), "check", args.gate, None, ok=False,
+                       detail=str(exc))
+                print("gate no disponible:", exc, file=sys.stderr)
+                return 1
+            try:
+                vault.unlock(session)
+            except Exception:
+                print("la clave de sesión no corresponde a este cofre", file=sys.stderr)
+                return 1
         existing = set(vault.names())
         missing = []
         for n in args.name:
@@ -722,16 +800,21 @@ def main(argv: list[str]) -> int:
 
     if args.command == "describe":
         import json as _json
-        try:
-            _session, serial = resolve_session_key(
-                args.gate, str(vault_path), stick=args.stick,
-                allow_new=args.allow_new_stick)
-            material = material_for(args.gate, str(vault_path), args.stick,
-                                    args.allow_new_stick)
-            vault.bind_material(material)
-        except (GateUnavailable, EOFError) as exc:
-            print(f"gate no disponible: {exc}", file=sys.stderr)
-            return 1
+        if con_codigo:
+            vault = prepare_recovery(vault_path, args.gate)
+            if not vault.is_v2() or vault._v2store().master is None:
+                return 1
+        else:
+            try:
+                _session, serial = resolve_session_key(
+                    args.gate, str(vault_path), stick=args.stick,
+                    allow_new=args.allow_new_stick)
+                material = material_for(args.gate, str(vault_path), args.stick,
+                                        args.allow_new_stick)
+                vault.bind_material(material)
+            except (GateUnavailable, EOFError) as exc:
+                print(f"gate no disponible: {exc}", file=sys.stderr)
+                return 1
         salida = []
         for nombre in vault.names():
             meta = dict(vault.meta(nombre) or {})
@@ -1770,16 +1853,24 @@ def main(argv: list[str]) -> int:
                 print(f"gate {mode} NO operativo: {exc}")
         return 0
 
-    try:
-        session, serial = resolve_session_key(args.gate, str(vault_path),
-                                             stick=args.stick, allow_new=args.allow_new_stick)
-    except (GateUnavailable, EOFError) as exc:
-        record(str(vault_path), args.command, args.gate, None, ok=False, detail=str(exc))
-        print("gate no disponible:", exc, file=sys.stderr)
-        return 1
+    session, serial = None, None
+    if con_codigo:
+        vault = prepare_recovery(vault_path, args.gate)
+        if not vault.is_v2() or vault._v2store().master is None:
+            return 1
+    else:
+        try:
+            session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            record(str(vault_path), args.command, args.gate, None, ok=False,
+                   detail=str(exc))
+            print("gate no disponible:", exc, file=sys.stderr)
+            return 1
 
     try:
-        if vault.is_v2():
+        if vault.is_v2() and not con_codigo:
             material = material_for(args.gate, str(vault_path), args.stick,
                                     args.allow_new_stick)
             vault.bind_material(material)

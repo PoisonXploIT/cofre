@@ -71,6 +71,17 @@ class Vault:
         self._material = material
         return self
 
+    def bind_recovery(self, codigo: str) -> "Vault":
+        """Abrir el cofre v2 con el código de recuperación (el del papel).
+
+        Es el único camino sin pendrive. El código no se guarda: solo se usa
+        para desenvolver la clave maestra de su ranura.
+        """
+        from cofre.store import V2Store
+        self._material = None
+        self._v2 = V2Store(self.path, recovery_code=codigo)
+        return self
+
     def _v2store(self):
         if self._v2 is None:
             from cofre.store import V2Store

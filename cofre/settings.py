@@ -13,10 +13,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from cofre import __version__
 from cofre.paths import atomic_write
 
 NAME = "cofre-settings.json"
-VERSION = "0.9.0"
+# una sola fuente: cofre/__init__.py
+VERSION = __version__
 
 DEFAULTS = {
     "idle_minutes": 10,       # 1..240

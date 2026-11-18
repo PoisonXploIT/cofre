@@ -20,6 +20,11 @@ MSG = {
     "comun.no_coincide": "no coincide; revisa las palabras y vuelve a probar",
     "comun.abre_cofre": "abre el cofre para {accion}",
 
+    # permisos temporales a la vista (2026-11-18)
+    "permisos.titulo": "permisos temporales:",
+    "permisos.retirar": "Retirar",
+    "permisos.retirado": "permiso retirado: {texto}",
+
     # paleta
     "paleta.titulo": "COFRE - comandos",
     "paleta.campo": "Buscar secretos y acciones",

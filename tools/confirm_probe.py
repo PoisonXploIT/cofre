@@ -84,20 +84,32 @@ def main() -> int:
     check("3b. el clic temprano no autoriza y el tardio si",
           dlg2.wait() == "once", "respuesta once tras el segundo clic")
 
-    # 4: la cola despierta al que pide desde otro hilo
+    # 4: la cola NO bloquea el hilo de Tk y despierta al que pide
     cola = ConfirmQueue(root)
     respuesta: dict = {}
 
     def pedir():
-        respuesta["r"] = cola.ask("Navegador - localhost", "SIMULACRO_RESTAURA", timeout=5)
+        respuesta["r"] = cola.ask("Navegador - localhost", "SIMULACRO_RESTAURA",
+                                  timeout=8, timeout_ms=15000)
 
     hilo = threading.Thread(target=pedir, daemon=True)
     hilo.start()
     time.sleep(0.3)
-    atendido = cola.poll()          # muestra el dialogo en el hilo de Tk
-    check("4. la cola atiende la peticion", atendido, "")
-    hilo.join(timeout=6)
-    check("4b. el que pide recibe la respuesta", respuesta.get("r") == "deny",
+    inicio = time.time()
+    atendido = cola.pump()          # abre el dialogo y vuelve, sin esperar
+    tardanza = time.time() - inicio
+    check("4. la cola atiende sin quedarse dentro del dialogo",
+          atendido and tardanza < 0.5, f"{tardanza:.2f}s")
+    check("4b. el que pide sigue esperando a que se cierre",
+          hilo.is_alive(), "")
+    try:
+        cola.ask("Tu - copiar", "SIMULACRO")     # desde el hilo de Tk, prohibido
+        check("4c. ask desde el hilo de Tk se rechaza", False, "no salto")
+    except AssertionError:
+        check("4c. ask desde el hilo de Tk se rechaza", True, "")
+    cola._pendiente["dialogo"]._close("once")     # como si se pulsara Permitir
+    hilo.join(timeout=4)
+    check("4d. el que pide recibe la respuesta", respuesta.get("r") == "once",
           str(respuesta.get("r")))
 
     root.destroy()

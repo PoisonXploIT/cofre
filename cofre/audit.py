@@ -33,6 +33,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -58,11 +59,14 @@ PRIVILEGED = {
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
     "discard", "health", "panic", "rekey", "recovery", "backup",
-    "run", "describe", "git-get",
+    "run", "describe", "git-get", "grant-revoke",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
 _STORE = None      # V2Store abierto: permite sellar el checkpoint al escribir
+# El registro lo escriben el hilo de la GUI, el de la tuberia y el del TCP. Si
+# dos anotan a la vez, el seq y el prev se pisan y la cadena se rompe sola.
+_WRITE = threading.Lock()
 
 
 # ---------------------------------------------------------------- clave
@@ -249,6 +253,15 @@ def record(vault_path: str | Path, command: str, gate: str,
            ok: bool = True, detail: str = "", actor: str | None = None,
            entry: str | None = None) -> Path:
     """Anotar un evento. Nunca se pasa el valor de un secreto."""
+    with _WRITE:
+        return _record(vault_path, command, gate, serial=serial, name=name, ok=ok,
+                       detail=detail, actor=actor, entry=entry)
+
+
+def _record(vault_path: str | Path, command: str, gate: str,
+            serial: int | None = None, name: str | None = None,
+            ok: bool = True, detail: str = "", actor: str | None = None,
+            entry: str | None = None) -> Path:
     p = audit_path(vault_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     # el ancla va antes de calcular seq/prev, o la cadena se rompe

@@ -19,6 +19,7 @@ import tkinter as tk
 
 from cofre.theme import COLORS as C
 from cofre.theme import SPACE, dark_titlebar
+from cofre.threads import assert_main, is_main
 from cofre import widgets as W
 
 TIMEOUT_MS = 20_000
@@ -31,8 +32,12 @@ GLIFO_ESCUDO = "\uea18"
 class ConfirmDialog:
     """Devuelve 'once' | 'grant' | 'deny' en `result`."""
 
-    def __init__(self, root, who: str, what: str, timeout_ms: int = TIMEOUT_MS):
+    def __init__(self, root, who: str, what: str, timeout_ms: int = TIMEOUT_MS,
+                 on_close=None):
+        # Tkinter solo en el hilo principal: si esto peta, hay un fallo de orden
+        assert_main("ConfirmDialog")
         self.result: str | None = None
+        self._on_close = on_close
         self._timeout_ms = timeout_ms
         self._restante = max(1, timeout_ms // 1000)
 
@@ -136,6 +141,7 @@ class ConfirmDialog:
             pass
 
     def _close(self, valor: str) -> None:
+        assert_main("ConfirmDialog._close")
         if self.result is not None:
             return
         self.result = valor
@@ -153,6 +159,12 @@ class ConfirmDialog:
             self.win.destroy()
         except Exception:
             pass
+        # quien espera esta en otro hilo: se le avisa aqui, no con wait_window
+        if self._on_close is not None:
+            try:
+                self._on_close(valor)
+            except Exception:
+                pass
 
     def wait(self) -> str:
         self.win.wait_window()
@@ -160,30 +172,88 @@ class ConfirmDialog:
 
 
 class ConfirmQueue:
-    """Puente entre el hilo que pide y el hilo de Tkinter."""
+    """Puente entre el hilo que pide y el hilo de Tkinter.
+
+    El hilo que pide (tuberia, TCP) es **el unico que espera**: encola y se
+    queda en `ask()`. El sondeo de Tk abre el dialogo **sin esperar** y sigue
+    vivo; cuando el dialogo se cierra, deja la respuesta y despierta a quien
+    pidio. Antes se abria con `wait_window()` dentro del propio sondeo: Tk se
+    quedaba dentro del dialogo y la cola no volvia a correr.
+    """
 
     def __init__(self, root):
         self.root = root
         self.requests: queue.Queue = queue.Queue()
+        self._pendiente: dict | None = None
 
-    def ask(self, who: str, what: str, timeout: int = 30) -> str:
+    @property
+    def ocupada(self) -> bool:
+        return self._pendiente is not None
+
+    def ask(self, who: str, what: str, timeout: int = 30,
+            timeout_ms: int | None = None) -> str:
+        """Desde un hilo que no es el de Tkinter. Devuelve la respuesta."""
+        if is_main():
+            raise AssertionError(
+                "ConfirmQueue.ask se llama desde otro hilo; en el hilo de Tk "
+                "se abre ConfirmDialog directamente")
         box: dict = {}
         done = threading.Event()
-        self.requests.put((who, what, box, done))
+        self.requests.put((who, what, box, done, int(timeout_ms or TIMEOUT_MS)))
         if not done.wait(timeout=timeout):
             return "deny"
         return box.get("result", "deny")
 
-    def poll(self) -> bool:
+    def _atender(self) -> bool:
         try:
-            who, what, box, done = self.requests.get_nowait()
+            who, what, box, done, timeout_ms = self.requests.get_nowait()
         except queue.Empty:
             return False
+
+        def cerrar(valor: str) -> None:
+            box["result"] = valor
+            self._pendiente = None       # el siguiente sondeo ya puede abrir otro
+            done.set()
+
         try:
-            dialogo = ConfirmDialog(self.root, who, what)
-            box["result"] = dialogo.wait()
+            dialogo = ConfirmDialog(self.root, who, what,
+                                    timeout_ms=timeout_ms, on_close=cerrar)
         except Exception:
             box["result"] = "deny"
-        finally:
             done.set()
+            return True
+        self._pendiente = {"dialogo": dialogo, "box": box, "done": done}
         return True
+
+    def pump(self) -> bool:
+        """Un paso del sondeo. Solo en el hilo de Tkinter, sin bloquear."""
+        assert_main("ConfirmQueue.pump")
+        if self._pendiente is not None:
+            if self._pendiente["done"].is_set():
+                self._pendiente = None
+            return False
+        return self._atender()
+
+    # nombre antiguo: el sondeo de la GUI ya lo usaba
+    def poll(self) -> bool:
+        return self.pump()
+
+    def cancelar(self) -> None:
+        """Al cerrar el cofre: cierra el dialogo pendiente y deniega el resto."""
+        if self._pendiente is not None:
+            dialogo = self._pendiente["dialogo"]
+            box, done = self._pendiente["box"], self._pendiente["done"]
+            self._pendiente = None
+            try:
+                dialogo._close("deny")
+            except Exception:
+                pass
+            box["result"] = "deny"
+            done.set()
+        while True:
+            try:
+                _who, _what, box, done, _tmo = self.requests.get_nowait()
+            except queue.Empty:
+                return
+            box["result"] = "deny"
+            done.set()

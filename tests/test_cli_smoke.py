@@ -105,3 +105,51 @@ class TestCliSmoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckV2YRecuperacion(unittest.TestCase):
+    """2026-11-18: `check` no entendia v2 y el codigo de recuperacion no existia
+    en el CLI (la pantalla de bloqueo lo mandaba a un flag que no estaba)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-cli-v2-"))
+        from cofre.firstuse import crear_cofre
+        self.estado = crear_cofre(self.tmp / "cofre.json", str(self.tmp.drive) + "\\",
+                                  clave=self.tmp / "COFRE.KEY")
+        from cofre.v2 import VaultV2
+        v2 = VaultV2(self.tmp / "cofre.json")
+        datos = v2.load()
+        v2.put(datos, self.estado["master"], "SIMULACRO_RESTAURA",
+               "restauracion-ok-42", ["prueba"], ["ejemplo.com"], kind="password")
+        v2.save(datos)
+        self.base = [sys.executable, "-m", "cofre.cli", "--vault",
+                     str(self.tmp / "cofre.json")]
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_check_entiende_v2(self):
+        proc = subprocess.run(
+            self.base + ["--stick", str(self.tmp / "COFRE.KEY"),
+                         "check", "--name", "SIMULACRO_RESTAURA"],
+            capture_output=True, text=True, cwd=str(REPO), timeout=180)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("OK    SIMULACRO_RESTAURA", proc.stdout)
+
+    def test_el_codigo_abre_sin_pendrive(self):
+        proc = subprocess.run(
+            self.base + ["--recovery", "--allow-pipe", "get", "SIMULACRO_RESTAURA"],
+            input=self.estado["código"] + "\n", capture_output=True, text=True,
+            cwd=str(REPO), timeout=180)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "restauracion-ok-42")
+        self.assertNotIn("restauracion-ok-42", proc.stderr)
+
+    def test_codigo_equivocado_no_abre(self):
+        proc = subprocess.run(
+            self.base + ["--recovery", "--allow-pipe", "get", "SIMULACRO_RESTAURA"],
+            input="palabra " * 24 + "otra\n", capture_output=True, text=True,
+            cwd=str(REPO), timeout=180)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.stdout.strip(), "")

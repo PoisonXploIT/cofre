@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Simulacro de recuperacion del backup (2026-11-14).
+r"""Simulacro de recuperacion del backup (2026-11-14).
 
 Prueba de verdad: restaurar el backup de la carpeta indicada en un directorio temporal
 y abrirlo con el pendrive real. No escribe en el cofre vivo ni toca E:\ ni F:\.
