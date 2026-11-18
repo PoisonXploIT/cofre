@@ -133,7 +133,8 @@ class Wizard:
     def _indicador(self, paso: int, nota: str = "") -> None:
         fila = tk.Frame(self.cuerpo, bg=C["surface"])
         fila.pack(fill="x", pady=(0, 10))
-        texto = f"Paso {paso} de {self.PASOS}" + (f" · {nota}" if nota else "")
+        texto = msg("primer_uso.paso", paso=paso, total=self.PASOS) + (
+            f" · {nota}" if nota else "")
         tk.Label(fila, text=texto, fg=C["muted"], bg=C["surface"],
                  font=self.app.f_small, anchor="w").pack(side="left")
         puntos = tk.Frame(fila, bg=C["surface"])
@@ -221,11 +222,11 @@ class Wizard:
 
         self._botonera(atras=self._paso_bienvenida,
                        siguiente=lambda _e=None: seguir(),
-                       texto_sig="Generar el código")
+                       texto_sig=msg("primer_uso.generar"))
 
     def _paso_codigo(self, event=None) -> None:
         self._limpiar()
-        self._indicador(3, "código de recuperación")
+        self._indicador(3, msg("primer_uso.paso_codigo"))
         self._titulo("Código de recuperación")
         self._texto(msg("primer_uso.codigo_texto"))
         # pie fijo abajo: se empaqueta antes que la cuadricula para que nunca
@@ -267,7 +268,7 @@ class Wizard:
 
     def _paso_confirmar(self, event=None) -> None:
         self._limpiar()
-        self._indicador(3, "confirmación")
+        self._indicador(3, msg("primer_uso.paso_confirmar"))
         self._titulo("Confirma que lo tienes")
         self._texto(msg("primer_uso.confirmar_texto"))
         if not self.preguntas:

@@ -41,6 +41,10 @@ MSG = {
 
     # primer uso
     "primer_uso.titulo": "COFRE - primera vez",
+    "primer_uso.paso": "Paso {paso} de {total}",
+    "primer_uso.paso_codigo": "código de recuperación",
+    "primer_uso.paso_confirmar": "confirmación",
+    "primer_uso.generar": "Generar el código",
     "primer_uso.bienvenida": "COFRE: tu bóveda local",
     "primer_uso.empezar": "Empezar",
     "primer_uso.pendrive": "1. Elige el pendrive principal",
