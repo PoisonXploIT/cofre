@@ -181,6 +181,15 @@ def build_parser() -> argparse.ArgumentParser:
                                     help="id, estado y caducidad de un token (sin el valor)"))
     ti.add_argument("name")
 
+    ap = with_common(sub.add_parser("app-exec",
+                                    help="ejecutar un comando con un token de GitHub App (1 h)"))
+    ap.add_argument("--clave", default="GH_APP_PRIVATE_KEY",
+                    help="secreto con la clave privada de la App")
+    ap.add_argument("--app-id", required=True)
+    ap.add_argument("--installation", required=True)
+    ap.add_argument("--var", default="GITHUB_TOKEN", help="variable de entorno a inyectar")
+    ap.add_argument("cmd", nargs="+")
+
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
@@ -568,6 +577,38 @@ def main(argv: list[str]) -> int:
         print(f"ejecutando con {len(args.name)} variables inyectadas (solo para ese proceso)")
         return subprocess.run(args.cmd, env=env).returncode
 
+    if args.command == "app-exec":
+        # El token de la App NO se guarda en el cofre, ni en el log, ni en ningun
+        # fichero: se pide, se inyecta en el proceso hijo y se olvida.
+        import subprocess
+        try:
+            session, serial = resolve_session_key(args.gate, str(vault_path),
+                                                 stick=args.stick,
+                                                 allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        from cofre.providers.github import app_jwt, installation_token
+        from cofre.providers.http import ProviderError
+        try:
+            pem = vault.get(session, args.clave)
+            jwt = app_jwt(args.app_id, pem)
+            valor, caduca = installation_token(jwt, args.installation)
+        except (KeyError, ProviderError) as exc:
+            print(f"no se pudo obtener el token de la App: {exc}", file=sys.stderr)
+            return 1
+        env = dict(os.environ)
+        env[args.var] = valor
+        record(str(vault_path), "app-exec", args.gate, serial,
+               name=args.var, ok=True, detail=f"caduca {caduca[:19]}")
+        del valor, jwt, pem
+        print(f"ejecutando con {args.var} inyectado (caduca {caduca[:19]}, "
+              "solo para ese proceso)")
+        return subprocess.run(args.cmd, env=env).returncode
+
     if args.command == "alerts":
         # las alertas se firman: hay que tener el cofre abierto y la clave
         try:
@@ -732,7 +773,8 @@ def main(argv: list[str]) -> int:
         consumidores = list(meta.get("consumers") or [])
         admin_nombre = args.admin or "CLOUDFLARE_TOKEN_ADMIN"
         admin_valor = ""
-        if not args.dry_run:
+        via_manual = args.manual or not getattr(proveedor, "can_auto_rotate", False)
+        if not args.dry_run and not via_manual:
             # la rotacion real necesita el token administrador, que pide confirmacion
             meta_admin = dict(vault.meta(admin_nombre) or {})
             if not meta_admin:
@@ -756,27 +798,44 @@ def main(argv: list[str]) -> int:
         if consumidores:
             print("consumidores que habria que actualizar: " + ", ".join(consumidores))
         if args.manual or not getattr(proveedor, "can_auto_rotate", False):
-            # GitHub y similares: se crea a mano en la web y se pega aqui
+            # GitHub y similares: se crea a mano en la web. Dos fases: primero se
+            # comprueba el valor nuevo y solo entonces se guarda.
             url = proveedor.manual_url(meta)
-            print(f"crea el token nuevo en: {url}")
-            print(f"y guardalo con:  python -m cofre.cli add {args.name}")
-            if not args.si:
-                print("cuando lo tengas, escribe PEGAR para reemplazar el valor aquí: ",
-                      end="", flush=True)
-                if sys.stdin.readline().strip() != "PEGAR":
-                    print("cancelado")
-                    return 1
-            nuevo = read_secret("valor del token nuevo: ")
+            print(f"crea el valor nuevo en: {url}")
+            nuevo = read_secret("valor nuevo: ")
             if not nuevo:
-                print("sin valor: cancelado", file=sys.stderr)
+                print("sin valor: no se ha tocado nada", file=sys.stderr)
                 return 1
-            vault.add(session, args.name, nuevo, meta.get("tags", []), meta.get("urls", []))
+            verif_nuevo = proveedor.verify(nuevo, meta)
+            if not verif_nuevo.ok:
+                print(f"el valor nuevo NO es válido ({verif_nuevo.detail}). "
+                      "No se guarda nada: el viejo sigue intacto.", file=sys.stderr)
+                record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                       ok=False, detail="valor nuevo inválido")
+                return 1
+            verif_viejo = proveedor.verify(valor, meta)
+            if verif_viejo.ok and "usuario " in verif_viejo.detail                     and "usuario " in verif_nuevo.detail:
+                usuario_viejo = verif_viejo.detail.split("usuario ", 1)[1].split(",")[0]
+                usuario_nuevo = verif_nuevo.detail.split("usuario ", 1)[1].split(",")[0]
+                if usuario_viejo != usuario_nuevo:
+                    print(f"el valor nuevo es de '{usuario_nuevo}' y el viejo de "
+                          f"'{usuario_viejo}'. No se guarda nada.", file=sys.stderr)
+                    record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                           ok=False, detail="valor nuevo de otro usuario")
+                    return 1
+            vault.add(session, args.name, nuevo, meta.get("tags", []),
+                      meta.get("urls", []))
             record(str(vault_path), "rotate", args.gate, serial, name=args.name,
-                   ok=True, detail="asistida (pegado)")
+                   ok=True, detail="asistida: verificado y guardado")
             from cofre.audit import stamp_vault
             stamp_vault(vault)
-            print("token nuevo guardado. Revoca el viejo en la web cuando lo hayas "
-                  "desplegado.")
+            print("valor nuevo verificado y guardado. Despliegalo y despues revoca el viejo.")
+            if args.revoke_old:
+                try:
+                    proveedor.revoke(valor, "", meta)
+                    print("valor viejo revocado")
+                except ProviderError as exc:
+                    print(f"no se pudo revocar el viejo: {exc}", file=sys.stderr)
             return 0
 
         if args.dry_run:

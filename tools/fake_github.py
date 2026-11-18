@@ -57,6 +57,17 @@ class FakeGitHub:
 
             def do_POST(self):
                 fake.llamadas.append(("POST", self.path))
+                if self.path == "/credentials/revoke":
+                    # sin autenticar: si llega cabecera, GitHub devuelve 403
+                    if self.headers.get("Authorization"):
+                        return self._json(403, {"message": "Must not be authenticated"})
+                    largo = int(self.headers.get("Content-Length", "0") or 0)
+                    cuerpo = json.loads(self.rfile.read(largo) or b"{}")
+                    credenciales = cuerpo.get("credentials") or []
+                    if len(credenciales) > 1000:
+                        return self._json(422, {"message": "Too many credentials"})
+                    fake.revocados.extend(credenciales)
+                    return self._json(202, {})
                 if self.path.endswith(f"/app/installations/{fake.installation}/access_tokens"):
                     jwt = self._auth()
                     if fake.app_jwt_esperado and jwt != fake.app_jwt_esperado:
@@ -67,11 +78,6 @@ class FakeGitHub:
 
             def do_DELETE(self):
                 fake.llamadas.append(("DELETE", self.path))
-                if "/user/personal-access-tokens/" in self.path:
-                    fake.revocados.append(self.path.rsplit("/", 1)[-1])
-                    self.send_response(204)
-                    self.end_headers()
-                    return
                 return self._json(404, {"message": "Not Found"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

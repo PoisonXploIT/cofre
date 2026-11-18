@@ -49,6 +49,13 @@ class TestGitHub(unittest.TestCase):
         self.assertIn("sammi", r.detail)
         self.assertIn("repo", r.detail)
 
+    def test_permisos_fine_grained_sin_cabecera(self):
+        # los fine-grained no mandan la cabecera de scopes: se dice, no se omite
+        self.fake.scopes = ""
+        r = self.prov.verify("ghp_bueno", {})
+        self.assertIn("fine-grained", r.detail)
+        self.fake.scopes = "repo, read:user"
+
     def test_verify_rechaza_token_malo(self):
         r = self.prov.verify("ghp_malo", {})
         self.assertFalse(r.ok)
@@ -64,9 +71,18 @@ class TestGitHub(unittest.TestCase):
         url = self.prov.manual_url({"provider_ref": {"fine_grained": True}})
         self.assertIn("personal-access-tokens", url)
 
-    def test_revoke_fine_grained(self):
-        self.prov.revoke("abc123", "ghp_bueno", {})
-        self.assertIn("abc123", self.fake.revocados)
+    def test_revoke_por_valor_sin_autenticar(self):
+        # el endpoint de revocacion acepta clasicos y fine-grained, y va sin auth
+        self.prov.revoke("ghp_viejo", "", {})
+        self.assertIn("ghp_viejo", self.fake.revocados)
+
+    def test_revoke_usa_el_endpoint_correcto(self):
+        self.prov.revoke_value("github_pat_abc", {})
+        self.assertIn(("POST", "/credentials/revoke"), self.fake.llamadas)
+
+    def test_revoke_sin_valor_avisa(self):
+        with self.assertRaises(ProviderError):
+            self.prov.revoke("", "", {})
 
     def test_revoke_sin_id_falla(self):
         with self.assertRaises(ProviderError):
@@ -110,6 +126,14 @@ class TestGitHubApp(unittest.TestCase):
         self.pem_publica  # la clave publica existe
         self.privada.public_key().verify(
             firma, f"{partes[0]}.{partes[1]}".encode(), padding.PKCS1v15(), hashes.SHA256())
+
+    def test_jwt_no_dura_mas_de_diez_minutos(self):
+        import base64
+        import json
+        token = app_jwt("123", self.pem, ahora=1_700_000_000)
+        cuerpo = json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))
+        self.assertEqual(cuerpo["iat"], 1_700_000_000 - 60)
+        self.assertLessEqual(cuerpo["exp"] - cuerpo["iat"], 600)
 
     def test_token_de_instalacion(self):
         token = app_jwt("123", self.pem)

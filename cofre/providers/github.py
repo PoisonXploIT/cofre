@@ -61,8 +61,12 @@ class GitHub(Provider):
         if status != 200:
             return VerifyResult(False, detail=str(body.get("message") or f"HTTP {status}"))
         login = str(body.get("login") or "")
+        # X-OAuth-Scopes solo llega con los PAT clasicos; los fine-grained no lo
+        # mandan, asi que se dice eso en vez de dejar el campo vacio
         scopes = str(cabeceras.get("X-OAuth-Scopes") or "")
-        detalle = f"usuario {login}" + (f", scopes: {scopes}" if scopes else "")
+        permisos = (f"permisos: {scopes}" if scopes
+                    else "permisos: fine-grained (ver en GitHub)")
+        detalle = f"usuario {login}, {permisos}"
         caduca = str(body.get("expires_at") or "")[:10]
         return VerifyResult(True, caduca, detalle)
 
@@ -74,14 +78,20 @@ class GitHub(Provider):
             f"{self.manual_url(meta)} y pegalo con 'rotate --manual'")
 
     def revoke(self, token_id: str, admin_value: str, meta: dict) -> None:
-        """Solo fine-grained tokens se pueden revocar por API; lo clasico, a mano."""
+        """Revocar POR VALOR, con POST /credentials/revoke.
+
+        Ese endpoint acepta PAT clasicos (ghp_), fine-grained (github_pat_),
+        de aplicacion OAuth (gho_), de usuario a servidor de Apps (ghu_) y de
+        refresco (ghr_). Va SIN autenticar: con cabecera devuelve 403. Aqui el
+        argumento `token_id` es el propio valor de la credencial.
+        """
         if not token_id:
-            raise ProviderError("falta el id del token; en tokens clasicos se borra a mano")
-        status, _h, body = request(
-            "DELETE", f"{_api()}/user/personal-access-tokens/{token_id}",
-            headers=_headers(admin_value))
-        if status not in (204, 200):
-            raise ProviderError(f"no se pudo revocar: {_errores(body) or status}")
+            raise ProviderError("falta el valor de la credencial a revocar")
+        revoke_credentials([token_id])
+
+    def revoke_value(self, valor: str, meta: dict) -> None:
+        """Atajo: revocar una credencial concreta por su valor."""
+        revoke_credentials([valor])
 
 
 # ------------------------------------------------------------------- App
@@ -98,8 +108,12 @@ def app_jwt(app_id: str, clave_pem: str | bytes, ahora: int | None = None) -> st
         return base64.urlsafe_b64encode(datos).rstrip(b"=").decode("ascii")
 
     momento = int(time.time() if ahora is None else ahora)
+    # iat un minuto atras por si el reloj va desfasado; exp nunca mas de diez
+    # minutos desde iat, que es el maximo que acepta GitHub
+    emitido = momento - 60
+    caduca = min(momento + 540, emitido + 600)
     cabecera = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-    cuerpo = b64(json.dumps({"iat": momento - 60, "exp": momento + 540,
+    cuerpo = b64(json.dumps({"iat": emitido, "exp": caduca,
                              "iss": str(app_id)}).encode())
     mensaje = f"{cabecera}.{cuerpo}".encode()
     privada = (serialization.load_pem_private_key(clave_pem.encode() if isinstance(clave_pem, str)
@@ -120,6 +134,22 @@ def installation_token(jwt: str, installation_id: str) -> tuple[str, str]:
     if not valor:
         raise ProviderError("GitHub no devolvio el token de instalacion")
     return valor, str(body.get("expires_at") or "")
+
+
+def revoke_credentials(valores: list[str]) -> None:
+    """Revocar hasta 1000 credenciales por llamada. Sin autenticar (si no, 403)."""
+    limpios = [v for v in valores if v]
+    if not limpios:
+        return
+    if len(limpios) > 1000:
+        raise ProviderError("GitHub revoca como maximo 1000 credenciales por peticion")
+    status, _h, body = request(
+        "POST", f"{_api()}/credentials/revoke",
+        headers={"Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28"},
+        json_body={"credentials": limpios})
+    if status not in (200, 202, 204):
+        raise ProviderError(f"no se pudo revocar: {_errores(body) or status}")
 
 
 def _errores(body) -> str:
