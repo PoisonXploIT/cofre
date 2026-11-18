@@ -190,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--var", default="GITHUB_TOKEN", help="variable de entorno a inyectar")
     ap.add_argument("cmd", nargs="+")
 
+    rs = with_common(sub.add_parser("resume",
+                                    help="ver una rotación interrumpida y decidir"))
+    rs.add_argument("--opcion", choices=["continuar", "deshacer"], default="")
+    rs.add_argument("--si", action="store_true", help="no pedir confirmación")
+
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
@@ -576,6 +581,44 @@ def main(argv: list[str]) -> int:
         record(str(vault_path), "exec", args.gate, serial, name=",".join(args.name), ok=True)
         print(f"ejecutando con {len(args.name)} variables inyectadas (solo para ese proceso)")
         return subprocess.run(args.cmd, env=env).returncode
+
+    if args.command == "resume":
+        from cofre import rotation as rot
+        plan = rot.plan_resume(str(vault_path))
+        if plan is None:
+            print("no hay ninguna rotación interrumpida")
+            return 0
+        print(f"rotación de '{plan['nombre']}' ({plan['proveedor']})")
+        print(f"  fase: {plan['fase']}")
+        print(f"  destinos: " + ", ".join(f"{d}={e}" for d, e in plan["destinos"].items()))
+        print(f"  que paso: {plan['explicación']}")
+        print(f"  opciones: {', '.join(plan['opciones'])} "
+              f"(recomendada: {plan['recomendada']})")
+        if plan["aviso"]:
+            print(f"  AVISO: {plan['aviso']}")
+        opcion = args.opcion or plan["recomendada"]
+        if opcion not in plan["opciones"]:
+            print(f"'{opcion}' no es posible en esta fase", file=sys.stderr)
+            return 1
+        if not args.si:
+            print(f"se aplicara '{opcion}'. Escribe {opcion.upper()} para confirmar: ",
+                  end="", flush=True)
+            if sys.stdin.readline().strip() != opcion.upper():
+                print("cancelado: no se ha tocado nada")
+                return 1
+        # el motor no ejecuta solo: aqui se aplica la opcion elegida
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        store = vault._v2store() if vault.is_v2() else None
+        if opcion == "deshacer":
+            rot.deshacer(str(vault_path), opcion_confirmada=True, store=store)
+        else:
+            rot.continuar(str(vault_path), opcion_confirmada=True, store=store)
+        print(f"hecho: {opcion}")
+        record(str(vault_path), "rotate", args.gate, None, name=plan["nombre"],
+               ok=True, detail=f"reanudada: {opcion}")
+        return 0
 
     if args.command == "app-exec":
         # El token de la App NO se guarda en el cofre, ni en el log, ni en ningun

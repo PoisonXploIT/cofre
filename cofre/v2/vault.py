@@ -103,15 +103,44 @@ class VaultV2:
     def _entry_key(self, master: bytes) -> bytes:
         return _hkdf(master, b"cofre/v2/entry")
 
-    def _put_value(self, data: dict, master: bytes, entry_id: str, value: str) -> None:
+    def _put_value(self, data: dict, master: bytes, entry_id: str, value: str,
+                   extra: dict | None = None) -> None:
         key = self._entry_key(master)
         nonce = secrets.token_bytes(12)
-        # Se guarda como JSON para poder anadir campos e historial sin cambiar
-        # el formato del blob.
-        claro = json.dumps({"value": value, "fields": {}, "history": []}).encode("utf-8")
+        # Se guarda como JSON para poder anadir campos, historial y el valor
+        # pendiente de una rotacion sin cambiar el formato del blob.
+        contenido = {"value": value, "fields": {}, "history": []}
+        contenido.update(extra or {})
+        claro = json.dumps(contenido).encode("utf-8")
         ct = AESGCM(key).encrypt(nonce, claro,
                                  _entry_aad(data["vault_id"], entry_id))
         data["entries"][entry_id] = {"n": nonce.hex(), "c": ct.hex()}
+
+    def blob(self, data: dict, master: bytes, name: str) -> dict:
+        """Contenido completo de la entrada: valor, historial y pendiente."""
+        idx = self.index(data, master)
+        meta = idx["entries"].get(name)
+        if not meta:
+            raise KeyError(name)
+        almacenado = data["entries"].get(meta["id"])
+        if not almacenado:
+            raise KeyError(name)
+        key = self._entry_key(master)
+        try:
+            claro = AESGCM(key).decrypt(bytes.fromhex(almacenado["n"]),
+                                        bytes.fromhex(almacenado["c"]),
+                                        _entry_aad(data["vault_id"], meta["id"]))
+        except InvalidTag as exc:
+            raise Vault2Error(f"la entrada '{name}' esta alterada") from exc
+        return json.loads(claro.decode("utf-8"))
+
+    def set_blob(self, data: dict, master: bytes, name: str, contenido: dict) -> None:
+        idx = self.index(data, master)
+        meta = idx["entries"].get(name)
+        if not meta:
+            raise KeyError(name)
+        self._put_value(data, master, meta["id"], str(contenido.get("value", "")),
+                        {k: v for k, v in contenido.items() if k != "value"})
 
     def get(self, data: dict, master: bytes, name: str) -> str:
         idx = self.index(data, master)

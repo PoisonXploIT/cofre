@@ -23,6 +23,7 @@ class FakeCloudflare:
         self.admin_token = admin_token
         self.tokens: dict[str, dict] = {}
         self.llamadas: list[tuple[str, str]] = []
+        self.secretos: dict[str, dict[str, str]] = {}   # script -> {nombre: valor}
         self.fallar_verify = False
         self.fallar_roll = False
         self.contador = 0
@@ -107,6 +108,18 @@ class FakeCloudflare:
 
             def do_PUT(self):
                 fake.llamadas.append(("PUT", self.path))
+                if "/workers/scripts/" in self.path and self.path.endswith("/secrets"):
+                    largo = int(self.headers.get("Content-Length", "0") or 0)
+                    cuerpo = json.loads(self.rfile.read(largo) or b"{}")
+                    script = self.path.split("/workers/scripts/")[1].split("/")[0]
+                    nombre = str(cuerpo.get("name") or "")
+                    texto = str(cuerpo.get("text") or "")
+                    if not nombre:
+                        return self._json(400, {"success": False,
+                                                "errors": [{"message": "falta name"}]})
+                    fake.secretos.setdefault(script, {})[nombre] = texto
+                    return self._json(200, {"success": True, "result": {}})
+
                 if not self._auth():
                     return self._json(403, {"success": False,
                                             "errors": [{"message": "sin permiso"}]})
