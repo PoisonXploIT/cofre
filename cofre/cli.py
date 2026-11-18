@@ -174,6 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--si", action="store_true", help="confirmar sin preguntar")
     rt.add_argument("--revoke-old", action="store_true",
                     help="tras crear el reemplazo, borrar el token viejo")
+    rt.add_argument("--manual", action="store_true",
+                    help="rotación asistida: abrir la web y pegar el token nuevo")
 
     ti = with_common(sub.add_parser("token-info",
                                     help="id, estado y caducidad de un token (sin el valor)"))
@@ -621,8 +623,14 @@ def main(argv: list[str]) -> int:
         proveedor = provider_get(proveedor_nombre)
         valor = vault.get(session, args.name)
         v = proveedor.verify(valor, meta)
-        print(f"{args.name}: {'válido' if v.ok else 'NO válido'} | estado {v.status or '?'} "
-              f"| id {v.token_id or '(sin id)'} | caduca {v.expires_at or '(sin caducidad)'}")
+        partes = [f"{args.name}: {'válido' if v.ok else 'NO válido'}"]
+        if v.status:
+            partes.append(f"estado {v.status}")
+        if v.token_id:
+            partes.append(f"id {v.token_id}")
+        if v.expires_at:
+            partes.append(f"caduca {v.expires_at}")
+        print(" | ".join(partes))
         if v.detail and v.detail != "activo":
             print(f"  detalle: {v.detail}")
         return 0
@@ -747,6 +755,30 @@ def main(argv: list[str]) -> int:
         print(f"modo de rotación: {modo}")
         if consumidores:
             print("consumidores que habria que actualizar: " + ", ".join(consumidores))
+        if args.manual or not getattr(proveedor, "can_auto_rotate", False):
+            # GitHub y similares: se crea a mano en la web y se pega aqui
+            url = proveedor.manual_url(meta)
+            print(f"crea el token nuevo en: {url}")
+            print(f"y guardalo con:  python -m cofre.cli add {args.name}")
+            if not args.si:
+                print("cuando lo tengas, escribe PEGAR para reemplazar el valor aquí: ",
+                      end="", flush=True)
+                if sys.stdin.readline().strip() != "PEGAR":
+                    print("cancelado")
+                    return 1
+            nuevo = read_secret("valor del token nuevo: ")
+            if not nuevo:
+                print("sin valor: cancelado", file=sys.stderr)
+                return 1
+            vault.add(session, args.name, nuevo, meta.get("tags", []), meta.get("urls", []))
+            record(str(vault_path), "rotate", args.gate, serial, name=args.name,
+                   ok=True, detail="asistida (pegado)")
+            from cofre.audit import stamp_vault
+            stamp_vault(vault)
+            print("token nuevo guardado. Revoca el viejo en la web cuando lo hayas "
+                  "desplegado.")
+            return 0
+
         if args.dry_run:
             print("dry-run: no se ha tocado nada")
             record(str(vault_path), "rotate", args.gate, serial, name=args.name,
