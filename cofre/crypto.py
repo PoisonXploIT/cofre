@@ -82,6 +82,13 @@ class Vault:
         if self.is_v2():
             self._v2store().refresh()
 
+    def reset_store(self) -> None:
+        """Olvidar el V2Store cacheado. Necesario tras un rekey hecho fuera de
+        este proceso: el master viejo seguiria en memoria y no abriria el nuevo
+        indice. La proxima llamada a _v2store() lo abre con el material actual.
+        """
+        self._v2 = None
+
     def is_v2(self) -> bool:
         try:
             return self.load().get("format") == 2

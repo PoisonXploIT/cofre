@@ -9,7 +9,9 @@ solo si la clave vieja verificaba toda la cadena.
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,7 +21,9 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from cofre import audit
+from cofre.gate import material_for
 from cofre.store import open_any
+from cofre.usb import register_stick, volume_serial
 from cofre.v2 import VaultV2, new_recovery_slot, new_usb_slot
 from cofre.v2.recovery import new_code
 from cofre.v2.rekey import RekeyError, guardar, preparar
@@ -235,3 +239,66 @@ class TestSegmentos(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCliRekey(unittest.TestCase):
+    """El comando rekey hace el ciclo completo: tramo, clave y código nuevo."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-cli-rekey-"))
+        self.vault = self.tmp / "cofre.json"
+        self.llave = self.tmp / "COFRE.KEY"
+        self.llave.write_bytes(secrets.token_bytes(32))
+        self.master = secrets.token_bytes(32)
+        self.serial = volume_serial(str(self.tmp.drive) + "\\")
+        self.codigo_viejo = new_code()
+        v2 = VaultV2(self.vault)
+        datos = v2.create(self.master, new_usb_slot(
+            self.master, self.llave.read_bytes(), self.serial, "principal", ""))
+        datos["slots"].append(new_recovery_slot(self.master, self.codigo_viejo,
+                                                "recuperacion"))
+        v2.put(datos, self.master, "UNO", "valor-uno", [], [])
+        v2.save(datos)
+        register_stick(str(self.vault), self.serial,
+                       str(self.tmp.drive) + "\\")
+        self.cmd = [sys.executable, "-m", "cofre.cli", "--gate", "usb",
+                    "--stick", str(self.llave), "--vault", str(self.vault)]
+        self.env = dict(os.environ, COFRE_VAULT=str(self.vault))
+
+    def tearDown(self):
+        import stat
+        for archivo in self.tmp.glob(audit.SEGMENT_PREFIX + "*.jsonl"):
+            try:
+                os.chmod(archivo, stat.S_IWRITE)
+            except OSError:
+                pass
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_rekey_cli(self):
+        r = subprocess.run(self.cmd + ["rekey", "--si", "--motivo", "prueba"],
+                           capture_output=True, text=True, env=self.env,
+                           timeout=180)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        marca = ("rekey hecho. Codigo de recuperacion nuevo "
+                 "(se muestra UNA vez):")
+        lineas = r.stdout.splitlines()
+        codigo = lineas[lineas.index(marca) + 1].strip()
+
+        datos = VaultV2(self.vault).load()
+        self.assertEqual(open_with_recovery(datos, codigo)[0] is not None, True)
+        with self.assertRaises(SlotError):
+            open_with_recovery(datos, self.codigo_viejo)
+        self.assertEqual(open_with_stick(datos, self.llave.read_bytes(),
+                                         self.serial, "")[0] is not None, True)
+
+        store = open_any(self.vault, material=material_for(
+            "usb", str(self.vault), stick=str(self.llave)))
+        self.assertEqual(store.get("UNO"), "valor-uno")
+
+        ver = subprocess.run(self.cmd + ["log", "verify"], capture_output=True,
+                             text=True, env=self.env, timeout=180)
+        self.assertEqual(ver.returncode, 0, ver.stdout + ver.stderr)
+        self.assertIn("clave retirada", ver.stdout + ver.stderr)
+        log = audit.audit_path(self.vault).read_text(encoding="utf-8")
+        self.assertNotIn(codigo, log)

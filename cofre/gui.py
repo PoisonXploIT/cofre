@@ -39,7 +39,8 @@ from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import default_vault
 from cofre.theme import (COLORS, SIZES, SPACE, apply_tk_scaling, build_fonts,
                          dark_titlebar, enable_dpi_awareness)
-from cofre.usb import (KEY_FILENAME, copy_key_to, create_key_on, drive_letters, key_drives,
+from cofre.usb import (KEY_FILENAME, DRIVE_FIXED, DRIVE_REMOVABLE, copy_key_to,
+                       create_key_on, drive_kind, drive_letters, key_drives,
                        find_stick, load_registry, read_key, register_stick,
                        revoke_stick, volume_serial)
 
@@ -831,6 +832,7 @@ class CofreGUI:
                 "label": s.get("label") or "",
                 "role": s.get("role") or ("principal" if i == 0 else "reserva"),
                 "connected": serial in present,
+                "present": serial in present,
             })
         return out
 
@@ -948,7 +950,8 @@ class CofreGUI:
         except Exception:
             pass
 
-    def lock(self, event=None, motivo: str | None = None, detalle: str = ""):
+    def lock(self, event=None, motivo: str | None = None, detalle: str = "",
+             sin_evento: bool = False):
         """Bloquear: se tira la clave de sesión de la RAM. Hace falta el
         pendrive otra vez para abrir."""
         try:
@@ -962,7 +965,7 @@ class CofreGUI:
         # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
         # existe si el cofre estaba abierto. Y si no habia sesión no se escribe
         # nada: bloquear un cofre ya cerrado no es un evento.
-        if self.session:
+        if self.session and not sin_evento:
             record(self.vault_path, "lock", self.gate, self.serial, ok=True,
                    detail=detalle or "manual")
         # el calendario se escribe antes de soltar la llave
@@ -2073,32 +2076,373 @@ class CofreGUI:
         self.refresh_detail()
 
     def open_keys(self) -> None:
+        """6.6: llaves del cofre, estado, último uso y acciones."""
+        if not self.session:
+            self.set_foot("abre el cofre para ver las llaves")
+            return
         win = self._sheet("Llaves y recuperación")
-        win.geometry("620x420")
+        win.geometry("760x560")
         cab = tk.Frame(win, bg=PANEL)
-        cab.pack(fill="x", padx=12, pady=(12, 4))
-        tk.Label(cab, text="Pendrives que abren este cofre", fg=FG,
-                 font=self.f_sub, bg=PANEL, anchor="w").pack(side="left")
-        self._btn(cab, "Crear llave", lambda e: self.wizard_create_key(event=e)).pack(
-            side="right")
+        cab.pack(fill="x", padx=14, pady=(12, 4))
+        tk.Label(cab, text="Llaves del cofre", fg=FG, bg=PANEL,
+                 font=self.f_sub, anchor="w").pack(side="left")
+        self._btn(cab, "Añadir pendrive",
+                  lambda e: self._add_pendrive(win)).pack(side="right")
+        self._btn(cab, "Nuevo código",
+                  lambda e: self._nuevo_codigo()).pack(side="right", padx=6)
+        self._btn(cab, "Probar código",
+                  lambda e: self._probar_codigo()).pack(side="right", padx=6)
+        tk.Label(win, text="Todo lo que abre este cofre. El código de "
+                           "recuperación vive en papel; no se puede leer aquí.",
+                 fg=MUT, bg=PANEL, font=self.f_small, anchor="w",
+                 wraplength=720, justify="left").pack(fill="x", padx=14)
         filas = tk.Frame(win, bg=PANEL)
-        filas.pack(fill="both", expand=True, padx=12)
+        filas.pack(fill="both", expand=True, padx=14, pady=(8, 4))
+        try:
+            llaves = self._llaves_datos()
+        except Exception as exc:                   # noqa: BLE001
+            llaves = []
+            tk.Label(filas, text=f"no se pudieron leer las llaves: {exc}",
+                     fg=WARN, bg=PANEL, font=self.f_body).pack(anchor="w")
+        for datos in llaves:
+            self._fila_llave(filas, datos, win)
+        tk.Label(win, text="Dar de baja un pendrive lo saca del cofre. Si haces "
+                           "rekey, cambia la clave maestra: las copias viejas "
+                           "dejan de abrir con la nueva y los pendrives no "
+                           "conectados se quedan fuera.",
+                 fg=FAINT, bg=PANEL, font=self.f_small, anchor="w",
+                 wraplength=720, justify="left").pack(fill="x", padx=14)
+        self._btn(win, "Cerrar", win.destroy).pack(pady=(8, 12))
+
+    def _llaves_datos(self) -> list[dict]:
+        if not self.vault.is_v2():
+            return []
+        from cofre import keys as keys_mod
+        from cofre.audit import _events
+        presentes = {}
+        for drive in key_drives():
+            serial = volume_serial(drive)
+            if serial is not None:
+                presentes[str(serial)] = {"drive": drive, "connected": True}
         for datos in self.stick_report():
-            fila = tk.Frame(filas, bg=PANEL)
-            fila.pack(fill="x", pady=2)
-            estado = "conectada" if datos.get("present") else "no conectada"
-            tk.Label(fila, text=f"{datos.get('drive')}  serial {datos.get('serial')}  "
-                                f"({datos.get('role')})  {estado}",
-                     fg=FG if datos.get("present") else MUT, bg=PANEL,
-                     font=self.f_small, anchor="w").pack(side="left")
-            self._btn(fila, "Revocar",
-                      lambda e, s=datos.get("serial"): self.revoke_stick_safe(int(s))
-                      ).pack(side="right")
-        tk.Label(win, text="El código de recuperación se usa desde la consola: "
-                           "run.cmd get NOMBRE --recovery",
-                 fg=FAINT, bg=PANEL, font=self.f_small, anchor="w").pack(
-            fill="x", padx=12, pady=(8, 4))
-        self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
+            presentes.setdefault(str(datos["serial"]),
+                                 {"drive": datos["drive"],
+                                  "connected": datos["connected"]})
+        return keys_mod.reporte(self.vault.load(),
+                                load_registry(self.vault_path), presentes,
+                                _events(self.vault_path))
+
+    def _fila_llave(self, parent, datos: dict, win) -> None:
+        caja = tk.Frame(parent, bg=CAMPO)
+        caja.pack(fill="x", pady=3)
+        kind = str(datos.get("kind") or "")
+        if kind == "recovery":
+            tk.Label(caja, text="Código de recuperación en papel", fg=FG,
+                     bg=CAMPO, font=self.f_body, anchor="w").pack(
+                side="left", padx=8, pady=6)
+            tk.Label(caja, text="25 palabras · no se puede leer desde aquí",
+                     fg=MUT, bg=CAMPO, font=self.f_small).pack(side="left")
+            return
+        if kind == "huerfano":
+            tk.Label(caja, text=f"{datos.get('drive') or '?'} · registro sin ranura",
+                     fg=WARN, bg=CAMPO, font=self.f_body, anchor="w").pack(
+                side="left", padx=8, pady=6)
+            return
+        serial = datos.get("serial")
+        actual = str(serial) == str(self.serial)
+        titulo = (f"{datos.get('drive') or 'sin letra'} · "
+                  f"{datos.get('role') or datos.get('label') or 'pendrive'} "
+                  f"· serial {serial}")
+        estado = "conectada" if datos.get("connected") else "no conectada"
+        if actual:
+            estado += " · abierta ahora"
+        if not datos.get("registered"):
+            estado += " · SIN REGISTRAR"
+        ultimo = str(datos.get("last") or "")
+        pie = (f"{estado} · último uso: {ultimo}" if ultimo
+               else f"{estado} · sin uso registrado")
+        tk.Label(caja, text=titulo, fg=FG, bg=CAMPO, font=self.f_body,
+                 anchor="w").pack(side="left", padx=8, pady=(6, 0))
+        tk.Label(caja, text=pie, fg=MUT, bg=CAMPO, font=self.f_small,
+                 anchor="w").pack(side="left")
+        if actual:
+            self._text_btn(
+                caja, "Es la llave abierta",
+                lambda: self.set_foot("para darla de baja, abre el cofre con "
+                                      "el otro pendrive")).pack(side="right",
+                                                                padx=8)
+        else:
+            self._text_btn(
+                caja, "Dar de baja",
+                lambda s=serial, w=win: self._baja_pendrive(int(s), w),
+                danger=True).pack(side="right", padx=8)
+
+    def _baja_pendrive(self, serial: int, win_keys) -> None:
+        if not self.session:
+            self.set_foot("abre el cofre para dar de baja un pendrive")
+            return
+        if int(serial) == int(self.serial or -1):
+            self.set_foot("abre el cofre con el otro pendrive y vuelve a intentarlo")
+            return
+        reg = load_registry(self.vault_path)
+        if len(reg.get("sticks") or {}) <= 1:
+            self.set_foot("no se puede dar de baja el único pendrive: añade otro antes")
+            return
+        info = (reg.get("sticks") or {}).get(str(serial)) or {}
+        donde = info.get("drive") or f"serial {serial}"
+        win = self._sheet("Dar de baja un pendrive")
+        win.geometry("640x360")
+        tk.Label(win, text=f"Vas a quitar la ranura del pendrive {donde}.",
+                 fg=FG, bg=PANEL, font=self.f_sub, anchor="w",
+                 wraplength=600, justify="left").pack(fill="x", padx=18,
+                                                      pady=(16, 6))
+        tk.Label(win, text="Ese pendrive dejará de abrir el cofre. Si eliges "
+                           "rekey, también cambia la clave maestra: las copias "
+                           "viejas no se abrirán con la nueva y los pendrives "
+                           "que no estén conectados se quedarán fuera. El rekey "
+                           "cierra el tramo del registro y empieza otro.",
+                 fg=MUT, bg=PANEL, font=self.f_body, anchor="w",
+                 wraplength=600, justify="left").pack(fill="x", padx=18)
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=16)
+
+        def solo() -> None:
+            win.destroy()
+            if self._quitar_slot(serial):
+                win_keys.destroy()
+                self.open_keys()
+
+        def con_rekey() -> None:
+            win.destroy()
+            if not self._quitar_slot(serial):
+                return
+            win_keys.destroy()
+            self._rekey_gui(f"baja de {donde}")
+
+        self._btn(fila, "Cancelar", win.destroy).pack(side="right")
+        self._btn(fila, "Dar de baja y rekey", con_rekey,
+                  accent=True).pack(side="right", padx=8)
+        self._btn(fila, "Solo dar de baja", solo,
+                  danger=True).pack(side="right", padx=8)
+
+    def _quitar_slot(self, serial: int) -> bool:
+        try:
+            store = self.vault._v2store()
+            from cofre import keys as keys_mod
+            datos, ok = keys_mod.quitar_pendrive(store._vault, store._data,
+                                                 serial)
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo quitar la ranura: {exc}")
+            return False
+        if not ok:
+            self.set_foot("esa ranura ya no estaba")
+            return False
+        store._data = datos
+        try:
+            revoke_stick(self.vault_path, serial)
+        except Exception:
+            pass
+        record(self.vault_path, "stick-revoke", self.gate, serial, name="-",
+               ok=True)
+        self.refresh_sticks()
+        self.set_foot(f"ranura del serial {serial} quitada")
+        return True
+
+    def _rekey_gui(self, motivo: str) -> None:
+        material = getattr(self.vault, "_material", {}) or {}
+        stick = str(material.get("stick_path") or "")
+        if not stick:
+            self.set_foot("sin el pendrive actual no se puede hacer rekey desde aquí")
+            return
+        self.set_foot("cambiando la clave maestra...")
+        self.root.update_idletasks()
+        comando = [sys.executable, "-m", "cofre.cli", "--gate", self.gate,
+                   "--stick", stick, "--vault", self.vault_path,
+                   "rekey", "--si", "--motivo", motivo]
+        entorno = dict(os.environ, COFRE_VAULT=str(self.vault_path))
+        if material.get("pin"):
+            entorno["COFRE_PIN"] = str(material["pin"])
+        try:
+            proc = subprocess.run(comando, capture_output=True, text=True,
+                                  env=entorno, timeout=300)
+            salida = (proc.stdout or "") + (proc.stderr or "")
+            exito = proc.returncode == 0
+        except Exception as exc:                   # noqa: BLE001
+            salida = f"no se pudo ejecutar el rekey: {exc}"
+            exito = False
+        if exito:
+            try:
+                # el proceso cerro el tramo y cambio la maestra: se reabre con
+                # la misma llave (su ranura se re-envolvio con el material actual)
+                self.vault.reset_store()
+                store = self.vault._v2store()
+                if store.master is None:
+                    raise RuntimeError("el cofre no se abrió con la llave nueva")
+                audit_set_key(store.master)
+                from cofre.audit import bind_store
+                bind_store(store)
+                self.refresh_sticks()
+                self.refresh_list()
+                self.refresh_detail()
+                self._escribir_calendario()
+                self.set_foot("rekey hecho; el pendrive actual sigue abriendo")
+            except Exception as exc:               # noqa: BLE001
+                self.set_foot(f"rekey hecho, pero no se pudo reabrir: {exc}. "
+                              "Bloquea y abre de nuevo")
+                self.lock(motivo="rekey", detalle="reabrir con el pendrive",
+                          sin_evento=True)
+        else:
+            self.set_foot("el rekey falló; el cofre sigue como estaba")
+        self._mostrar_salida("Rekey del cofre", salida.strip())
+
+    def _add_pendrive(self, win_keys) -> None:
+        material = getattr(self.vault, "_material", {}) or {}
+        stick = str(material.get("stick_path") or "")
+        actual = stick[:3].upper() if len(stick) >= 2 and stick[1] == ":" else ""
+        if not stick:
+            self.set_foot("abre el cofre con un pendrive para poder añadir otro")
+            return
+        letras = [d for d in drive_letters()
+                  if drive_kind(d) in (DRIVE_REMOVABLE, DRIVE_FIXED)
+                  and d.upper() != actual]
+        if not letras:
+            self.set_foot("no hay otra unidad conectada")
+            return
+        win = self._sheet("Añadir un pendrive")
+        win.geometry("660x440")
+        tk.Label(win, text="Añadir un pendrive al cofre", fg=FG, bg=PANEL,
+                 font=self.f_sub, anchor="w").pack(fill="x", padx=18,
+                                                   pady=(16, 4))
+        pasos = chr(10).join([
+            "1. Se escribe COFRE.KEY.nuevo en la unidad elegida. El COFRE.KEY",
+            "   que ya tenga ese pendrive no se toca.",
+            "2. Se añade una ranura al cofre y se comprueba que la llave nueva",
+            "   abre antes de darla por buena.",
+            "3. Cuando confirmes, borra o renombra el COFRE.KEY viejo y renombra",
+            "   COFRE.KEY.nuevo a COFRE.KEY. El viejo ya no sirve para este cofre.",
+        ])
+        tk.Label(win, text=pasos, fg=MUT, bg=PANEL, font=self.f_body,
+                 anchor="w", justify="left").pack(fill="x", padx=18)
+        lista = tk.Listbox(win, bg=CAMPO, fg=FG, font=self.f_mono,
+                           relief="flat", bd=0, highlightthickness=0,
+                           height=6)
+        lista.pack(fill="x", padx=18, pady=10)
+        for letra in letras:
+            lista.insert("end", letra)
+        lista.selection_set(0)
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=(0, 14))
+
+        def crear() -> None:
+            seleccion = lista.curselection()
+            if not seleccion:
+                return
+            destino = letras[seleccion[0]]
+            win.destroy()
+            self._crear_llave_en(destino, win_keys)
+
+        self._btn(fila, "Cancelar", win.destroy).pack(side="right")
+        self._btn(fila, "Crear llave nueva", crear,
+                  accent=True).pack(side="right", padx=8)
+
+    def _crear_llave_en(self, drive: str, win_keys) -> None:
+        material = getattr(self.vault, "_material", {}) or {}
+        stick = str(material.get("stick_path") or "")
+        destino = Path(drive) / "COFRE.KEY.nuevo"
+        comando = [sys.executable, "-m", "cofre.cli", "--gate", self.gate,
+                   "--stick", stick, "--vault", self.vault_path,
+                   "stick-add-v2", str(destino)]
+        entorno = dict(os.environ, COFRE_VAULT=str(self.vault_path))
+        if material.get("pin"):
+            entorno["COFRE_PIN"] = str(material["pin"])
+        try:
+            proc = subprocess.run(comando, capture_output=True, text=True,
+                                  env=entorno, timeout=180)
+            salida = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        except Exception as exc:                   # noqa: BLE001
+            salida = f"no se pudo crear la llave: {exc}"
+        try:
+            self.vault.refresh()
+            self.refresh_sticks()
+        except Exception:
+            pass
+        try:
+            win_keys.destroy()
+        except Exception:
+            pass
+        self._mostrar_salida("Añadir pendrive", salida)
+        self.open_keys()
+
+    def _nuevo_codigo(self) -> None:
+        if not self.session or not self.vault.is_v2():
+            self.set_foot("abre un cofre v2 para generar el código")
+            return
+        aviso = ("Se va a reemplazar el código de recuperación. El anterior "
+                 "dejará de abrir el cofre. Los pendrives no cambian.")
+        if not self._confirmar_accion("Nuevo código de recuperación", aviso,
+                                      "Generar"):
+            return
+        try:
+            store = self.vault._v2store()
+            from cofre import keys as keys_mod
+            codigo, datos = keys_mod.generar_codigo(
+                store._vault, store._data, store.master)
+            store._data = datos
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo generar el código: {exc}")
+            return
+        record(self.vault_path, "recovery", self.gate, self.serial, name="-",
+               ok=True, detail="código de recuperación renovado")
+        self.set_foot("código nuevo generado; el anterior ya no abre")
+        self._mostrar_codigo(codigo)
+
+    def _mostrar_codigo(self, codigo: str) -> None:
+        win = self._sheet("Código de recuperación nuevo")
+        win.geometry("660x320")
+        tk.Label(win, text="Apunta estas 25 palabras en papel",
+                 fg=FG, bg=PANEL, font=self.f_title, anchor="w").pack(
+            fill="x", padx=18, pady=(16, 2))
+        tk.Label(win, text="Se muestran una sola vez. No se guardan en ningún "
+                           "fichero. El código anterior ya no abre.",
+                 fg=MUT, bg=PANEL, font=self.f_small, anchor="w",
+                 wraplength=620, justify="left").pack(fill="x", padx=18)
+        caja = tk.Text(win, height=5, bg=CAMPO, fg=FG, font=self.f_mono,
+                       bd=0, highlightthickness=0, wrap="word")
+        caja.pack(fill="both", expand=True, padx=18, pady=10)
+        caja.insert("end", codigo)
+        caja.configure(state="disabled")
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=(0, 14))
+        self._btn(fila, "Cerrar", win.destroy).pack(side="right")
+        self._btn(fila, "Copiar", lambda: self._copiar_texto(codigo)).pack(
+            side="right", padx=8)
+
+    def _probar_codigo(self) -> None:
+        win = self._sheet("Probar el código de recuperación")
+        win.geometry("680x380")
+        tk.Label(win, text="Pega las 25 palabras. No se guarda nada.",
+                 fg=FG, bg=PANEL, font=self.f_sub, anchor="w").pack(
+            fill="x", padx=18, pady=(16, 4))
+        caja = tk.Text(win, height=5, bg=CAMPO, fg=FG, font=self.f_mono,
+                       bd=0, highlightthickness=0, wrap="word")
+        caja.pack(fill="both", expand=True, padx=18, pady=8)
+        resultado = tk.Label(win, text="", fg=MUT, bg=PANEL,
+                             font=self.f_body, anchor="w", wraplength=620,
+                             justify="left")
+        resultado.pack(fill="x", padx=18)
+
+        def probar() -> None:
+            from cofre import keys as keys_mod
+            ok, motivo = keys_mod.probar_codigo(
+                self.vault.load(), caja.get("1.0", "end").strip())
+            resultado.configure(text=("ABRE: " if ok else "NO ABRE: ") + motivo,
+                                fg=OK if ok else WARN)
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=14)
+        self._btn(fila, "Cerrar", win.destroy).pack(side="right")
+        self._btn(fila, "Probar", probar, accent=True).pack(side="right",
+                                                             padx=8)
 
     def open_palette(self, event=None):
         """6.4: Ctrl+K. Busca secretos y acciones; Enter ejecuta."""

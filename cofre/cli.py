@@ -211,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--admin", default="",
                     help="secreto con permisos de gestión (Cloudflare)")
 
+    rk = with_common(sub.add_parser(
+        "rekey", help="cambiar la clave maestra y el código de recuperacion"))
+    rk.add_argument("--motivo", default="manual",
+                    help="por que se cambia (queda en el registro)")
+    rk.add_argument("--si", action="store_true", help="no pedir confirmación")
+
     du = with_common(sub.add_parser(
         "due", help="recordatorios del calendario (sin abrir el cofre)"))
     du.add_argument("--notify", action="store_true",
@@ -417,6 +423,105 @@ def prepare_audit(vault_path, gate: str, stick: str | None, allow_new: bool):
         return Vault(Path(vault_path))
 
 
+def rekey_vivo(vault, vault_path, material, motivo: str = "manual",
+               gate: str = "-", serial: int | None = None,
+               actor: str = "cli"):
+    """Rekey completo: cierra el tramo, re-cifra, archiva y cambia la clave.
+
+    Deja el objeto `vault` y su store con la clave nueva. Devuelve
+    (codigo, perdidos, error). Si el guardado falla, restaura el tramo y la
+    clave vieja sigue valiendo.
+    """
+    from cofre import audit as audit_mod
+    from cofre.v2 import rekey as rekey_mod
+    store = vault._v2store()
+    etiqueta = ""
+    if (store.slot or {}).get("kind") == "usb":
+        etiqueta = str(store.slot.get("label") or "")
+    try:
+        prep = rekey_mod.preparar(
+            store._vault, store._data, store.master,
+            stick_key=material.get("stick_key"),
+            serial=material.get("serial"),
+            label=etiqueta, pin=material.get("pin", ""))
+    except Exception as exc:                       # noqa: BLE001
+        return "", [], str(exc)
+    log = audit_mod.audit_path(vault_path)
+    log_antes = log.read_text(encoding="utf-8") if log.exists() else ""
+    segmento = None
+    try:
+        # evento de cierre firmado con la clave VIEJA
+        record(str(vault_path), "rekey", gate, serial, name="-", ok=True,
+               detail=f"clave maestra retirada: {motivo}"[:150])
+        segmento = audit_mod.close_segment(
+            str(vault_path), prep.master, motivo=motivo, gate=gate,
+            serial=serial, actor=actor)
+        if segmento is None:
+            raise RuntimeError("no hay registro que cerrar")
+        idx = store._vault.index(prep.data, prep.master)
+        idx.setdefault("settings", {})["audit"] = {
+            "seq": int(segmento.get("seq", 1)),
+            "hash": str(segmento.get("hash") or "")}
+        store._vault._write_index(prep.data, prep.master, idx)
+        rekey_mod.guardar(store._vault, prep)
+        store._data = prep.data
+        store.master = prep.master
+        store.slot = prep.usb_slot
+        audit_mod.set_key(prep.master)
+        audit_mod.bind_store(store)
+        audit_mod.stamp(store, prep.master)
+        return prep.codigo, prep.perdidos, None
+    except Exception as exc:                       # noqa: BLE001
+        if segmento is not None:
+            try:
+                archivo = Path(segmento["archivo"])
+                os.chmod(archivo, stat.S_IWRITE)
+                archivo.unlink(missing_ok=True)
+            except Exception:
+                pass
+            if log_antes:
+                atomic_write(audit_path(vault_path), log_antes)
+        return "", [], str(exc)
+
+
+def _print_rekey(codigo: str, perdidos: list[dict], vault_path) -> None:
+    """Codigo nuevo una vez y aviso visible de los pendrives que quedan fuera."""
+    if not codigo:
+        return
+    print("")
+    print("rekey hecho. Codigo de recuperacion nuevo (se muestra UNA vez):")
+    print("  " + codigo)
+    print("Apunta el código en papel.")
+    if perdidos:
+        from cofre.usb import load_registry
+        try:
+            registro = load_registry(vault_path, strict=False)
+        except Exception:
+            registro = {"sticks": {}}
+        print("")
+        print("ATENCION: estos pendrives ya NO abren el cofre:")
+        for perdido in perdidos:
+            if str(perdido.get("kind")) != "usb":
+                print("  el código de recuperacion anterior ya no vale; "
+                      "usa el nuevo de arriba")
+                continue
+            info = ((registro.get("sticks") or {}).get(
+                str(perdido.get("serial"))) or {})
+            donde = str(info.get("drive") or "").strip()
+            rol = str(info.get("role") or perdido.get("label") or "")
+            if not donde:
+                print(f"  serial {perdido.get('serial')} ({rol}): "
+                      "conéctalo y ejecuta run.cmd stick-add-v2 "
+                      "<letra>:\\COFRE.KEY.nuevo")
+                continue
+            letra = donde if donde.endswith("\\") else donde + "\\"
+            print(f"  {letra} ({rol}): conéctalo y ejecuta")
+            print(f"    run.cmd stick-add-v2 {letra}COFRE.KEY.nuevo")
+            print("    luego renombra COFRE.KEY.nuevo a COFRE.KEY")
+    else:
+        print("El pendrive con el que has abierto sigue abriendo el cofre.")
+
+
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     vault_path = Path(args.vault)
@@ -424,7 +529,7 @@ def main(argv: list[str]) -> int:
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
                   "migrate", "stick-add-v2", "check", "list", "resume",
-                  "health", "panic"}
+                  "health", "panic", "rekey"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -1165,105 +1270,69 @@ def main(argv: list[str]) -> int:
                   f"{accion.nombre}: {detalle}")
             if not ok:
                 fallos += 1
-        codigo = ""
-        segmento = None
-        log_antes = ""
-        prep = None
-        try:
-            from cofre import audit as audit_mod
-            from cofre.v2 import rekey as rekey_mod
-            etiqueta = ""
-            if (store.slot or {}).get("kind") == "usb":
-                etiqueta = str(store.slot.get("label") or "")
-            prep = rekey_mod.preparar(
-                store._vault, store._data, store.master,
-                stick_key=material.get("stick_key"),
-                serial=material.get("serial"),
-                label=etiqueta, pin=material.get("pin", ""))
-            log = audit_mod.audit_path(vault_path)
-            log_antes = log.read_text(encoding="utf-8") if log.exists() else ""
-            # cerrar el tramo con un evento firmado con la clave VIEJA
-            record(str(vault_path), "rekey", args.gate, serial, name="-",
-                   ok=True, detail="clave maestra retirada: panico")
-            segmento = audit_mod.close_segment(
-                str(vault_path), prep.master, motivo="panico", gate=args.gate,
-                serial=serial, actor="cli")
-            if segmento is None:
-                raise RuntimeError("no hay registro que cerrar")
-            # el cofre nuevo ya apunta al ancla del tramo nuevo
-            idx = store._vault.index(prep.data, prep.master)
-            idx.setdefault("settings", {})["audit"] = {
-                "seq": int(segmento.get("seq", 1)),
-                "hash": str(segmento.get("hash") or "")}
-            store._vault._write_index(prep.data, prep.master, idx)
-            rekey_mod.guardar(store._vault, prep)
-            store._data = prep.data
-            store.master = prep.master
-            store.slot = prep.usb_slot
-            audit_mod.set_key(prep.master)
-            audit_mod.bind_store(store)
+        codigo, perdidos, error = rekey_vivo(
+            vault, vault_path, material, motivo="panico", gate=args.gate,
+            serial=serial, actor="cli")
+        if error:
+            fallos += 1
+            print(f"no se pudo hacer el rekey: {error}", file=sys.stderr)
+            print("los tokens ya estan revocados; el cofre sigue con la clave "
+                  "anterior", file=sys.stderr)
+            try:
+                record(str(vault_path), "panic", args.gate, serial, name="-",
+                       ok=False, detail=f"rekey fallido: {error}"[:150])
+            except Exception:
+                pass
+        else:
             record(str(vault_path), "panic", args.gate, serial, name="-",
                    ok=(fallos == 0),
                    detail=(f"{len(plan.acciones)} acciones, {fallos} fallos; "
                            f"roll={plan.cuenta('roll')} "
                            f"revoke={plan.cuenta('revoke')}")[:150])
-            codigo = prep.codigo
-        except Exception as exc:                   # noqa: BLE001
-            if segmento is not None:
-                # deshacer el cierre: restaurar el tramo y quitar el ancla
-                try:
-                    archivo = Path(segmento["archivo"])
-                    os.chmod(archivo, stat.S_IWRITE)
-                    archivo.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                if log_antes:
-                    atomic_write(audit_path(vault_path), log_antes)
-            fallos += 1
-            print(f"no se pudo hacer el rekey: {exc}", file=sys.stderr)
-            print("los tokens ya estan revocados; el cofre sigue con la clave "
-                  "anterior", file=sys.stderr)
-            try:
-                record(str(vault_path), "panic", args.gate, serial, name="-",
-                       ok=False, detail=f"rekey fallido: {exc}"[:150])
-            except Exception:
-                pass
-        if codigo and prep is not None:
-            print("")
-            print("rekey hecho. Codigo de recuperacion nuevo (se muestra UNA vez):")
-            print("  " + codigo)
-            print("Apunta el código en papel.")
-            if prep.perdidos:
-                from cofre.usb import load_registry
-                try:
-                    registro = load_registry(vault_path, strict=False)
-                except Exception:
-                    registro = {"sticks": {}}
-                print("")
-                print("ATENCION: estos pendrives ya NO abren el cofre:")
-                for perdido in prep.perdidos:
-                    if str(perdido.get("kind")) != "usb":
-                        print("  el código de recuperacion anterior ya no vale; "
-                              "usa el nuevo de arriba")
-                        continue
-                    info = ((registro.get("sticks") or {}).get(
-                        str(perdido.get("serial"))) or {})
-                    donde = str(info.get("drive") or "").strip()
-                    rol = str(info.get("role") or perdido.get("label") or "")
-                    if not donde:
-                        print(f"  serial {perdido.get('serial')} ({rol}): "
-                              "conéctalo y ejecuta run.cmd stick-add-v2 "
-                              "<letra>:\\COFRE.KEY.nuevo")
-                        continue
-                    letra = donde if donde.endswith("\\") else donde + "\\"
-                    print(f"  {letra} ({rol}): conéctalo y ejecuta")
-                    print(f"    run.cmd stick-add-v2 {letra}COFRE.KEY.nuevo")
-                    print("    luego renombra COFRE.KEY.nuevo a COFRE.KEY")
-            else:
-                print("El pendrive con el que has abierto sigue abriendo el cofre.")
+            _print_rekey(codigo, perdidos, vault_path)
         from cofre.audit import stamp_vault
         stamp_vault(vault)
         return 0 if fallos == 0 else 1
+
+    if args.command == "rekey":
+        try:
+            _session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        if not vault.is_v2():
+            print("el rekey necesita un cofre v2", file=sys.stderr)
+            return 1
+        store = vault._v2store()
+        if store.master is None:
+            print("no se pudo abrir el cofre", file=sys.stderr)
+            return 1
+        if not args.si:
+            print("Se va a cambiar la clave maestra y el código de recuperacion.")
+            print("Los pendrives que no esten conectados se quedan fuera.")
+            print("Escribe REKEY para confirmar: ", end="", flush=True)
+            if sys.stdin.readline().strip() != "REKEY":
+                print("cancelado: no se ha tocado nada")
+                return 1
+        codigo, perdidos, error = rekey_vivo(
+            vault, vault_path, material, motivo=args.motivo or "manual",
+            gate=args.gate, serial=serial, actor="cli")
+        if error:
+            print(f"no se pudo hacer el rekey: {error}", file=sys.stderr)
+            record(str(vault_path), "rekey", args.gate, serial, name="-",
+                   ok=False, detail=error[:150])
+            return 1
+        record(str(vault_path), "rekey", args.gate, serial, name="-", ok=True,
+               detail=f"clave nueva; {len(perdidos)} slots fuera")
+        _print_rekey(codigo, perdidos, vault_path)
+        from cofre.audit import stamp_vault
+        stamp_vault(vault)
+        return 0
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))
