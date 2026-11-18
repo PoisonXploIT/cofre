@@ -96,8 +96,8 @@ def dispatch(app, message: dict) -> dict:
             otorgado = app.request_confirm(f"Navegador - {domain or 'sin dominio'}", nombre)
             if otorgado == "deny":
                 record(app.vault_path, "browser-get", app.gate, app.serial, name=nombre,
-                       ok=False, detail="confirmacion denegada")
-                return {"ok": False, "error": "confirmacion denegada en COFRE"}
+                       ok=False, detail="confirmación denegada")
+                return {"ok": False, "error": "confirmación denegada en COFRE"}
 
         try:
             valor = app.vault.get(app.session, nombre)

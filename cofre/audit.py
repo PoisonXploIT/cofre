@@ -46,13 +46,17 @@ MAX_LINES = 5000
 # Eventos que pueden ocurrir con el cofre CERRADO: un intento de apertura
 # fallido, una alerta de fallos, un rechazo del puente. Van sin firma y es
 # normal; no se confunden con manipulacion.
-EXPECTED_UNSIGNED = {"gui-gate", "alert", "bridge-reject", "check"}
+# 'check' NO esta aqui: abre el cofre con la llave y por tanto puede y debe
+# firmar. Si aparece sin firma es un fallo de orden, como el del lock.
+EXPECTED_UNSIGNED = {"gui-gate", "alert", "bridge-reject"}
 
 PRIVILEGED = {
     "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
     "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
     "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
-    "meta", "host-assign", "seal",
+    "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
+    "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
+    "copy-exec", "edit-load", "bridge-start", "canary-access",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -74,7 +78,7 @@ def set_key(master: bytes | None) -> None:
 
 
 def bind_store(store) -> None:
-    """El cofre abierto. Con esto, cada linea queda sellada en el checkpoint."""
+    """El cofre abierto. Con esto, cada línea queda sellada en el checkpoint."""
     global _STORE
     _STORE = store
 
@@ -100,7 +104,7 @@ def _line_hash(texto: str) -> str:
 
 
 def _last_line(path: Path) -> tuple[int, str, str]:
-    """(seq, hash, texto) de la ultima linea, o (0, GENESIS, '') si no hay."""
+    """(seq, hash, texto) de la última línea, o (0, GENESIS, '') si no hay."""
     if not path.exists():
         return 0, GENESIS, ""
     try:
@@ -212,7 +216,7 @@ def ensure_anchor(vault_path: str | Path, gate: str = "-",
 
 
 def legacy_report(vault_path: str | Path) -> tuple[bool, str]:
-    """Compara el historico con el hash anclado en la primera linea del v2."""
+    """Compara el historico con el hash anclado en la primera línea del v2."""
     archivados = [p for p in legacy_files(vault_path)
                   if p.name.startswith(".cofre-access-v1-")]
     if not archivados:
@@ -312,7 +316,7 @@ def _events(vault_path: str | Path) -> list[dict]:
 
 
 def tail(vault_path: str | Path, lines: int = 20) -> list[str]:
-    """Compatibilidad: las ultimas entradas en una linea de texto."""
+    """Compatibilidad: las ultimas entradas en una línea de texto."""
     out = []
     for ev in _events(vault_path)[-lines:]:
         out.append(f"{ev.get('ts','')} cmd={ev.get('ev','-')} gate={ev.get('gate','-')} "
@@ -329,7 +333,7 @@ VERBS = {
     "clipboard": "copiado al portapapeles",
     "del": "borrado",
     "rename": "renombrado",
-    "gen": "contrasena generada",
+    "gen": "contraseña generada",
     "list": "listado de secretos",
     "exec": "comando ejecutado con",
     "export": "volcado a pantalla",
@@ -378,7 +382,7 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     """Comprueba la cadena, las firmas y (si hay) el checkpoint."""
     p = audit_path(vault_path)
     if not p.exists():
-        return True, "no hay log todavia"
+        return True, "no hay log todavía"
     lineas = p.read_text(encoding="utf-8").splitlines()
     prev = GENESIS
     seq_esperado = 1
@@ -399,11 +403,11 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         try:
             ev = json.loads(texto)
         except json.JSONDecodeError:
-            return False, f"linea {numero}: no es JSON"
+            return False, f"línea {numero}: no es JSON"
         if ev.get("prev") != prev:
-            return False, f"linea {numero}: la cadena no cuadra (prev distinto)"
+            return False, f"línea {numero}: la cadena no cuadra (prev distinto)"
         if int(ev.get("seq", 0)) != seq_esperado:
-            return False, f"linea {numero}: seq {ev.get('seq')} cuando tocaba {seq_esperado}"
+            return False, f"línea {numero}: seq {ev.get('seq')} cuando tocaba {seq_esperado}"
         mac = ev.pop("mac", None)
         if mac is None:
             sin_firma += 1
@@ -414,7 +418,7 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         elif _KEY is not None:
             esperado = hmac.new(_KEY, _canonical(ev), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(mac, esperado):
-                return False, f"linea {numero}: firma incorrecta (manipulada)"
+                return False, f"línea {numero}: firma incorrecta (manipulada)"
         prev = _line_hash(texto)
         seq_esperado += 1
     if culpables:
@@ -429,14 +433,14 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
             if ev.get("ev") == "audit-note" and ev.get("mac"):
                 nota = int(ev.get("seq", 0))
         if nota and all(int(c.split(":")[0]) < nota for c in culpables):
-            detalle = (f"{len(lineas)} lineas, cadena intacta; {len(culpables)} "
+            detalle = (f"{len(lineas)} líneas, cadena intacta; {len(culpables)} "
                        f"sin firma explicadas por la nota firmada de la linea {nota}")
             return True, detalle
         muestra = ", ".join(culpables[:6])
         extra = "" if len(culpables) <= 6 else f" y {len(culpables) - 6} mas"
         return False, (f"eventos que exigen cofre abierto y van sin firma: "
                        f"{muestra}{extra}. Se anadieron a mano")
-    detalle = f"{len(lineas)} lineas, cadena intacta"
+    detalle = f"{len(lineas)} líneas, cadena intacta"
     anclas = []
     for texto in lineas:
         try:
@@ -447,16 +451,16 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
             anclas.append(int(ev.get("seq", 0)))
     if anclas:
         ultima_ancla = max(anclas)
-        detalle += f", re-anclado en la linea {ultima_ancla}"
+        detalle += f", re-anclado en la línea {ultima_ancla}"
         if ultima_ancla > 1:
-            detalle += f" (lineas 1-{ultima_ancla - 1} exentas de firma)"
+            detalle += f" (líneas 1-{ultima_ancla - 1} exentas de firma)"
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle
 
 
 def pending_unsigned(vault_path: str | Path) -> int:
-    """Eventos esperados sin firma posteriores al ultimo sello o nota firmada."""
+    """Eventos esperados sin firma posteriores al último sello o nota firmada."""
     eventos = _events(vault_path)
     corte = 0
     for ev in eventos:
@@ -492,7 +496,7 @@ def auto_seal(store, master: bytes, forzar: bool = False) -> bool:
 # ---------------------------------------------------------------- checkpoint
 
 def checkpoint(store, master: bytes) -> dict:
-    """Ultimo seq y hash de la linea, guardados dentro del indice cifrado."""
+    """Ultimo seq y hash de la línea, guardados dentro del indice cifrado."""
     p = audit_path(store.path)
     if not p.exists():
         return {}
@@ -577,7 +581,7 @@ def check_checkpoint(store, master: bytes) -> tuple[bool, str]:
         return False, f"no se puede leer el checkpoint: {type(exc).__name__}"
     guardado = (idx.get("settings") or {}).get("audit") or {}
     if not guardado:
-        return True, "sin checkpoint todavia"
+        return True, "sin checkpoint todavía"
     p = audit_path(store.path)
     seq, hash_ultima, _ = _last_line(p)
     if not p.exists() or seq == 0:
@@ -585,12 +589,12 @@ def check_checkpoint(store, master: bytes) -> tuple[bool, str]:
     guardado_seq = int(guardado.get("seq", -1))
     if seq < guardado_seq:
         return False, (f"el log tiene {seq} eventos y el checkpoint {guardado_seq}: "
-                       "faltan lineas al final")
+                       "faltan líneas al final")
     if seq > guardado_seq:
         # tipico tras restaurar una copia antigua del cofre: el log va por delante.
         # No es manipulacion; se avisa y se puede resellar con un evento firmado.
         return True, (f"aviso: el log va por delante del checkpoint ({seq} > {guardado_seq}); "
                       "normal si se ha restaurado una copia. Usa 'log reseal' para sellarlo")
     if guardado.get("hash") != hash_ultima:
-        return False, "la ultima linea no coincide con el checkpoint"
+        return False, "la última línea no coincide con el checkpoint"
     return True, f"{seq} eventos, checkpoint OK"

@@ -107,4 +107,4 @@ def open_with_recovery(vault: dict, code: str, kdf: dict | None = None) -> tuple
         master = try_open_slot(slot, material, kdf)
         if master:
             return master, slot
-    raise SlotError("el codigo de recuperacion no abre este cofre")
+    raise SlotError("el código de recuperacion no abre este cofre")

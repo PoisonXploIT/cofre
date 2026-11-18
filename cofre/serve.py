@@ -66,7 +66,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(code, {"ok": False, "error": error})
 
     def _session(self):
-        """Clave de sesion valida ahora mismo. Lanza si el pendrive no esta."""
+        """Clave de sesión valida ahora mismo. Lanza si el pendrive no esta."""
         session, serial = resolve_session_key(
             self.server.gate, self.server.vault_path, stick=self.server.stick)
         return session, serial
@@ -118,7 +118,7 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
         except Exception:
-            self._reject(400, "cuerpo invalido")
+            self._reject(400, "cuerpo inválido")
             return
         name = str(payload.get("name", "")).strip()
         domain = str(payload.get("domain", "")).strip().lower()

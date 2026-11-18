@@ -71,7 +71,7 @@ def main() -> int:
     if only in (None, "normal"):
         lnk = desktop / f"{name}.lnk"
         ok &= make(lnk, PYTHONW, "-m cofre.cli gui", REPO,
-                   "COFRE - boveda de secretos")
+                   "COFRE - bóveda de secretos")
         print("normal     :", lnk, "(", lnk.stat().st_size if lnk.exists() else 0, "bytes )")
     if only in (None, "diag"):
         lnk = desktop / f"{name} (diagnostico).lnk"

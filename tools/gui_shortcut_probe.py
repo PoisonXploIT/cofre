@@ -65,7 +65,7 @@ def main() -> int:
     app._confirm_revoke = 12345
     app.session = None
     app._on_escape(None)
-    check("H4 Escape desarma la confirmacion",
+    check("H4 Escape desarma la confirmación",
           not app._confirm_delete and app._confirm_revoke is None and calls["close"] == 0,
           f"cierres: {calls['close']}")
 

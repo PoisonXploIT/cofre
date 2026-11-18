@@ -18,7 +18,7 @@ DESKTOP_SWITCHDESKTOP = 0x0100
 
 
 def input_desktop_locked() -> bool | None:
-    """True si el escritorio de entrada no se puede abrir (sesion bloqueada)."""
+    """True si el escritorio de entrada no se puede abrir (sesión bloqueada)."""
     handle = user32.OpenInputDesktop(0, False, DESKTOP_SWITCHDESKTOP)
     if handle:
         user32.CloseDesktop(handle)

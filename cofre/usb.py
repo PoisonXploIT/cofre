@@ -177,7 +177,7 @@ def load_registry(vault_path: str | Path, strict: bool = True) -> dict:
         if strict:
             raise RegistryCorrupt(
                 f"{p} esta corrupto y no se puede leer ({exc}). "
-                "No se autoriza ningun pendrive hasta arreglarlo: borralo y "
+                "No se autoriza ningún pendrive hasta arreglarlo: borralo y "
                 "registra de nuevo con 'python -m cofre.cli stick-register E:\\COFRE.KEY'"
             ) from exc
         return {"sticks": {}}

@@ -37,7 +37,7 @@ def wrap_key(master: bytes, session: bytes) -> dict:
 
 def unwrap_key(wrapper: dict, session: bytes) -> bytes:
     if wrapper.get("v") != WRAP_VERSION:
-        raise ValueError("version de envoltorio no soportada")
+        raise ValueError("versión de envoltorio no soportada")
     return _aesgcm(session).decrypt(bytes.fromhex(wrapper["nonce"]), bytes.fromhex(wrapper["ct"]), None)
 
 

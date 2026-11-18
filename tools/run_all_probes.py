@@ -17,6 +17,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 PROBES = [
+    ("accents", [sys.executable, "tools/check_accents.py"], False),
     ("backup_restore", [sys.executable, "tools/backup_restore_probe.py"], True),
     ("unittest", [sys.executable, "-m", "unittest", "discover", "-s", "tests"], False),
     ("hardening", [sys.executable, "tools/hardening_probe.py"], False),
@@ -48,7 +49,7 @@ def main() -> int:
             ok = proc.returncode == 0
             salida = (proc.stdout or "").strip().splitlines()
         except FileNotFoundError:
-            ok, salida = False, ["no se encontro el ejecutable"]
+            ok, salida = False, ["no se encontró el ejecutable"]
         except subprocess.TimeoutExpired:
             ok, salida = False, ["tiempo agotado"]
         segundos = time.time() - inicio

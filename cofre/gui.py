@@ -1065,7 +1065,7 @@ class CofreGUI:
                        if m.get("type") in ("api_key", "api_token", "oauth_app", "private_key")),
             "note": sum(1 for m in metas.values() if m.get("type") == "note"),
             "atencion": sum(1 for n, m in metas.items() if self._necesita_atencion(n, m)),
-            "rotación": sum(1 for m in metas.values() if self._rotación_pendiente(m)),
+            "rotación": sum(1 for m in metas.values() if self._rotacion_pendiente(m)),
             "caducan": sum(1 for m in metas.values() if self._caduca_pronto(m)),
             "papelera": 0,
         }
@@ -1075,7 +1075,12 @@ class CofreGUI:
                                fg=WARN if (clave == "atencion" and valor) else FAINT)
 
     def _proveedor_por_nombre(self, nombre: str) -> str:
-        """Heuristica por prefijo: CF_ -> cloudflare, GH_ -> github..."""
+        """SOLO para el color del cuadro y el subtitulo de la fila.
+
+        No se usa (ni se debe usar) para politicas, rotacion ni despliegues:
+        eso mira `meta["provider"]`, que es lo que el usuario declaro. Deducir
+        el proveedor del nombre es una comodidad visual, no un dato.
+        """
         prefijos = {"CF_": "cloudflare", "CLOUDFLARE": "cloudflare",
                     "GH_": "github", "GITHUB": "github",
                     "GOOGLE": "google", "GCP_": "google",
@@ -1097,7 +1102,7 @@ class CofreGUI:
                     return (f"caduca en {max(dias, 0)} d", "rot")
             except Exception:
                 pass
-        if self._rotación_pendiente(meta):
+        if self._rotacion_pendiente(meta):
             return ("rotar", "rot")
         try:
             if not self.vault.urls(nombre) and str(meta.get("type")) != "note":
@@ -1620,7 +1625,7 @@ class CofreGUI:
         if f == "atencion":
             return self._necesita_atencion(nombre, meta)
         if f == "rotación":
-            return self._rotación_pendiente(meta)
+            return self._rotacion_pendiente(meta)
         if f == "caducan":
             return self._caduca_pronto(meta)
         return True
@@ -1636,7 +1641,7 @@ class CofreGUI:
         except Exception:
             return False
 
-    def _rotación_pendiente(self, meta: dict) -> bool:
+    def _rotacion_pendiente(self, meta: dict) -> bool:
         cada = meta.get("rotate_every_days")
         if not cada:
             return False
@@ -1653,7 +1658,7 @@ class CofreGUI:
             sin_sitio = not self.vault.urls(nombre)
         except Exception:
             sin_sitio = True
-        return (self._rotación_pendiente(meta) or self._caduca_pronto(meta)
+        return (self._rotacion_pendiente(meta) or self._caduca_pronto(meta)
                 or (sin_sitio and str(meta.get("type")) != "note"))
 
     def open_health(self) -> None:
@@ -1679,7 +1684,7 @@ class CofreGUI:
             ("caducan en 30 d", sum(1 for m in metas.values() if self._caduca_pronto(m)),
              "rot", "caducan"),
             ("rotación pendiente", sum(1 for m in metas.values()
-                                       if self._rotación_pendiente(m)), "rot", "rotación"),
+                                       if self._rotacion_pendiente(m)), "rot", "rotación"),
             ("secretos", len(nombres), "ok", "todos"),
         ]
         fila = tk.Frame(panel, bg=PANEL2)
@@ -2256,7 +2261,7 @@ class CofreGUI:
         self.refresh_detail()
 
     def _ask_text(self, titulo: str, etiqueta: str, ejemplo: str = "") -> str:
-        """Hoja minima de una linea. Devuelve '' si se cancela."""
+        """Hoja minima de una línea. Devuelve '' si se cancela."""
         from cofre.widgets import Field
         win = self._sheet(titulo)
         win.geometry("460x180")
@@ -2527,7 +2532,7 @@ class CofreGUI:
                 texto += f"  ||  historico v1 (sin verificar): {viejos[0].name}"
         except Exception:
             pass
-        self.set_foot("ultimo registro: " + texto)
+        self.set_foot("último registro: " + texto)
 
 
 def parse_args(argv: list[str]) -> dict:

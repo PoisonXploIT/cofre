@@ -52,7 +52,7 @@ class TestHosts(unittest.TestCase):
         vault_path = tmp / "cofre.json"
         ok, motivo = allows(str(vault_path), "GITHUB_TOKEN", "github.com")
         self.assertFalse(ok)
-        self.assertIn("no tiene ningun sitio", motivo)
+        self.assertIn("no tiene ningún sitio", motivo)
         assign(str(vault_path), "GITHUB_TOKEN", ["github.com"])
         self.assertTrue(allows(str(vault_path), "GITHUB_TOKEN", "github.com")[0])
         self.assertFalse(allows(str(vault_path), "GITHUB_TOKEN", "cloudflare.com")[0])

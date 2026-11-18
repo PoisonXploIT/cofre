@@ -133,7 +133,7 @@ class TestFirmaExigible(unittest.TestCase):
         audit.record(self.vault, "reanchor", "usb", ok=True, detail="decision del usuario")
         ok, detalle = audit.verify(self.vault)
         self.assertTrue(ok, detalle)
-        self.assertIn("re-anclado en la linea 2", detalle)
+        self.assertIn("re-anclado en la línea 2", detalle)
         self.assertIn("exentas de firma", detalle)
 
     def test_restaurar_copia_antigua_avisa_pero_no_falla(self):
@@ -175,11 +175,39 @@ class TestFirmaExigible(unittest.TestCase):
         audit_path(vp).write_text(recortado, encoding="utf-8")
         ok, detalle = audit.check_checkpoint(store, master)
         self.assertFalse(ok)
-        self.assertIn("faltan lineas", detalle)
+        self.assertIn("faltan líneas", detalle)
+
+
+class TestFirmaDeCheck(unittest.TestCase):
+    """'check' abre el cofre: no puede ir sin firma."""
+
+    def test_check_no_esta_entre_los_esperados(self):
+        from cofre.audit import EXPECTED_UNSIGNED
+        self.assertNotIn("check", EXPECTED_UNSIGNED)
+        self.assertEqual(EXPECTED_UNSIGNED, {"gui-gate", "alert", "bridge-reject"})
+
+    def test_un_check_sin_firma_es_manipulacion(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="cofre-check-"))
+        vault = tmp / "cofre.json"
+        audit.set_key(secrets.token_bytes(32))
+        try:
+            audit.record(vault, "reanchor", "usb", ok=True, detail="ancla")
+            texto = audit_path(vault).read_text(encoding="utf-8")
+            import hashlib
+            falso = json.dumps({"seq": 2, "ev": "check", "ok": True,
+                                "prev": hashlib.sha256(texto.splitlines()[-1].encode()).hexdigest(),
+                                "mac": None}, sort_keys=True, separators=(",", ":"))
+            audit_path(vault).write_text(texto + falso + chr(10), encoding="utf-8")
+            ok, detalle = audit.verify(vault)
+            self.assertFalse(ok)
+            self.assertIn("check", detalle)
+        finally:
+            audit.clear_key()
 
 
 class TestSellado(unittest.TestCase):
-    """Sellado automatico: solo cuando lo pendiente es lo esperado."""
+    """Sellado automático: solo cuando lo pendiente es lo esperado."""
 
     def _cofre(self):
         from cofre.v2 import VaultV2, new_usb_slot
@@ -249,7 +277,7 @@ class TestCheckpoint(unittest.TestCase):
             audit_path(vp).write_text("\n".join(lineas[:-1]) + "\n", encoding="utf-8")
             ok, detalle = audit.check_checkpoint(store, master)
             self.assertFalse(ok)
-            self.assertIn("faltan lineas", detalle)
+            self.assertIn("faltan líneas", detalle)
         finally:
             audit.clear_key()
 

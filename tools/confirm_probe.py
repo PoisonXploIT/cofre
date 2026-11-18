@@ -52,7 +52,7 @@ def main() -> int:
     check("1. muestra quien pide", any("dash.cloudflare.com" in t for t in textos),
           textos[1] if len(textos) > 1 else "")
     check("1b. muestra que pide", any("CLOUDFLARE_DNS_TOKEN" in t for t in textos), "")
-    check("1c. no muestra ningun valor", not any("valor" in t.lower() for t in textos), "")
+    check("1c. no muestra ningún valor", not any("valor" in t.lower() for t in textos), "")
     inicio = time.time()
     resultado = dlg.wait()
     check("2. se cierra solo y deniega", resultado == "deny",

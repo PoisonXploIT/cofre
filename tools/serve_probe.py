@@ -66,7 +66,7 @@ def main() -> int:
         print("FALLO  H13: un registro vacio autorizo un pendrive sin registrar")
         failures_hint = True
     except Exception as exc:
-        print("OK    H13: registro vacio -> no se autoriza ningun pendrive")
+        print("OK    H13: registro vacio -> no se autoriza ningún pendrive")
         print("       ", str(exc)[:90])
         failures_hint = False
 
@@ -153,7 +153,7 @@ def main() -> int:
     from cofre.gate import GateUnavailable
 
     def _closed(*_a, **_k):
-        raise GateUnavailable("no se encontro COFRE.KEY")
+        raise GateUnavailable("no se encontró COFRE.KEY")
 
     original = serve_mod.resolve_session_key
     serve_mod.resolve_session_key = _closed

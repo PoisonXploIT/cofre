@@ -1,0 +1,8 @@
+#!/bin/sh
+# COFRE: antes de cada commit, comprobar que no hay identificadores con tilde
+# y que no quedan tildes pendientes en cadenas.
+python tools/check_accents.py || exit 1
+python tools/fix_accents.py --check || {
+    echo "Hay tildes pendientes: ejecuta python tools/fix_accents.py"
+    exit 1
+}

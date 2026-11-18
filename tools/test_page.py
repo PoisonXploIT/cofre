@@ -65,7 +65,7 @@ def main() -> int:
         except OSError as exc:
             print(f"puerto {puerto} no disponible: {exc}", file=sys.stderr)
     if server is None:
-        print("no se pudo abrir ningun puerto de prueba", file=sys.stderr)
+        print("no se pudo abrir ningún puerto de prueba", file=sys.stderr)
         return 1
     print(f"pagina de prueba en http://localhost:{server.server_address[1]}/")
     print("Ctrl+C para parar")

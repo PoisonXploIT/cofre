@@ -69,7 +69,7 @@ def main() -> int:
     campos.pack(anchor="w", padx=16, pady=(0, 12))
     f1 = Field(campos, placeholder="buscar secreto", width=260)
     f1.pack(side="left", padx=(0, 8))
-    f2 = Field(campos, placeholder="contrasena", show="*", width=200)
+    f2 = Field(campos, placeholder="contraseña", show="*", width=200)
     f2.pack(side="left")
 
     # filas
@@ -109,7 +109,7 @@ def main() -> int:
           int(Chip(root, "abierto").cget("height")) == 24, "")
     check("6. el campo devuelve lo escrito",
           (f1.set("abc") or f1.get()) == "abc", f1.get())
-    check("7. el campo con contrasena oculta lo escrito",
+    check("7. el campo con contraseña oculta lo escrito",
           str(f2.entry.cget("show")) == "*", "")
     check("8. la fila alta es la del plan", ListRow.ALTO == 56, str(ListRow.ALTO))
     check("9. la fila se marca como seleccionada", r2.seleccionada, "")

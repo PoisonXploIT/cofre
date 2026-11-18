@@ -125,12 +125,12 @@ class V2Store:
 
     def unlock(self) -> bytes:
         if self.master is None:
-            raise StoreError("el cofre v2 necesita la llave del pendrive o el codigo")
+            raise StoreError("el cofre v2 necesita la llave del pendrive o el código")
         return self.master
 
     def _need(self) -> bytes:
         if self.master is None:
-            raise StoreError("cofre v2 abierto sin sesion")
+            raise StoreError("cofre v2 abierto sin sesión")
         return self.master
 
     def get(self, name: str) -> str:

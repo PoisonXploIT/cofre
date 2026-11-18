@@ -223,7 +223,7 @@ def main() -> int:
                  gui_exe=str(Path(sys.executable).with_name("no-existe.exe")))
     check("8. servidor con ejecutable inesperado se corta",
           r.get("error") == "servidor de tuberia no fiable", str(r))
-    check("8b. y no devuelve ningun valor", "value" not in str(r), str(r)[:70])
+    check("8b. y no devuelve ningún valor", "value" not in str(r), str(r)[:70])
 
     # 8c. mismo python.exe y mismo PID declarado, pero sin "-m cofre" en su
     # linea de comandos: se corta por la linea de comandos. Con "-m cofre" el
@@ -233,7 +233,7 @@ def main() -> int:
     impostor.start()
     r = run_host({"type": "status"}, {"pipe": name, "pid": os.getpid()},
                  gui_exe=sys.executable)
-    check("8c. linea de comandos que no es de COFRE se corta",
+    check("8c. línea de comandos que no es de COFRE se corta",
           r.get("error") == "servidor de tuberia no fiable", str(r))
 
     # 9. el predicado de la linea de comandos, en aislamiento

@@ -38,7 +38,7 @@ class GateUnavailable(RuntimeError):
 
 
 def hid_session_key(nonce: bytes) -> bytes:
-    """Deriva la clave de sesion hablando CTAP2 con la llave (hmac-secret)."""
+    """Deriva la clave de sesión hablando CTAP2 con la llave (hmac-secret)."""
     try:
         from fido2.ctap2 import Ctap2  # noqa: F401
     except ImportError as exc:  # pragma: no cover
@@ -60,7 +60,7 @@ def hid_session_key(nonce: bytes) -> bytes:
         raise GateUnavailable("el autenticador no reporta hmac-secret")
     raise GateUnavailable(
         "enumeracion OK pero el flujo hmac-secret (autenticate con salt) "
-        "toda no implementado en esta version"
+        "toda no implementado en esta versión"
     )
 
 

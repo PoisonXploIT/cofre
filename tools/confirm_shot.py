@@ -1,4 +1,4 @@
-"""Captura del dialogo de confirmacion (E7)."""
+"""Captura del dialogo de confirmación (E7)."""
 
 from __future__ import annotations
 

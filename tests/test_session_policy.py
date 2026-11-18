@@ -1,4 +1,4 @@
-"""Pruebas de la sesion (2.1) y de las politicas (2.3)."""
+"""Pruebas de la sesión (2.1) y de las politicas (2.3)."""
 
 from __future__ import annotations
 
@@ -168,6 +168,21 @@ class TestPermisosTemporales(unittest.TestCase):
                 pass
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestProveedorPorNombre(unittest.TestCase):
+    """El nombre solo da color; nunca decide politicas ni rotación."""
+
+    def test_el_nombre_no_cambia_la_politica(self):
+        con_nombre = {"name": "CF_TOKEN_ADMIN", "type": "api_key"}
+        sin_nombre = {"name": "OTRA_COSA", "type": "api_key"}
+        for canal in ("browser", "exec", "clipboard", "reveal"):
+            self.assertEqual(allowed(con_nombre, canal)[0], allowed(sin_nombre, canal)[0],
+                             f"el nombre no debe cambiar la politica en {canal}")
+
+    def test_solo_la_etiqueta_admin_activa_la_confirmacion(self):
+        self.assertFalse(needs_confirm({"name": "CLOUDFLARE_TOKEN_ADMIN", "type": "api_key"}))
+        self.assertTrue(needs_confirm({"name": "X", "type": "api_key", "tags": ["admin"]}))
 
 
 if __name__ == "__main__":

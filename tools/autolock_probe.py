@@ -14,11 +14,11 @@ app = CofreGUI(str(Path.home() / "AI" / "cofre" / "cofre.json"), "usb")
 app.build()
 app.root.update()
 print("1 abierto:", app.state(), "|", app.status_var.get())
-print("  serial de la sesion:", app.serial)
+print("  serial de la sesión:", app.serial)
 
 used = app.serial
 if used is None:
-    print("no hay sesion abierta: conectar un pendrive y repetir")
+    print("no hay sesión abierta: conectar un pendrive y repetir")
     raise SystemExit(1)
 
 real = app.stick_report
@@ -29,7 +29,7 @@ app._poll()
 app.root.update()
 print("2 tras retirar el pendrive:", app.state(), "|", app.status_var.get())
 print("3 pie:", app.foot_var.get())
-print("4 sesion viva?", app.session is not None, "| serial:", app.serial)
+print("4 sesión viva?", app.session is not None, "| serial:", app.serial)
 
 app.stick_report = real
 app.unlock()

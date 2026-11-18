@@ -23,7 +23,7 @@ DEFAULTS = {
 
 
 class Session:
-    """Estado de una sesion abierta. No sabe descifrar: eso es del cofre."""
+    """Estado de una sesión abierta. No sabe descifrar: eso es del cofre."""
 
     def __init__(self, settings: dict | None = None, now=None, wall=None,
                  lock_state=None):
@@ -47,7 +47,7 @@ class Session:
     # ---------------------------------------------------------------- estado
 
     def touch(self) -> None:
-        """Marca actividad de la persona (no del sondeo automatico)."""
+        """Marca actividad de la persona (no del sondeo automático)."""
         self.last_activity = self._now()
         self.last_wall = self._wall()
         self.activity_count += 1
@@ -61,7 +61,7 @@ class Session:
     # ---------------------------------------------------------------- decision
 
     def check(self) -> str | None:
-        """Motivo para bloquear, o None si la sesion sigue valida."""
+        """Motivo para bloquear, o None si la sesión sigue valida."""
         if self.locked_reason:
             return self.locked_reason
 

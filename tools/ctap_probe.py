@@ -187,13 +187,13 @@ def main():
 
     path = args.path or find_fido_path()
     if not path:
-        print("No se encontro ninguna interfaz con usage page 0xF1D0.")
+        print("No se encontró ninguna interfaz con usage page 0xF1D0.")
         return 1
     print("interfaz FIDO:", path)
 
     handle, info = open_with_retry(path, args.retries)
     if handle is None:
-        print("CreateFileW no pudo abrir la llave en %d intentos (ultimo err=%d)."
+        print("CreateFileW no pudo abrir la llave en %d intentos (último err=%d)."
               % (args.retries, info))
         print("El interface esta enumerado pero el driver FIDO (fidohid.inf) no")
         print("permite abrirlo desde este proceso. Pruebas a hacer:")
@@ -232,7 +232,7 @@ def main():
         try:
             import cbor2
             gi = cbor2.loads(data)
-            print("version:", gi.get("version"))
+            print("versión:", gi.get("versión"))
             print("extensions:", gi.get("extensions"))
             print("algorithms:", gi.get("algorithms"))
             print("options:", gi.get("options"))

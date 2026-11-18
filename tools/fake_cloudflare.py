@@ -80,7 +80,7 @@ class FakeCloudflare:
                 if self.path.endswith("/user/tokens/verify"):
                     if fake.fallar_verify:
                         return self._json(403, {"success": False,
-                                                "errors": [{"message": "token invalido"}]})
+                                                "errors": [{"message": "token inválido"}]})
                     cabecera = self.headers.get("Authorization", "").replace("Bearer ", "")
                     datos = fake.tokens.get(cabecera)
                     if not datos:

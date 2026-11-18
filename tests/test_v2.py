@@ -135,7 +135,7 @@ class TestMigracion(unittest.TestCase):
         res = migrar(vault_path, key.read_bytes(), 111, hosts_map={"UNO": ["ejemplo.com"]})
         self.assertTrue(res["backup"])
         self.assertTrue((tmp / "cofre.v1.json").exists())
-        self.assertEqual(check_code(res["codigo"])[0], True)
+        self.assertEqual(check_code(res["código"])[0], True)
 
         data = VaultV2(vault_path).load()
         self.assertTrue(VaultV2.is_v2(data))
@@ -147,7 +147,7 @@ class TestMigracion(unittest.TestCase):
         self.assertEqual(v2.names(data, m), ["DOS", "UNO"])
 
         # y con el codigo de recuperacion
-        m3, _ = open_with_recovery(data, res["codigo"])
+        m3, _ = open_with_recovery(data, res["código"])
         self.assertEqual(v2.get(data, m3, "UNO"), "valor-uno")
 
 

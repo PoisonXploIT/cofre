@@ -245,7 +245,7 @@ def cmd_stick_verify(vault_path: str) -> int:
     authorized = set(reg.get("sticks", {}))
     drives = keys_to_try()
     if not drives:
-        print("no hay ningun pendrive con %s conectado" % KEY_FILENAME)
+        print("no hay ningún pendrive con %s conectado" % KEY_FILENAME)
         return 1
 
     ok, bad = 0, 0
@@ -429,7 +429,7 @@ def main(argv: list[str]) -> int:
                 return 1
             if not args.si:
                 print("Esto mueve el punto desde el que se exige firma.")
-                print("Las lineas anteriores quedaran exentas y el aviso saldra en log verify.")
+                print("Las líneas anteriores quedaran exentas y el aviso saldra en log verify.")
                 print(f"Motivo: {args.motivo}")
                 respuesta = input("Escribe REANCLAR para confirmar: ").strip()
                 if respuesta != "REANCLAR":
@@ -621,7 +621,7 @@ def main(argv: list[str]) -> int:
         proveedor = provider_get(proveedor_nombre)
         valor = vault.get(session, args.name)
         v = proveedor.verify(valor, meta)
-        print(f"{args.name}: {'valido' if v.ok else 'NO valido'} | estado {v.status or '?'} "
+        print(f"{args.name}: {'válido' if v.ok else 'NO válido'} | estado {v.status or '?'} "
               f"| id {v.token_id or '(sin id)'} | caduca {v.expires_at or '(sin caducidad)'}")
         if v.detail and v.detail != "activo":
             print(f"  detalle: {v.detail}")
@@ -740,7 +740,7 @@ def main(argv: list[str]) -> int:
             admin_valor = vault.get(session, admin_nombre)
 
         verificacion = proveedor.verify(valor, meta)
-        print(f"estado del token: {'activo' if verificacion.ok else 'NO valido'}"
+        print(f"estado del token: {'activo' if verificacion.ok else 'NO válido'}"
               + (f" (caduca {verificacion.expires_at})" if verificacion.expires_at else "")
               + (f" - {verificacion.detail}" if verificacion.detail else ""))
         modo = "B (crear reemplazo y desplegar)" if consumidores else "A (roll del valor)"
@@ -923,7 +923,7 @@ def main(argv: list[str]) -> int:
                 print(f"{args.name}: {', '.join(mapping.get(args.name, [])) or '(sin asignar)'}")
                 return 0
             if not mapping:
-                print("ningun secreto tiene dominios asignados")
+                print("ningún secreto tiene dominios asignados")
                 return 0
             for nombre in sorted(mapping):
                 print(f"  {nombre:28} {', '.join(mapping[nombre])}")

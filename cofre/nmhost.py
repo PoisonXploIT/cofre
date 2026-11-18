@@ -301,7 +301,7 @@ def server_is_trusted(handle) -> tuple[bool, str]:
 
     cmd = command_line_of(server_pid)
     if cmd and not cmdline_ok(cmd):
-        return False, "la linea de comandos del servidor no parece de COFRE"
+        return False, "la línea de comandos del servidor no parece de COFRE"
     return True, f"pid {server_pid} ({os.path.basename(image)})"
 
 

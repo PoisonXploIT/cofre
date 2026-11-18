@@ -1,4 +1,4 @@
-"""Comprueba 4.1: los botones del detalle se encienden y apagan segun seleccion."""
+"""Comprueba 4.1: los botones del detalle se encienden y apagan segun selección."""
 import os
 import sys
 from pathlib import Path
@@ -21,18 +21,18 @@ app.root.update()
 app.dest_var.set(str(fake) + os.sep)
 app.wizard_create_key()
 app.wizard_init()
-print("0 sesion abierta:", app.session is not None, "| wrapper:",
+print("0 sesión abierta:", app.session is not None, "| wrapper:",
       app.vault.load().get("wrapper") is not None)
 app.name_var.set("DEMO")
 app.val_var.set("un-valor-de-prueba")
 app.add_secret()
-print("1 sin seleccion:", [b._enabled for b in app.action_btns][:4], "...")
+print("1 sin selección:", [b._enabled for b in app.action_btns][:4], "...")
 app.selected = None
 app.refresh_list()
-print("2 tras limpiar seleccion:", app.action_btns[0]._enabled)
+print("2 tras limpiar selección:", app.action_btns[0]._enabled)
 app.select("DEMO")
 app.root.update()
-print("3 con seleccion:", [b._enabled for b in app.action_btns])
+print("3 con selección:", [b._enabled for b in app.action_btns])
 app.lock()
 print("4 tras bloquear:", [b._enabled for b in app.action_btns])
 print("5 label del ojo:", app.show_val_btn.label.cget("text"))

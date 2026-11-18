@@ -51,5 +51,5 @@ def check_code(code: str) -> tuple[bool, str]:
     texto = " ".join(partes[:-1])
     esperada = control_word(texto, palabras)
     if partes[-1] != normalize(esperada):
-        return False, "la palabra de control no cuadra: hay un error al copiar el codigo"
+        return False, "la palabra de control no cuadra: hay un error al copiar el código"
     return True, ""

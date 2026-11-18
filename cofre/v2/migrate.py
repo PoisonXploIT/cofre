@@ -79,7 +79,7 @@ def migrate(vault_path: str | Path, stick_key: bytes, serial: int, pin: str = ""
     v2 = VaultV2(tmp)
     data = v2.create(master, new_usb_slot(master, stick_key, serial,
                                           f"pendrive {serial}", pin))
-    v2.add_slot(data, new_recovery_slot(master, codigo, "codigo en papel"))
+    v2.add_slot(data, new_recovery_slot(master, codigo, "código en papel"))
     for nombre in nombres:
         v2.put(data, master, nombre, valores[nombre],
                tags=etiquetas[nombre], urls=dominios.get(nombre, []))
@@ -93,7 +93,7 @@ def migrate(vault_path: str | Path, stick_key: bytes, serial: int, pin: str = ""
             raise MigrateError(f"la verificacion fallo en '{nombre}': no se cambia nada")
     m3, _ = open_with_recovery(releido, codigo)
     if m3 != m2:
-        raise MigrateError("el codigo de recuperacion no abre la copia; se aborta")
+        raise MigrateError("el código de recuperacion no abre la copia; se aborta")
 
     # intercambio
     v1_path = vault_path.with_name("cofre.v1.json")
@@ -104,7 +104,7 @@ def migrate(vault_path: str | Path, stick_key: bytes, serial: int, pin: str = ""
     if hosts_file.exists():
         hosts_file.rename(hosts_file.with_name(".cofre-hosts.json.importado"))
 
-    return {"entradas": nombres, "codigo": codigo, "backup": str(backup),
+    return {"entradas": nombres, "código": codigo, "backup": str(backup),
             "v1_guardado": str(v1_path)}
 
 

@@ -103,7 +103,7 @@ def allows(vault_path: str | Path, name: str, page_host: str) -> tuple[bool, str
     """(permitido, motivo). Sin asignacion no se permite nada."""
     patterns = hosts_for(vault_path, name)
     if not patterns:
-        return False, f"'{name}' no tiene ningun sitio asignado"
+        return False, f"'{name}' no tiene ningún sitio asignado"
     if not host_matches(page_host, patterns):
-        return False, f"'{page_host}' no esta asignado a '{name}'"
+        return False, f"'{page_host}' no está asignado a '{name}'"
     return True, ""

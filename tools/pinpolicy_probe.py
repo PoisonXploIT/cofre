@@ -29,7 +29,7 @@ print("2 tras detectar pendrive -> estado:", app.state(), "|", app.status_var.ge
 print("   pie:", app.foot_var.get())
 
 # con pin vacio unlock debe fallar
-print("3 unlock sin PIN devuelve:", app.unlock(), "| sesion:", app.session)
+print("3 unlock sin PIN devuelve:", app.unlock(), "| sesión:", app.session)
 
 # botones apagados sin seleccion
 states = [b._enabled for b in app.action_btns]
@@ -44,5 +44,5 @@ app2 = CofreGUI(path, "usb")
 app2.build()
 app2.root.update()
 print("5 usb normal -> estado:", app2.state(), "|", app2.status_var.get())
-print("6 botones sin seleccion:", [b._enabled for b in app2.action_btns])
+print("6 botones sin selección:", [b._enabled for b in app2.action_btns])
 app2.root.destroy()
