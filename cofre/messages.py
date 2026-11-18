@@ -93,20 +93,20 @@ MSG = {
     "llaves.sin_sesion": "abre el cofre para ver las llaves",
     "llaves.solo_pendrive": "no se puede dar de baja el único pendrive: añade otro antes",
     "llaves.baja_titulo": "Dar de baja un pendrive",
-    "llaves.baja_texto": "Ese pendrive dejará de abrir el cofre. Si eliges rekey, "
+    "llaves.baja_texto": "Ese pendrive dejará de abrir el cofre. Si eliges cambiar la clave, "
                          "también cambia la clave maestra: las copias viejas no "
                          "se abrirán con la nueva y los pendrives que no estén "
                          "conectados se quedarán fuera. El rekey cierra el tramo "
                          "del registro y empieza otro.",
     "llaves.solo_baja": "Solo dar de baja",
-    "llaves.baja_rekey": "Dar de baja y rekey",
+    "llaves.baja_rekey": "Dar de baja y cambiar la clave",
     "llaves.ranura_quitada": "ranura del serial {serial} quitada",
-    "llaves.rekey_hecho": "rekey hecho; el pendrive actual sigue abriendo",
-    "llaves.rekey_error": "el rekey falló; el cofre sigue como estaba",
-    "llaves.rekey_reabrir": "rekey hecho, pero no se pudo reabrir: {error}. "
+    "llaves.rekey_hecho": "clave maestra cambiada; el pendrive actual sigue abriendo",
+    "llaves.rekey_error": "no se pudo cambiar la clave maestra; el cofre sigue como estaba",
+    "llaves.rekey_reabrir": "clave maestra cambiada, pero no se pudo reabrir: {error}. "
                             "Bloquea y abre de nuevo",
     "llaves.rekey_codigo": "cambiando la clave maestra...",
-    "llaves.rekey_sin_llave": "sin el pendrive actual no se puede hacer rekey desde aquí",
+    "llaves.rekey_sin_llave": "sin el pendrive actual no se puede cambiar la clave maestra",
     "llaves.anadir_titulo": "Añadir un pendrive",
     "llaves.anadir_texto": "1. Se escribe COFRE.KEY.nuevo en la unidad elegida. "
                            "El COFRE.KEY que ya tenga ese pendrive no se toca.\n"

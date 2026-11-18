@@ -2344,7 +2344,7 @@ class CofreGUI:
             salida = (proc.stdout or "") + (proc.stderr or "")
             exito = proc.returncode == 0
         except Exception as exc:                   # noqa: BLE001
-            salida = f"no se pudo ejecutar el rekey: {exc}"
+            salida = f"no se pudo cambiar la clave maestra: {exc}"
             exito = False
         if exito:
             try:
@@ -2939,7 +2939,7 @@ class CofreGUI:
             "  3. GitHub App: regenerar la clave privada en la web.",
             "  4. Otros proveedores: URL para revocar a mano.",
             "  5. Señuelos: no se tocan.",
-            "  6. Código de recuperación nuevo y rekey: este pendrive sigue;",
+            "  6. Código nuevo y cambio de la clave maestra: este pendrive sigue;",
             "     los demás se quedan fuera y hay que volver a darles llave.",
             "",
             "El código nuevo se muestra UNA vez. Ten papel a mano.",
