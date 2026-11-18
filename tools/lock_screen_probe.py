@@ -63,6 +63,36 @@ def main() -> int:
           f"sesión={'si' if app.session else 'no'} mapeada={capa.winfo_ismapped()} "
           f"pie={app.foot_var.get()[:70]!r}")
 
+    # 9. el sondeo no repinta si nada cambia (2026-11-18: titileo al abrir)
+    app.lock(motivo="bloqueado para probar el titileo")
+    app.root.update()
+    repintados = {"filas": 0, "destruidos": 0}
+    original = app.lock_screen.llaves.winfo_children
+
+    def contar():
+        repintados["filas"] += 1
+        return original()
+
+    class Espia:
+        def __init__(self, real):
+            self.real = real
+
+        def __call__(self):
+            repintados["destruidos"] += 1
+            return self.real()
+
+    app.lock_screen.llaves.winfo_children = contar
+    for _ in range(4):                    # cuatro sondeos, como 8 s de reloj
+        app.lock_screen.refrescar()
+        app.root.update()
+    check("9. el sondeo no repinta la pantalla de bloqueo si nada cambia",
+          repintados["filas"] == 0, f"{repintados['filas']} repintados")
+    app.lock_screen._firma = None         # forzar un cambio de verdad
+    app.lock_screen.refrescar()
+    check("9b. si cambia algo, si repinta", repintados["filas"] > 0,
+          f"{repintados['filas']} repintados")
+    app.lock_screen.llaves.winfo_children = original
+
     # volver a bloquear y capturar
     app.lock(motivo="bloqueado por inactividad (10 min sin usarlo)")
     app.root.update()

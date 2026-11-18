@@ -110,12 +110,23 @@ class LockScreen(tk.Frame):
     # ------------------------------------------------------------ estado
 
     def refrescar(self, motivo: str = "") -> None:
-        """Repinta llaves y motivo. Se llama al bloquear y en cada sondeo."""
-        if motivo:
+        """Repinta llaves y motivo.
+
+        Se llama al bloquear y **en cada sondeo** (cada 2 s). Antes destruia y
+        volvia a crear las filas siempre: la pantalla de bloqueo titilaba todo el
+        rato. Ahora solo se repinta si cambia algo de verdad (una llave que entra
+        o sale, o el gate); el motivo se toca solo si es otro texto.
+        """
+        if motivo and self.motivo.cget("text") != motivo:
             self.motivo.configure(text=motivo)
+        filas = self.app.stick_report()
+        firma = (tuple((str(d.get("drive")), str(d.get("role")),
+                        bool(d.get("present"))) for d in filas[:3]), self.app.gate)
+        if firma == getattr(self, "_firma", None):
+            return
+        self._firma = firma
         for w in self.llaves.winfo_children():
             w.destroy()
-        filas = self.app.stick_report()
         if not filas:
             self.sin_llave.pack(fill="x", padx=SPACE["lg"], pady=(0, SPACE["md"]))
         else:
@@ -132,12 +143,15 @@ class LockScreen(tk.Frame):
                          fg=C["ok"] if conectada else C["faint"], bg=C["surface"],
                          font=self._font("label")).pack(side="left")
         if self.app.gate == "usb-pin":
-            self.pin_box.pack(fill="x", pady=(SPACE["md"], 0))
-        else:
+            if not self.pin_box.winfo_ismapped():
+                self.pin_box.pack(fill="x", pady=(SPACE["md"], 0))
+        elif self.pin_box.winfo_ismapped():
             self.pin_box.pack_forget()
-        self.b_abrir.set_enabled(bool(filas))
-        self.sin_llave.configure(text="conecta un pendrive del cofre"
-                                       if not filas else "")
+        if self.b_abrir._estado != ("normal" if filas else "disabled"):
+            self.b_abrir.set_enabled(bool(filas))
+        texto_sin = "conecta un pendrive del cofre" if not filas else ""
+        if self.sin_llave.cget("text") != texto_sin:
+            self.sin_llave.configure(text=texto_sin)
 
     def mostrar(self, motivo: str = "") -> None:
         self.refrescar(motivo)

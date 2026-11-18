@@ -59,7 +59,7 @@ PRIVILEGED = {
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
     "discard", "health", "panic", "rekey", "recovery", "backup",
-    "run", "describe", "git-get", "grant-revoke",
+    "run", "describe", "git-get", "grant-revoke", "scan",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -376,6 +376,8 @@ VERBS = {
     "run": "comando con variables del proyecto",
     "describe": "descripcion para agentes (sin valores)",
     "git-get": "credencial entregada a git",
+    "grant-revoke": "permiso temporal retirado",
+    "scan": "escaneo de fugas",
 }
 
 

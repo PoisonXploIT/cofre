@@ -39,6 +39,7 @@ PROBES = [
     ("pipe_server", [sys.executable, "tools/pipe_server_probe.py"], False),
     ("confirm", [sys.executable, "tools/confirm_probe.py"], False),
     ("confirm_stress", [sys.executable, "tools/confirm_stress_probe.py"], False),
+    ("leak", [sys.executable, "tools/leak_probe.py"], False),
     ("serve", [sys.executable, "tools/serve_probe.py"], False),
     ("extension", ["node", "tools/extension_fill_test.mjs"], True),
 ]

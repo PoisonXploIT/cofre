@@ -243,6 +243,20 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--admin", default="",
                     help="secreto con permisos de gestión (Cloudflare)")
 
+    sn = with_common(sub.add_parser(
+        "scan", help="buscar secretos del cofre pegados en ficheros (sin mostrar el valor)"))
+    sn.add_argument("carpeta", nargs="?", default=".",
+                    help="carpeta a escanear (por defecto, la actual)")
+    sn.add_argument("--json", action="store_true", help="salida JSON para maquinas")
+    sn.add_argument("--staged", action="store_true",
+                    help="solo lo que git va a commitear (lo usa el gancho)")
+    sn.add_argument("--install-hook", metavar="REPO", default="",
+                    help="instalar el gancho de pre-commit en ese repo")
+    sn.add_argument("--uninstall-hook", metavar="REPO", default="",
+                    help="quitar el gancho de pre-commit de ese repo")
+    sn.add_argument("--excluir", action="append", default=[],
+                    help="carpeta o extension a saltar (repetible)")
+
     rk = with_common(sub.add_parser(
         "rekey", help="cambiar la clave maestra y el código de recuperacion"))
     rk.add_argument("--motivo", default="manual",
@@ -494,6 +508,127 @@ def prepare_recovery(vault_path, gate: str):
     except Exception as exc:                      # noqa: BLE001
         print(f"no se pudo abrir con ese código: {exc}", file=sys.stderr)
     return vault
+
+
+GANCHO = """#!/bin/sh
+# COFRE 3.4: no dejar secretos del cofre pegados en un commit.
+# Instalado el {fecha}. Se quita con: run.cmd scan --uninstall-hook <repo>
+COFRE_VAULT="${{COFRE_VAULT:-{vault}}}"
+export COFRE_VAULT
+exec "{python}" "{gancho}" --repo .
+"""
+
+
+def _instalar_gancho(repo: str, vault_path, quitar: bool) -> int:
+    raiz = Path(repo).resolve()
+    if not (raiz / ".git").exists():
+        print(f"{raiz} no es un repositorio git", file=sys.stderr)
+        return 1
+    destino = raiz / ".git" / "hooks" / "pre-commit"
+    if quitar:
+        if destino.exists():
+            destino.unlink()
+            print("gancho de pre-commit quitado")
+        else:
+            print("no habia gancho de COFRE en ese repo")
+        return 0
+    if destino.exists():
+        print(f"ya existe {destino}: no se sobrescribe. Quita el tuyo primero.",
+              file=sys.stderr)
+        return 1
+    import datetime
+    texto = GANCHO.format(
+        fecha=datetime.date.today().isoformat(),
+        vault=str(Path(vault_path).resolve()).replace("\\", "/"),
+        python=sys.executable.replace("\\", "/"),
+        gancho=str(Path(__file__).resolve().parent.parent / "tools" / "leak_hook.py")
+        .replace("\\", "/"))
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto, encoding="utf-8", newline="\n")
+    try:
+        destino.chmod(0o755)
+    except OSError:
+        pass
+    print(f"gancho instalado en {destino}")
+    print("En cada commit se comprobara si un secreto del cofre va pegado.")
+    print("Sin el pendrive puesto avisa y deja pasar; con una fuga, para el commit.")
+    return 0
+
+
+def cmd_scan(args, vault_path) -> int:
+    """3.4: buscar secretos pegados. Nunca muestra el valor."""
+    from cofre import leak
+    from cofre.audit import record
+
+    if args.install_hook or args.uninstall_hook:
+        repo = args.install_hook or args.uninstall_hook
+        return _instalar_gancho(repo, vault_path, quitar=bool(args.uninstall_hook))
+
+    if getattr(args, "recovery", False):
+        vault = prepare_recovery(vault_path, args.gate)
+    else:
+        vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
+    store = vault._v2store() if vault.is_v2() else None
+    if store is None or store.master is None:
+        print("para escanear hace falta el pendrive (o --recovery): las huellas se "
+              "derivan de la clave maestra", file=sys.stderr)
+        return 2
+
+    clave = leak.clave_de_huellas(store.master)
+    secretos: dict[str, str] = {}
+    for nombre in vault.names():
+        try:
+            valor = vault.get(None, nombre)
+        except Exception:                            # noqa: BLE001
+            continue
+        if valor:
+            secretos[nombre] = valor
+    tabla, cortos = leak.huellas_de(clave, secretos)
+
+    carpeta = Path(args.carpeta)
+    if args.staged:
+        hallazgos = leak.escanear_escenificados(carpeta, clave, tabla, cortos)
+    else:
+        if not carpeta.exists():
+            print(f"no existe la carpeta {carpeta}", file=sys.stderr)
+            return 2
+        hallazgos = leak.escanear_carpeta(carpeta, clave, tabla, cortos)
+    if args.excluir:
+        saltar = set(args.excluir)
+        hallazgos = [h for h in hallazgos
+                     if not any(parte in saltar for parte in Path(h[0]).parts)
+                     and Path(h[0]).suffix.lower() not in saltar]
+
+    serial = None
+    try:
+        if (store.slot or {}).get("kind") == "usb":
+            serial = int(store.slot.get("serial"))
+    except Exception:                                # noqa: BLE001
+        serial = None
+
+    if args.json:
+        import json as _json
+        print(_json.dumps({
+            "count": len(hallazgos),
+            "secrets": len(secretos),
+            "scope": "staged" if args.staged else str(carpeta),
+            "leaks": [{"secret": n, "file": str(Path(r)), "line": ln}
+                      for r, ln, n in hallazgos],
+        }, ensure_ascii=False, indent=2))
+    elif not hallazgos:
+        print(f"sin fugas: {len(secretos)} secretos comprobados en "
+              f"{'lo escenificado' if args.staged else carpeta}")
+    else:
+        print(f"{len(hallazgos)} coincidencia(s):")
+        for ruta, linea, nombre in hallazgos:
+            print(f"  {nombre}  {ruta}:{linea}")
+        print("")
+        print("El valor no se muestra. Quita el secreto del fichero y vuelve a probar.")
+
+    record(str(vault_path), "scan", args.gate, serial, ok=not hallazgos,
+           name=f"{len(hallazgos)} coincidencia(s)",
+           detail=f"{'staged' if args.staged else 'carpeta=' + str(carpeta)}"[:150])
+    return 1 if hallazgos else 0
 
 
 def rekey_vivo(vault, vault_path, material, motivo: str = "manual",
@@ -748,6 +883,9 @@ def main(argv: list[str]) -> int:
     if args.command == "serve":
         from cofre.serve import main as serve_main
         return serve_main(["--port", str(args.port)])
+
+    if args.command == "scan":
+        return cmd_scan(args, vault_path)
 
     if args.command == "check":
         # v2 no tiene `wrapper`: se abre con la llave del pendrive (o el código)
