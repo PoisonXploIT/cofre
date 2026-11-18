@@ -740,13 +740,17 @@ class CofreGUI:
         self.root.bind("<Control-l>", lambda _e: self.lock())
         self.root.bind("<Control-f>", lambda _e: self.query_entry.focus_set())
         self.root.bind("<Control-n>", lambda _e: self._focus_new())
+        self.root.bind("<Control-k>", self.open_palette)
+        self.root.bind("<Control-e>", self._on_edit_shortcut)
+        self.root.bind("<Control-Shift-KeyPress-C>", self._on_copy_name_shortcut)
+        self.root.bind("<Delete>", self._on_delete_shortcut)
         # H3: Ctrl+C solo copia el secreto cuando NO estas tecleando en un
         # campo. Si el foco esta en un Entry/Text, ese Ctrl+C es el normal.
         self.root.bind("<Control-c>", self._on_copy_shortcut)
         self.root.bind("<Return>", self._on_enter)
         self.root.bind("<Prior>", lambda _e: self.move_selection(-1))
         self.root.bind("<Next>", lambda _e: self.move_selection(1))
-        self.root.bind("<F1>", lambda _e: self.toggle_help())
+        self.root.bind("<F1>", lambda _e: self.open_shortcuts())
         from cofre.gui_confirm import ConfirmQueue
         self.confirm_queue = ConfirmQueue(self.root)
         self.root.after(200, self._pump_confirm)
@@ -2096,6 +2100,163 @@ class CofreGUI:
             fill="x", padx=12, pady=(8, 4))
         self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
 
+    def open_palette(self, event=None):
+        """6.4: Ctrl+K. Busca secretos y acciones; Enter ejecuta."""
+        if getattr(self, "lock_screen", None) and not self.session:
+            self.set_foot("abre el cofre para usar la paleta de comandos")
+            return "break"
+        actual = getattr(self, "_palette", None)
+        if actual is not None:
+            try:
+                actual.win.lift()
+                actual.entrada.focus_force()
+            except Exception:
+                pass
+            return "break"
+        from cofre.palette import Palette
+        self._palette = Palette(self)
+        return "break"
+
+    def open_shortcuts(self, event=None) -> None:
+        win = self._sheet("COFRE - atajos de teclado")
+        win.geometry("620x480")
+        tk.Label(win, text="Atajos", fg=FG, bg=PANEL, font=self.f_title,
+                 anchor="w").pack(fill="x", padx=18, pady=(14, 4))
+        filas = [
+            ("Ctrl+K", "Paleta de comandos y secretos"),
+            ("Ctrl+F", "Buscar en la lista"),
+            ("Ctrl+N", "Nuevo secreto"),
+            ("Enter", "Copiar el secreto seleccionado"),
+            ("Ctrl+Shift+C", "Copiar el nombre (no revela el valor)"),
+            ("Ctrl+E", "Editar el secreto"),
+            ("Supr", "Mover a la papelera (pide confirmación)"),
+            ("Ctrl+L", "Bloquear el cofre"),
+            ("Esc", "Ocultar el valor o cerrar el diálogo"),
+            ("Ctrl+Q", "Salir"),
+            ("F1", "Estos atajos"),
+        ]
+        for tecla, que in filas:
+            fila = tk.Frame(win, bg=PANEL)
+            fila.pack(fill="x", padx=18, pady=3)
+            tk.Label(fila, text=tecla, fg=ACC, bg=PANEL, font=self.f_mono,
+                     width=14, anchor="w").pack(side="left")
+            tk.Label(fila, text=que, fg=FG, bg=PANEL, font=self.f_body,
+                     anchor="w").pack(side="left")
+        self._btn(win, "Cerrar", win.destroy).pack(pady=(10, 14))
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.focus_force()
+
+    def _foco_en_campo(self) -> bool:
+        try:
+            foco = self.root.focus_get()
+        except Exception:
+            foco = None
+        return foco is not None and foco.winfo_class() in (
+            "Entry", "Text", "TEntry", "TText")
+
+    def _on_edit_shortcut(self, event=None):
+        if self._foco_en_campo():
+            return
+        self.edit_selected()
+
+    def _on_delete_shortcut(self, event=None):
+        if self._foco_en_campo():
+            return
+        self.delete_selected()
+
+    def _on_copy_name_shortcut(self, event=None):
+        if self._foco_en_campo():
+            return
+        self.copy_name()
+
+    def _rotar_para_paleta(self, nombre: str) -> None:
+        """Rotar desde la paleta: confirmación aquí y el CLI hace el trabajo."""
+        if not self.session:
+            self.set_foot("abre el cofre para rotar")
+            return
+        meta = dict(self.vault.meta(nombre) or {})
+        proveedor = str(meta.get("provider") or "")
+        if not proveedor:
+            self.set_foot("ese secreto no tiene proveedor")
+            return
+        from cofre.providers import get as provider_get
+        try:
+            automatico = bool(getattr(provider_get(proveedor),
+                                      "can_auto_rotate", False))
+        except Exception:
+            automatico = False
+        if not automatico:
+            self.set_foot("esa rotación es asistida: ejecuta "
+                          "'run.cmd rotate --manual' en una terminal")
+            return
+        consumidores = list(meta.get("consumers") or [])
+        aviso = f"Se va a rotar '{nombre}' en {proveedor}. "
+        if consumidores:
+            aviso += "Se desplegará en: " + ", ".join(consumidores) + ". "
+        aviso += "El valor viejo queda registrado para revocarlo desde Salud."
+        if not self._confirmar_accion("Rotar credencial", aviso, "Rotar"):
+            return
+        material = getattr(self.vault, "_material", {}) or {}
+        stick = str(material.get("stick_path") or "")
+        if not stick:
+            self.set_foot("sin la ruta del pendrive no se puede rotar desde aquí")
+            return
+        self.set_foot(f"rotando '{nombre}' con el CLI...")
+        self.root.update_idletasks()
+        comando = [sys.executable, "-m", "cofre.cli", "--gate", self.gate,
+                   "--stick", stick, "--vault", self.vault_path,
+                   "rotate", nombre, "--si"]
+        entorno = dict(os.environ, COFRE_VAULT=str(self.vault_path))
+        if material.get("pin"):
+            entorno["COFRE_PIN"] = str(material["pin"])
+        codigo = 1
+        try:
+            proc = subprocess.run(comando, capture_output=True, text=True,
+                                  env=entorno, timeout=240)
+            salida = (proc.stdout or "") + (proc.stderr or "")
+            codigo = proc.returncode
+        except Exception as exc:                   # noqa: BLE001
+            salida = f"no se pudo ejecutar la rotación: {exc}"
+        try:
+            self.vault.refresh()
+            self.refresh_list()
+            self.refresh_detail()
+            self._escribir_calendario()
+        except Exception:
+            pass
+        self._mostrar_salida(f"Rotación de {nombre}", salida.strip())
+        self.set_foot("rotación terminada" if codigo == 0
+                      else "rotación con avisos: revisa la salida")
+
+    def _mostrar_salida(self, titulo: str, texto: str) -> None:
+        win = self._sheet(titulo)
+        win.geometry("720x440")
+        tk.Label(win, text=titulo, fg=FG, bg=PANEL, font=self.f_h2,
+                 anchor="w").pack(fill="x", padx=14, pady=(12, 6))
+        marco = tk.Frame(win, bg=PANEL)
+        marco.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        caja = tk.Text(marco, bg=PANEL2, fg=FG, font=self.f_mono, bd=0,
+                       highlightthickness=0, wrap="word")
+        barra = tk.Scrollbar(marco, command=caja.yview)
+        caja.configure(yscrollcommand=barra.set)
+        barra.pack(side="right", fill="y")
+        caja.pack(side="left", fill="both", expand=True)
+        caja.insert("end", texto or "sin salida")
+        caja.configure(state="disabled")
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=14, pady=(0, 12))
+        self._btn(fila, "Cerrar", win.destroy).pack(side="right")
+        self._btn(fila, "Copiar detalle",
+                  lambda: self._copiar_texto(texto)).pack(side="right", padx=8)
+
+    def _copiar_texto(self, texto: str) -> None:
+        try:
+            from cofre.clipboard import copy_text
+            copy_text(texto)
+            self.set_foot("detalle copiado al portapapeles")
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo copiar: {exc}")
+
     def open_settings(self) -> None:
         win = self._sheet("Ajustes")
         win.geometry("560x380")
@@ -2782,6 +2943,20 @@ class CofreGUI:
         if not self.selected or not self.session:
             self.set_foot("no hay selección")
             return
+        # 2.3: la politica se aplica tambien al boton de la GUI y a la paleta
+        from cofre import policy as _policy
+        meta = dict(self.vault.meta(self.selected) or {})
+        permitido, motivo = _policy.allowed(meta, "clipboard")
+        if not permitido:
+            self.set_foot(motivo)
+            return
+        if _policy.needs_confirm(meta):
+            if not self._confirmar_accion(
+                    "Confirmar copia",
+                    f"'{self.selected}' esta marcado como sensible. Se va a "
+                    "copiar el valor al portapapeles.",
+                    "Copiar"):
+                return
         try:
             value = self.vault.get(self.session, self.selected)
         except Exception as exc:

@@ -129,6 +129,21 @@ def main() -> int:
     check("H4 Escape con cofre cerrado no cierra la ventana",
           calls["close"] == 0, f"cierres: {calls['close']}")
 
+    # 6.4: Ctrl+K abre la paleta; escribir y Enter ejecuta la accion
+    app.session = b"x" * 32
+    llamadas_paleta = []
+    app.open_health = lambda: llamadas_paleta.append("salud")
+    app._comprobar_salud = lambda: llamadas_paleta.append("comprobar")
+    app.open_palette()
+    paleta = getattr(app, "_palette", None)
+    if paleta is not None:
+        paleta.entrada.insert(0, "comprobar salud")
+        paleta._refrescar()
+        paleta.ejecutar()
+    check("6.4 la paleta busca y ejecuta con Enter",
+          llamadas_paleta == ["salud", "comprobar"],
+          f"llamadas: {llamadas_paleta}")
+
     app.root.destroy()
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)}/{len(results)} comprobaciones OK")
