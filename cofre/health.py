@@ -159,6 +159,9 @@ def revisar(store, master: bytes, verificar: bool = True,
         if tipo in SIN_VALOR:
             continue
         proveedor_nombre = str(meta.get("provider") or "")
+        if not proveedor_nombre and isinstance(meta.get("verify"), dict):
+            # 5.5: con la comprobacion configurada y sin proveedor, es el generico
+            proveedor_nombre = "generic"
         resultado = None
         error = ""
         if verificar and proveedor_nombre and tipo != "private_key":

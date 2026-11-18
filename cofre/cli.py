@@ -195,6 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="id de la GitHub App (para las referencias @app)")
     mta.add_argument("--installation", default="",
                      help="id de la instalación de la GitHub App")
+    mta.add_argument("--verify", default="",
+                     help='comprobacion para Salud en JSON: url, header, prefix, ok')
 
     rt = with_common(sub.add_parser("rotate", help="rotar un token de un proveedor"))
     rt.add_argument("name")
@@ -1375,6 +1377,28 @@ def main(argv: list[str]) -> int:
         if args.installation:
             meta["installation_id"] = args.installation
             cambios.append("installation=" + args.installation)
+        if args.verify:
+            import json as _json
+            try:
+                cfg = _json.loads(args.verify)
+            except _json.JSONDecodeError as exc:
+                print(f"el JSON de --verify no vale: {exc}", file=sys.stderr)
+                return 1
+            if not isinstance(cfg, dict):
+                print("--verify espera un objeto JSON", file=sys.stderr)
+                return 1
+            permitidas = {"method", "url", "header", "prefix", "ok", "json_ok",
+                          "expires", "manual_url", "body"}
+            raras = sorted(set(cfg) - permitidas)
+            if raras:
+                print("claves no válidas en --verify: " + ", ".join(raras),
+                      file=sys.stderr)
+                return 1
+            if not str(cfg.get("url") or "").startswith("http"):
+                print("--verify necesita una url http(s) en 'url'", file=sys.stderr)
+                return 1
+            meta["verify"] = cfg
+            cambios.append("verify=" + str(cfg.get("url")))
         if args.admin:
             etiquetas = [t for t in meta.get("tags", []) if t != "admin"] + ["admin"]
             meta["tags"] = etiquetas
