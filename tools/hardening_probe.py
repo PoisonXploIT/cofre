@@ -93,7 +93,7 @@ def main() -> int:
         check("H13 registro vacío falla cerrado", False,
               "se autorizo un pendrive sin registro")
     except (StickNotRegistered, GateUnavailable) as exc:
-        check("H13 registro vacío falla cerrado", "no hay ningun pendrive autorizado" in str(exc),
+        check("H13 registro vacío falla cerrado", "no hay ningún pendrive autorizado" in str(exc),
               str(exc)[:80])
 
     # H13: un registro corrupto tampoco abre la puerta

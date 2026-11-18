@@ -15,7 +15,7 @@ Lo que aplica:
     oculta solo a los 15 s ("Fijar" evita la auto-ocultacion);
   - Copiar escribe en el portapapeles real de Windows (avisa: cualquier
     proceso de la sesión puede leerlo);
-  - los secretos no se escriben en ningun fichero de la interfaz;
+  - los secretos no se escriben en ningún fichero de la interfaz;
   - cada accion queda en .cofre-access.log (nombre y gate, nunca el valor).
 """
 
@@ -272,6 +272,39 @@ class CofreGUI:
         boton.set_enabled = set_enabled
         return boton
 
+    def _draw_pill(self) -> None:
+        """Pildora redondeada: fondo ok_bg, texto corto y punto de estado."""
+        if not hasattr(self, "pill"):
+            return
+        from cofre import widgets as W
+        abierto = bool(self.session)
+        fondo = COLORS["ok_bg"] if abierto else COLORS["raised"]
+        color = COLORS["ok_fg"] if abierto else COLORS["muted"]
+        texto = self.status_var.get()
+        self.pill.delete("all")
+        ancho = max(120, self.f_sub.measure(texto) + 46)
+        self._pill_ancho = ancho
+        self.pill.configure(width=ancho)
+        W.round_rect(self.pill, 1, 1, ancho - 1, 27, 13, fill=fondo, outline="")
+        self.pill.create_oval(11, 11, 19, 19,
+                              fill=COLORS["ok"] if abierto else COLORS["faint"],
+                              outline="")
+        self.pill.create_text(27, 14, text=texto, anchor="w", fill=color,
+                              font=self.f_sub)
+
+    def _actualizar_pildora_tiempo(self) -> None:
+        """'Abierto · llave E: · se bloquea en 9:42'."""
+        base = getattr(self, "_pill_texto", "Abierto")
+        if self.session_obj is not None:
+            try:
+                resta = max(0, int(self.session_obj.settings["idle_minutes"] * 60
+                                   - self.session_obj.idle_seconds()))
+                base += f" · se bloquea en {resta // 60}:{resta % 60:02d}"
+            except Exception:
+                pass
+        self.status_var.set(base)
+        self._draw_pill()
+
     def _placeholder(self, texto: str, entry, var) -> None:
         """Texto de ayuda gris dentro del campo, que desaparece al escribir."""
         if var.get():
@@ -310,19 +343,19 @@ class CofreGUI:
         tk.Label(top, text="COFRE", fg=FG, font=self.f_title, bg=PANEL).pack(side="left")
 
 
-        self.status_var = tk.StringVar(value="cerrado")
-        pill = tk.Frame(top, bg=PANEL2, highlightthickness=1, highlightbackground=LINE)
-        pill.pack(side="right", padx=(0, 8))
-        self.pill_dot = tk.Canvas(pill, width=10, height=10, bg=PANEL2,
-                                  highlightthickness=0, bd=0)
-        self.pill_dot.pack(side="left", padx=(12, 0))
-        self._dot = self.pill_dot.create_oval(2, 2, 9, 9, fill=WARN, outline="")
-        self.status_label = tk.Label(pill, textvariable=self.status_var, fg=FG,
-                                     bg=PANEL2, font=self.f_sub)
-        self.status_label.pack(side="left", padx=(8, 12), pady=6)
+        # E7: pildora redondeada y verde, con texto corto, a la izquierda de
+        # los botones: pildora, Bloquear, Nuevo.
+        self.status_var = tk.StringVar(value="Cerrado")
+        self.pill = tk.Canvas(top, height=28, bg=PANEL, highlightthickness=0, bd=0)
+        self.pill.pack(side="left", padx=(10, 12))
+        self._pill_ancho = 250
+        self.pill.configure(width=self._pill_ancho)
+        self.status_label = None
+        self._draw_pill()
+
+        self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 10))
         self._btn(top, "Nuevo", self._focus_new, accent=True).pack(side="right",
                                                                    padx=(0, 0))
-        self._btn(top, "Bloquear", self.lock).pack(side="right", padx=(0, 10))
         # E4: el buscador vive en la cabecera, no en la lista
         self.query_var = tk.StringVar()
         caja_buscar = tk.Frame(top, bg=PANEL2, highlightthickness=1,
@@ -412,8 +445,10 @@ class CofreGUI:
         seccion("Vigilar")
         entrada("atencion", "Atención", lambda: self.set_filtro("atencion"),
                 punto=WARN)
-        entrada("rotacion", "Rotación pendiente", lambda: self.set_filtro("rotacion"))
-        entrada("caducan", "Caducan pronto", lambda: self.set_filtro("caducan"))
+        entrada("caducan", "Caducan pronto", lambda: self.set_filtro("caducan"),
+                punto=COLORS["rot_fg"])
+        entrada("rotación", "Rotación pendiente", lambda: self.set_filtro("rotación"),
+                punto=COLORS["rot_fg"])
         entrada("papelera", "Papelera", lambda: self.set_filtro("papelera"))
 
         sistema = tk.Frame(left, bg=PANEL)
@@ -624,7 +659,7 @@ class CofreGUI:
         self.show_val_btn = None
         self._ver_frame = None
 
-        tk.Frame(right, bg=LINE, height=1).pack(fill="x", padx=16, pady=12)
+        # (sin raya decorativa: separa el aire, no una linea)
 
         # E6: el alta vive en una hoja (cofre/entry_sheet.py). Aqui solo quedan
         # las variables de estado que usan otros sitios del código.
@@ -719,9 +754,10 @@ class CofreGUI:
 
     def set_status(self, text, warn=False):
         self.status_var.set(text)
-        self.status_label.configure(fg=FG)
+        self._draw_pill()
         try:
-            self.pill_dot.itemconfigure(self._dot, fill=WARN if warn else OK)
+            if warn:
+                self.pill.configure(bg=PANEL)
         except Exception:
             pass
 
@@ -731,9 +767,22 @@ class CofreGUI:
         for i, lab in enumerate(self.log_labels):
             lab.configure(text=entries[i] if i < len(entries) else "")
 
-    def set_foot(self, text):
+    def set_foot(self, text, ttl: int = 8000):
+        """Aviso breve en el pie. Se borra solo, o al cambiar de estado."""
         self.foot_var.set(text)
         self.refresh_log()
+        if getattr(self, "_foot_id", None):
+            try:
+                self.root.after_cancel(self._foot_id)
+            except Exception:
+                pass
+            self._foot_id = None
+        if ttl:
+            self._foot_id = self.root.after(ttl, self._clear_foot)
+
+    def _clear_foot(self) -> None:
+        self._foot_id = None
+        self.foot_var.set("")
 
     def stick_report(self) -> list[dict]:
         """Pendrives autorizados, con letra, rol y si estan conectados ahora."""
@@ -794,8 +843,9 @@ class CofreGUI:
                 pin=pin)
         except (GateUnavailable, EOFError) as exc:
             self.session = None
-            self.set_status("cerrado: conecta el pendrive y pulsa Reconectar", warn=True)
-            self.set_foot("gate cerrado: " + (str(exc) if str(exc) else "no se ha encontrado COFRE.KEY"))
+            self._pill_texto = "Cerrado"
+            self.set_status("Cerrado", warn=True)
+            self.set_foot("conecta un pendrive del cofre y pulsa Reconectar", ttl=0)
             record(self.vault_path, "gui-gate", self.gate, None, ok=False, detail=str(exc))
             self.refresh_sticks()
             self.refresh_wizard()
@@ -830,7 +880,14 @@ class CofreGUI:
                     bind_store(self.vault._v2store())
             except Exception:
                 pass
-            from cofre.audit import verify_vault
+            from cofre.audit import auto_seal, verify_vault
+            try:
+                if self.vault.is_v2():
+                    store = self.vault._v2store()
+                    if store.master is not None:
+                        auto_seal(store, store.master)
+            except Exception:
+                pass
             _ok, _det = verify_vault(self.vault)
             if not _ok:
                 self.set_foot(f"AVISO: el registro de accesos no cuadra: {_det}")
@@ -848,15 +905,17 @@ class CofreGUI:
         if getattr(self, "stick", None):
             # llave suelta: se avisa, porque el auto-bloqueo por pendrive no
             # puede funcionar con un fichero que no esta en un volumen
-            self.set_status(f"abierto  |  llave de prueba: fichero  |  {n} secreto(s)",
-                            warn=True)
+            self._pill_texto = "Abierto · llave de prueba"
+            self.set_status(self._pill_texto, warn=True)
             try:
                 record(self.vault_path, "gate-explicit", self.gate, self.serial,
                        ok=True, detail="stick-explicito")
             except Exception:
                 pass
         else:
-            self.set_status(f"abierto  |  llave: {which}  |  {n} secreto(s)", warn=False)
+            self._pill_texto = f"Abierto · llave {which.split(' ')[0]}"
+            self._actualizar_pildora_tiempo()
+            self.set_foot("listo", ttl=0)
         self.refresh_sticks()
         self.refresh_wizard()
         self.refresh_list()
@@ -893,7 +952,9 @@ class CofreGUI:
         self.refresh_list()
         self.refresh_wizard()
         self._update_detail_visible()
-        self.set_status("bloqueado  |  la llave ya no esta en memoria", warn=True)
+        self._pill_texto = "Cerrado"
+        self.set_status("Cerrado", warn=True)
+        self._clear_foot()
         if getattr(self, "lock_screen", None):
             texto = motivo or "la llave ya no esta en memoria. Conecta un pendrive "
             self.lock_screen.mostrar(texto)
@@ -955,7 +1016,7 @@ class CofreGUI:
             return
         for n in names:
             meta = self.vault.meta(n) or {}
-            proveedor = str(meta.get("provider") or "")
+            proveedor = str(meta.get("provider") or "") or self._proveedor_por_nombre(n)
             try:
                 sitio = (self.vault.urls(n) or [""])[0]
             except Exception:
@@ -1004,7 +1065,7 @@ class CofreGUI:
                        if m.get("type") in ("api_key", "api_token", "oauth_app", "private_key")),
             "note": sum(1 for m in metas.values() if m.get("type") == "note"),
             "atencion": sum(1 for n, m in metas.items() if self._necesita_atencion(n, m)),
-            "rotacion": sum(1 for m in metas.values() if self._rotacion_pendiente(m)),
+            "rotación": sum(1 for m in metas.values() if self._rotación_pendiente(m)),
             "caducan": sum(1 for m in metas.values() if self._caduca_pronto(m)),
             "papelera": 0,
         }
@@ -1012,6 +1073,18 @@ class CofreGUI:
             valor = cuentas.get(clave, 0)
             etiqueta.configure(text=str(valor) if valor else "",
                                fg=WARN if (clave == "atencion" and valor) else FAINT)
+
+    def _proveedor_por_nombre(self, nombre: str) -> str:
+        """Heuristica por prefijo: CF_ -> cloudflare, GH_ -> github..."""
+        prefijos = {"CF_": "cloudflare", "CLOUDFLARE": "cloudflare",
+                    "GH_": "github", "GITHUB": "github",
+                    "GOOGLE": "google", "GCP_": "google",
+                    "AWS_": "aws", "AZURE": "azure", "OPENAI": "openai"}
+        arriba = nombre.upper()
+        for prefijo, proveedor in prefijos.items():
+            if arriba.startswith(prefijo):
+                return proveedor
+        return ""
 
     def _chip_de(self, nombre: str, meta: dict) -> tuple[str, str] | None:
         """Solo etiquetas que piden atencion: si esta sano, sin etiqueta."""
@@ -1024,7 +1097,7 @@ class CofreGUI:
                     return (f"caduca en {max(dias, 0)} d", "rot")
             except Exception:
                 pass
-        if self._rotacion_pendiente(meta):
+        if self._rotación_pendiente(meta):
             return ("rotar", "rot")
         try:
             if not self.vault.urls(nombre) and str(meta.get("type")) != "note":
@@ -1251,7 +1324,7 @@ class CofreGUI:
         drives = sorted(self._key_drives())
         if st == "no-key":
             self.wizard_msg.set(
-                "No hay COFRE.KEY en ningun volumen. Conecta el pendrive y "
+                "No hay COFRE.KEY en ningún volumen. Conecta el pendrive y "
                 "pulsa 'Crear llave' (se escriben 32 bytes aleatorios en el USB).")
             if self.detail_name.winfo_manager():
                 self.wizard.pack(fill="x", padx=16, pady=(12, 4),
@@ -1481,7 +1554,7 @@ class CofreGUI:
         ("5. Usarla en un programa", [
             "Pulsa 'Comando exec' y pega en la terminal.",
             "Queda así: run.cmd exec --name TAVILY_API_KEY -- python script.py",
-            "La clave va dentro de ese proceso, no a ningun fichero.",
+            "La clave va dentro de ese proceso, no a ningún fichero.",
             "Cuando el proceso termina, la clave desaparece con el.",
         ]),
         ("6. Terminar", [
@@ -1546,8 +1619,8 @@ class CofreGUI:
             return tipo == "note"
         if f == "atencion":
             return self._necesita_atencion(nombre, meta)
-        if f == "rotacion":
-            return self._rotacion_pendiente(meta)
+        if f == "rotación":
+            return self._rotación_pendiente(meta)
         if f == "caducan":
             return self._caduca_pronto(meta)
         return True
@@ -1563,7 +1636,7 @@ class CofreGUI:
         except Exception:
             return False
 
-    def _rotacion_pendiente(self, meta: dict) -> bool:
+    def _rotación_pendiente(self, meta: dict) -> bool:
         cada = meta.get("rotate_every_days")
         if not cada:
             return False
@@ -1580,7 +1653,7 @@ class CofreGUI:
             sin_sitio = not self.vault.urls(nombre)
         except Exception:
             sin_sitio = True
-        return (self._rotacion_pendiente(meta) or self._caduca_pronto(meta)
+        return (self._rotación_pendiente(meta) or self._caduca_pronto(meta)
                 or (sin_sitio and str(meta.get("type")) != "note"))
 
     def open_health(self) -> None:
@@ -1606,21 +1679,21 @@ class CofreGUI:
             ("caducan en 30 d", sum(1 for m in metas.values() if self._caduca_pronto(m)),
              "rot", "caducan"),
             ("rotación pendiente", sum(1 for m in metas.values()
-                                       if self._rotacion_pendiente(m)), "rot", "rotacion"),
+                                       if self._rotación_pendiente(m)), "rot", "rotación"),
             ("secretos", len(nombres), "ok", "todos"),
         ]
         fila = tk.Frame(panel, bg=PANEL2)
         fila.pack(fill="x", pady=(12, 8))
         for titulo, valor, kind, filtro in tarjetas:
-            fondo = {"warn": WARNBG, "rot": COLORS["rot_bg"], "ok": COLORS["ok_bg"]}[kind]
-            color = {"warn": WARNFG, "rot": COLORS["rot_fg"], "ok": COLORS["ok_fg"]}[kind]
-            tarjeta = tk.Frame(fila, bg=fondo, highlightthickness=1,
-                               highlightbackground=fondo, cursor="hand2")
-            tarjeta.pack(side="left", padx=(0, 8), ipadx=10, ipady=6)
+            # tarjetas neutras: solo el numero lleva color si hay algo que mirar
+            fondo = CAMPO
+            color = {"warn": WARNFG, "rot": COLORS["rot_fg"], "ok": OK}[kind]                 if valor else MUT
+            tarjeta = tk.Frame(fila, bg=fondo, highlightthickness=0, cursor="hand2")
+            tarjeta.pack(side="left", padx=(0, 8), ipadx=12, ipady=6)
             n_lab = tk.Label(tarjeta, text=str(valor), fg=color, bg=fondo,
                              font=self.f_title)
             n_lab.pack()
-            t_lab = tk.Label(tarjeta, text=titulo, fg=color, bg=fondo,
+            t_lab = tk.Label(tarjeta, text=titulo, fg=MUT, bg=fondo,
                              font=self.f_small)
             t_lab.pack()
             for w in (tarjeta, n_lab, t_lab):
@@ -1628,14 +1701,27 @@ class CofreGUI:
                     self.set_filtro(f), self._mostrar_vista("detalle")))
 
         try:
-            from cofre.audit import verify_vault
+            from cofre.audit import pending_unsigned, verify_vault
             ok, detalle = verify_vault(self.vault)
-            texto = ("registro: OK · " if ok else "registro: PROBLEMA · ") + detalle
-            color = OK if ok else WARN
+            pendientes = pending_unsigned(self.vault)
         except Exception as exc:                      # noqa: BLE001
-            texto, color = f"registro: no se pudo verificar ({exc})", WARN
-        tk.Label(panel, text=texto, fg=color, bg=PANEL2, font=self.f_small,
-                 anchor="w", wraplength=520, justify="left").pack(fill="x")
+            ok, detalle, pendientes = False, f"no se pudo verificar ({exc})", 0
+        fila_reg = tk.Frame(panel, bg=PANEL2)
+        fila_reg.pack(fill="x", pady=(6, 0))
+        tk.Label(fila_reg, text="", fg=OK if ok else WARN, bg=PANEL2,
+                 font=(ICON_FONT, 11)).pack(side="left")
+        tk.Label(fila_reg, text="Registro íntegro" if ok else "Registro con problemas",
+                 fg=OK if ok else WARN, bg=PANEL2, font=self.f_small).pack(
+            side="left", padx=(6, 10))
+        if pendientes:
+            fila_pend = tk.Frame(panel, bg=PANEL2)
+            fila_pend.pack(fill="x", pady=(2, 0))
+            tk.Label(fila_pend, text="", fg=WARNFG, bg=PANEL2,
+                     font=(ICON_FONT, 11)).pack(side="left")
+            tk.Label(fila_pend, text=f"{pendientes} eventos sin sellar",
+                     fg=WARNFG, bg=PANEL2, font=self.f_small).pack(side="left",
+                                                                  padx=(6, 10))
+            self._text_btn(fila_pend, "Sellar", self._sellar_registro).pack(side="left")
 
         for datos in self.stick_report():
             estado = "conectada" if datos.get("present") else "no conectada"
@@ -1644,6 +1730,17 @@ class CofreGUI:
             linea = (f"llave {datos.get('drive')} · {datos.get('role')} · {estado}")
             tk.Label(panel, text=linea, fg=MUT if datos.get("present") else FAINT,
                      bg=PANEL2, font=self.f_small, anchor="w").pack(fill="x")
+
+    def _sellar_registro(self) -> None:
+        """Sellar el registro desde la vista de salud."""
+        try:
+            from cofre.audit import auto_seal
+            store = self.vault._v2store() if self.vault.is_v2() else None
+            hecho = bool(store) and auto_seal(store, store.master, forzar=True)
+        except Exception:
+            hecho = False
+        self.set_foot("registro sellado" if hecho else "no se pudo sellar")
+        self._mostrar_vista("salud")
 
     def _mostrar_vista(self, vista: str) -> None:
         """Cambia entre el detalle normal y las vistas (salud)."""
@@ -1767,7 +1864,7 @@ class CofreGUI:
         texto.pack(side="left", fill="both", expand=True, padx=XS, pady=XS)
 
         lineas = tail_human(self.vault_path, 40)
-        cuerpo = "\n".join(lineas) if lineas else "todavía no hay eventos"
+        cuerpo = chr(10).join(lineas) if lineas else "todavía no hay eventos"
         texto.insert("end", cuerpo)
         texto.configure(state="disabled")
 
@@ -2050,7 +2147,7 @@ class CofreGUI:
             self._chip(self.chips_row, texto, kind).pack(side="left", padx=(0, 6))
 
         if not sitios:
-            tk.Label(self.sites_box, text="ninguno: este secreto no se rellena en ninguna web",
+            tk.Label(self.sites_box, text="ningúno: este secreto no se rellena en ningúna web",
                      fg=FAINT, font=self.f_small, bg=PANEL2, anchor="w").pack(fill="x")
         for sitio in sitios:
             fila = tk.Frame(self.sites_box, bg=PANEL2)
@@ -2076,7 +2173,7 @@ class CofreGUI:
         if meta.get("rotate_every_days"):
             lineas.append(f"rotar cada {meta['rotate_every_days']} días")
         if meta.get("last_rotated"):
-            lineas.append(f"última rotacion: {meta['last_rotated']}")
+            lineas.append(f"última rotación: {meta['last_rotated']}")
         if not lineas:
             lineas.append("sin datos de ciclo de vida")
         for linea in lineas:

@@ -270,7 +270,7 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
     cands = _candidates(extra_paths)
     if not cands:
         raise StickNotFound(
-            f"no se encontro {KEY_FILENAME} en ningun volumen. "
+            f"no se encontró {KEY_FILENAME} en ningun volumen. "
             "Conecta el pendrive o us --stick E:\\COFRE.KEY"
         )
 
@@ -282,8 +282,8 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
         if not allow_new:
             seen = ", ".join(str(s) for _p, s, _l in cands if s is not None) or "ninguno"
             raise StickNotRegistered(
-                f"no hay ningun pendrive autorizado en {registry_path(vault_path)}. "
-                f"Se han encontrado COFRE.KEY en estos volumenes: {seen}. "
+                f"no hay ningún pendrive autorizado en {registry_path(vault_path)}. "
+                f"Se han encontrado COFRE.KEY en estos volúmenes: {seen}. "
                 "No se autorizan por defecto. Registra el tuyo: "
                 "python -m cofre.cli stick-register E:\\COFRE.KEY  (o "
                 "--allow-new-stick para aceptarlo y registrarlo ahora)"

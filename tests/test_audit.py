@@ -178,6 +178,49 @@ class TestFirmaExigible(unittest.TestCase):
         self.assertIn("faltan lineas", detalle)
 
 
+class TestSellado(unittest.TestCase):
+    """Sellado automatico: solo cuando lo pendiente es lo esperado."""
+
+    def _cofre(self):
+        from cofre.v2 import VaultV2, new_usb_slot
+        from cofre.store import open_any
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="cofre-seal-"))
+        vp = tmp / "cofre.json"
+        master = secrets.token_bytes(32)
+        VaultV2(vp).create(master, new_usb_slot(master, secrets.token_bytes(32), 1, "E", ""))
+        store = open_any(vp)
+        store._data = store._vault.load()
+        store.master = master
+        return vp, store, master
+
+    def test_sella_los_intentos_esperados(self):
+        vp, store, master = self._cofre()
+        audit.clear_key()
+        for _ in range(3):
+            audit.record(vp, "gui-gate", "usb", ok=False, detail="sin pendrive")
+        self.assertEqual(audit.pending_unsigned(vp), 3)
+        audit.set_key(master)
+        audit.bind_store(store)
+        self.assertTrue(audit.auto_seal(store, master))
+        self.assertEqual(audit.pending_unsigned(vp), 0)
+        eventos = [json.loads(l) for l in
+                   (vp.parent / ".cofre-audit.jsonl").read_text(encoding="utf-8").splitlines()]
+        sellos = [e for e in eventos if e.get("ev") == "seal"]
+        self.assertTrue(sellos and sellos[0].get("mac"), "el sello debe ir firmado")
+
+    def test_no_sella_si_hay_algo_raro(self):
+        vp, store, master = self._cofre()
+        audit.set_key(master)
+        audit.bind_store(store)
+        audit.record(vp, "get", "usb", 111, name="X")
+        # se rompe la cadena a mano: verify falla y no debe sellar
+        p = vp.parent / ".cofre-audit.jsonl"
+        p.write_text(p.read_text(encoding="utf-8").replace('"ev":"get"', '"ev":"get "'),
+                     encoding="utf-8")
+        self.assertFalse(audit.auto_seal(store, master))
+
+
 class TestCheckpoint(unittest.TestCase):
     def test_checkpoint_detecta_lineas_borradas(self):
         from cofre.crypto import Vault

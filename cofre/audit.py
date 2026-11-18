@@ -43,11 +43,16 @@ MAX_LINES = 5000
 
 # Eventos que SOLO pueden ocurrir con el cofre abierto. Si aparecen sin firma no
 # es que se escribieran con el cofre cerrado: alguien los anadio a mano.
+# Eventos que pueden ocurrir con el cofre CERRADO: un intento de apertura
+# fallido, una alerta de fallos, un rechazo del puente. Van sin firma y es
+# normal; no se confunden con manipulacion.
+EXPECTED_UNSIGNED = {"gui-gate", "alert", "bridge-reject", "check"}
+
 PRIVILEGED = {
     "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
     "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
     "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
-    "meta", "host-assign",
+    "meta", "host-assign", "seal",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -404,7 +409,7 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
             sin_firma += 1
             privilegiado = str(ev.get("ev")) in PRIVILEGED
             en_uso_real = antes_de_uso is None or int(ev.get("seq", 0)) >= antes_de_uso
-            if _KEY is not None and privilegiado and en_uso_real:
+            if _KEY is not None and privilegiado and en_uso_real                     and str(ev.get("ev")) not in EXPECTED_UNSIGNED:
                 culpables.append(f"{numero}:{ev.get('ev')}")
         elif _KEY is not None:
             esperado = hmac.new(_KEY, _canonical(ev), hashlib.sha256).hexdigest()
@@ -448,6 +453,40 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle
+
+
+def pending_unsigned(vault_path: str | Path) -> int:
+    """Eventos esperados sin firma posteriores al ultimo sello o nota firmada."""
+    eventos = _events(vault_path)
+    corte = 0
+    for ev in eventos:
+        if ev.get("ev") in ("seal", "audit-note") and ev.get("mac"):
+            corte = max(corte, int(ev.get("seq", 0)))
+    return sum(1 for ev in eventos
+               if ev.get("mac") is None and str(ev.get("ev")) in EXPECTED_UNSIGNED
+               and int(ev.get("seq", 0)) > corte)
+
+
+def auto_seal(store, master: bytes, forzar: bool = False) -> bool:
+    """Sellar el registro cuando lo pendiente es solo lo esperado.
+
+    Escribe un evento 'seal' FIRMADO que deja constancia de cuantos eventos
+    esperados habia, y actualiza el checkpoint. Si hay algo que no es esperado,
+    no sella (salvo forzar, que solo usa el boton Sellar).
+    """
+    try:
+        ok, _detalle = verify(store.path)
+        esperados = pending_unsigned(store.path)
+        if not esperados:
+            return False
+        if not ok and not forzar:
+            return False
+        record(store.path, "seal", "-", None, ok=True, actor="gui",
+               detail=f"{esperados} eventos con el cofre cerrado, sellados")
+        stamp(store, master)
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------- checkpoint

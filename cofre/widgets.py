@@ -65,11 +65,28 @@ PALETA_PROVEEDOR = ("#7AA7E8", "#5CBF8F", "#D9A955", "#C58BE0", "#E8964A",
                     "#6FC7C7", "#E07A9A", "#9FB05C")
 
 
+CONOCIDOS = {
+    "cloudflare": "#D9A955",   # ambar, como en el lienzo
+    "github": "#C58BE0",
+    "google": "#7AA7E8",
+    "aws": "#E8964A",
+    "amazon": "#E8964A",
+    "azure": "#6FC7C7",
+    "microsoft": "#6FC7C7",
+    "openai": "#5CBF8F",
+    "stripe": "#9FB05C",
+}
+
+
 def color_de_proveedor(nombre: str) -> str:
-    """Color estable por proveedor: el mismo nombre da siempre el mismo tono."""
-    if not nombre:
+    """Color estable por proveedor. Los conocidos tienen tono fijo."""
+    bajo = (nombre or "").lower()
+    for clave, color in CONOCIDOS.items():
+        if clave in bajo:
+            return color
+    if not bajo:
         return MUT
-    total = sum(ord(c) for c in nombre.lower())
+    total = sum(ord(c) for c in bajo)
     return PALETA_PROVEEDOR[total % len(PALETA_PROVEEDOR)]
 
 
