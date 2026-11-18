@@ -6,6 +6,11 @@ Comprueba, sin abrir la ventana de verdad, que:
   H3  Ctrl+C NO copia el secreto cuando el foco esta en un campo de texto.
   H4  Escape NO cierra la aplicacion: desarma confirmaciones o bloquea.
 
+No depende del foco real de Windows (que otro programa puede robar): se inyecta
+el widget que tendria el foco y se llama al manejador. Antes se usaba
+focus_set()+update() y una pasada de la bateria fallo porque el foco no estaba
+donde tocaba.
+
   python tools/gui_shortcut_probe.py
 """
 
@@ -31,19 +36,21 @@ def main() -> int:
 
     results = []
 
+    def foco(widget):
+        """Fijar que widget tendria el foco, sin depender del foco real."""
+        app.root.focus_get = lambda: widget
+
     def check(name, ok, detail=""):
         results.append((name, bool(ok), detail))
         print(f"{'OK   ' if ok else 'FALLO'}  {name}  {detail}")
 
     # 1. foco en el buscador: Ctrl+C no debe tocar el portapapeles
-    app.query_entry.focus_set()
-    app.root.update()
+    foco(app.query_entry)
     app._on_copy_shortcut(None)
     check("H3 Ctrl+C con foco en el buscador no copia", calls["copy"] == 0,
           f"llamadas a copy: {calls['copy']}")
 
-    app.query_entry.focus_set()
-    app.root.update()
+    foco(app.query_entry)
     app._on_copy_shortcut(None)
     check("H3 Ctrl+C con foco en un campo de texto no copia", calls["copy"] == 0,
           f"llamadas a copy: {calls['copy']}")
@@ -51,12 +58,10 @@ def main() -> int:
     # 2. foco en la lista (no en un campo): Ctrl+C si copia
     app.selected = "EJEMPLO"
     app.session = b"x" * 32
-    app.list_frame.focus_set()
-    app.root.update()
-    focused = app.root.focus_get()
+    foco(app.list_frame)
     app._on_copy_shortcut(None)
     check("H3 Ctrl+C con foco fuera de un campo si copia",
-          calls["copy"] >= 1, f"foco {focused.winfo_class() if focused else 'None'}, llamadas: {calls['copy']}")
+          calls["copy"] >= 1, f"llamadas: {calls['copy']}")
     app.session = None
     app.selected = None
 
@@ -88,8 +93,7 @@ def main() -> int:
     calls["copy"] = 0
     app.selected = "EJEMPLO"
     app.session = b"x" * 32
-    app.list_frame.focus_set()
-    app.root.update()
+    foco(app.list_frame)
     app._on_enter(None)
     check("R7 Enter copia el seleccionado", calls["copy"] == 1, f"copy={calls['copy']}")
 
