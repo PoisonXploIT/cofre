@@ -16,6 +16,7 @@ from cofre import firstuse
 from cofre.store import open_any
 from cofre.usb import load_registry
 from cofre.v2 import VaultV2
+from cofre.v2.recovery import new_code
 from cofre.v2.slots import open_with_recovery, open_with_stick
 
 
@@ -48,6 +49,16 @@ class TestCrear(unittest.TestCase):
         store = open_any(self.vault, material={
             "stick_key": self.clave.read_bytes(), "serial": 111, "pin": ""})
         self.assertEqual(store.names(), [])
+
+    def test_respeta_el_codigo_que_se_le_da(self):
+        codigo = new_code()
+        with mock.patch("cofre.firstuse.volume_serial", return_value=111):
+            estado = firstuse.crear_cofre(self.vault, self.drive,
+                                          clave=self.clave,
+                                          recovery_code=codigo)
+        self.assertEqual(estado["código"], codigo)
+        self.assertEqual(open_with_recovery(estado["data"], codigo)[0],
+                         estado["master"])
 
     def test_no_pisa_un_cofre_ni_una_llave(self):
         self.vault.write_text("{}", encoding="utf-8")

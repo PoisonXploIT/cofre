@@ -285,6 +285,102 @@ class Chip(tk.Canvas):
 
 # ---------------------------------------------------------------- campo
 
+class Segmented(tk.Frame):
+    """Control segmentado: varias opciones, la elegida en laton."""
+
+    def __init__(self, parent, variable, opciones, etiquetas=None,
+                 bg: str | None = None):
+        self._bg = bg or str(parent.cget("bg"))
+        super().__init__(parent, bg=self._bg)
+        self.var = variable
+        pares = list(zip(opciones, etiquetas or opciones))
+        self._labels = []
+        for valor, texto in pares:
+            lab = tk.Label(self, text=str(texto), bg=RAISED, fg=MUTED,
+                           padx=10, pady=4, cursor="hand2", takefocus=1,
+                           highlightthickness=2,
+                           highlightbackground=RAISED,
+                           highlightcolor=ACCENT,
+                           font=_font(self, "label"))
+            lab.pack(side="left", padx=(0, 2))
+            lab.bind("<Button-1>", lambda _e, v=valor: self._elegir(v))
+            lab.bind("<Return>", lambda _e, v=valor: self._elegir(v))
+            lab.bind("<space>", lambda _e, v=valor: self._elegir(v))
+            self._labels.append((str(valor), lab))
+        try:
+            variable.trace_add("write", lambda *_: self._pintar())
+        except Exception:
+            pass
+        self._pintar()
+
+    def _elegir(self, valor) -> None:
+        self.var.set(str(valor))
+
+    def _pintar(self) -> None:
+        for valor, lab in self._labels:
+            elegido = str(self.var.get()) == valor
+            lab.configure(bg=ACCENT if elegido else RAISED,
+                          fg=ON_ACCENT if elegido else MUTED,
+                          highlightbackground=ACCENT if elegido else RAISED)
+
+
+class Switch(tk.Canvas):
+    """Interruptor propio: pista redondeada y bolita, sin el cuadro de Tk."""
+
+    def __init__(self, parent, variable, bg: str | None = None):
+        self._bg = bg or str(parent.cget("bg"))
+        self.var = variable
+        super().__init__(parent, width=48, height=26, bg=self._bg,
+                         highlightthickness=2, highlightbackground=self._bg,
+                         highlightcolor=ACCENT, takefocus=1, bd=0)
+        self.bind("<Button-1>", self._toggle)
+        self.bind("<Return>", self._toggle)
+        self.bind("<space>", self._toggle)
+        try:
+            variable.trace_add("write", lambda *_: self._pintar())
+        except Exception:
+            pass
+        self._pintar()
+
+    def _toggle(self, _e=None) -> None:
+        self.var.set(not bool(self.var.get()))
+
+    def _pintar(self) -> None:
+        self.delete("all")
+        encendido = bool(self.var.get())
+        round_rect(self, 3, 4, 45, 22, 9,
+                   fill=ACCENT if encendido else BORDER_STRONG, outline="")
+        x = 33 if encendido else 15
+        self.create_oval(x - 8, 5, x + 8, 21, fill=ON_ACCENT, outline="")
+
+
+class CodeGrid(tk.Frame):
+    """Cuadricula numerada 5x5 del codigo de recuperacion.
+
+    Se lee y se copia a mano sin perderse: cada celda lleva su numero y la
+    palabra en mono grande. No hay boton de copiar: el portapapeles guarda
+    historial y puede sincronizarse.
+    """
+
+    def __init__(self, parent, codigo: str, bg: str | None = None):
+        self._bg = bg or str(parent.cget("bg"))
+        super().__init__(parent, bg=self._bg)
+        self._f_num = _font(self, "label")
+        self._f_word = tkfont.Font(font=_font(self, "mono"))
+        self._f_word.configure(size=15, weight="bold")
+        partes = str(codigo or "").split()
+        for columna in range(5):
+            self.columnconfigure(columna, weight=1)
+        for indice, palabra in enumerate(partes[:25]):
+            fila, columna = divmod(indice, 5)
+            celda = tk.Frame(self, bg=C["card"], padx=8, pady=6)
+            celda.grid(row=fila, column=columna, padx=3, pady=3, sticky="nsew")
+            tk.Label(celda, text=str(indice + 1), fg=C["muted"],
+                     bg=C["card"], font=self._f_num, anchor="w").pack(fill="x")
+            tk.Label(celda, text=palabra, fg=C["text"], bg=C["card"],
+                     font=self._f_word, anchor="w").pack(fill="x")
+
+
 class Field(tk.Frame):
     """Entrada de texto con marco redondeado y anillo al enfocar."""
 

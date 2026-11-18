@@ -75,7 +75,9 @@ def main() -> int:
             pila.append(hijo)
             if not hijo.winfo_ismapped() or pw <= 1:
                 continue
-            if hijo.winfo_x() + hijo.winfo_width() > pw + 1:
+            ph = padre.winfo_height()
+            if (hijo.winfo_x() + hijo.winfo_width() > pw + 1
+                    or hijo.winfo_y() + hijo.winfo_height() > ph + 1):
                 fuera.append(hijo.winfo_class())
     print(f"asistente: {len(fuera)} widgets fuera de su padre")
     ruta2 = captura(win, "cofre_6_8_codigo.png")

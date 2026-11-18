@@ -10,9 +10,28 @@ la ranura de un serial; nunca deja el cofre sin ninguna llave.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from cofre.v2.recovery import check_code, new_code
 from cofre.v2.slots import SlotError, new_recovery_slot, open_with_recovery
+
+
+def fecha_humana(texto, ahora: datetime | None = None) -> str:
+    """Fecha del log en lenguaje normal: hoy 18:49, ayer, hace 3 días..."""
+    ahora = ahora or datetime.now()
+    try:
+        cuando = datetime.fromisoformat(str(texto))
+    except (TypeError, ValueError):
+        return str(texto or "")
+    hoy = ahora.date()
+    if cuando.date() == hoy:
+        return f"hoy {cuando:%H:%M}"
+    if cuando.date() == hoy - timedelta(days=1):
+        return f"ayer {cuando:%H:%M}"
+    dias = (hoy - cuando.date()).days
+    if 0 < dias < 7:
+        return f"hace {dias} días"
+    return cuando.strftime("%d/%m/%Y %H:%M")
 
 
 def reporte(data: dict, registry: dict, presentes: dict,

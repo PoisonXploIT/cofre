@@ -439,6 +439,7 @@ class CofreGUI:
                 punto_lab.pack(side="left", padx=(2, 4))
                 self.nav_dots[clave] = punto_lab
             b = self._text_btn(fila, texto, comando, alinear="w")
+            b.label.configure(pady=1)
             b.pack(side="left", fill="x", expand=True)
             self.nav_btns[clave] = b
             if contador:
@@ -466,7 +467,10 @@ class CofreGUI:
         entrada("papelera", "Papelera", lambda: self.set_filtro("papelera"))
 
         sistema = tk.Frame(left, bg=PANEL)
-        sistema.pack(side="bottom", fill="x", pady=(0, 8))
+        # antes que el bloque expandible: si no, el fondo de la columna se
+        # queda sin altura y las entradas de Sistema salen cortadas (lo cazó
+        # layout_check al medir el alto, no solo el ancho)
+        sistema.pack(side="bottom", fill="x", pady=(0, 8), before=nav)
 
         def seccion_sistema(titulo: str) -> None:
             tk.Label(sistema, text=titulo.upper(), fg=FAINT, font=self.f_small,
@@ -476,6 +480,7 @@ class CofreGUI:
             fila = tk.Frame(sistema, bg=PANEL)
             fila.pack(fill="x", padx=12, pady=1)
             b = self._text_btn(fila, texto, comando, alinear="w")
+            b.label.configure(pady=1)
             b.pack(side="left", fill="x", expand=True)
             self.nav_btns[clave] = b
 
@@ -2132,7 +2137,7 @@ class CofreGUI:
         cab = tk.Frame(win, bg=PANEL)
         cab.pack(fill="x", padx=14, pady=(12, 4))
         tk.Label(cab, text="Llaves del cofre", fg=FG, bg=PANEL,
-                 font=self.f_sub, anchor="w").pack(side="left")
+                 font=self.f_title, anchor="w").pack(side="left")
         self._btn(cab, "Añadir pendrive",
                   lambda e: self._add_pendrive(win)).pack(side="right")
         self._btn(cab, "Nuevo código",
@@ -2153,10 +2158,10 @@ class CofreGUI:
                      fg=WARN, bg=PANEL, font=self.f_body).pack(anchor="w")
         for datos in llaves:
             self._fila_llave(filas, datos, win)
-        tk.Label(win, text="Dar de baja un pendrive lo saca del cofre. Si haces "
-                           "rekey, cambia la clave maestra: las copias viejas "
-                           "dejan de abrir con la nueva y los pendrives no "
-                           "conectados se quedan fuera.",
+        tk.Label(win, text="Dar de baja un pendrive lo saca del cofre. Si "
+                           "cambias la clave maestra, las copias viejas dejan "
+                           "de abrir con la nueva y los pendrives no conectados "
+                           "se quedan fuera.",
                  fg=FAINT, bg=PANEL, font=self.f_small, anchor="w",
                  wraplength=720, justify="left").pack(fill="x", padx=14)
         self._btn(win, "Cerrar", win.destroy).pack(pady=(8, 12))
@@ -2179,39 +2184,51 @@ class CofreGUI:
                                 load_registry(self.vault_path), presentes,
                                 _events(self.vault_path))
 
+    def _fecha_humana(self, texto: str) -> str:
+        from cofre import keys as keys_mod
+        return keys_mod.fecha_humana(texto)
+
     def _fila_llave(self, parent, datos: dict, win) -> None:
+        from cofre import widgets as W
         caja = tk.Frame(parent, bg=CAMPO)
         caja.pack(fill="x", pady=3)
         kind = str(datos.get("kind") or "")
+        icono = tk.Canvas(caja, width=34, height=34, bg=CAMPO,
+                          highlightthickness=0)
+        icono.pack(side="left", padx=(8, 4), pady=6)
         if kind == "recovery":
+            icono.create_text(17, 17, text="", fill=MUT,
+                              font=(ICON_FONT, 15))
             tk.Label(caja, text="Código de recuperación en papel", fg=FG,
-                     bg=CAMPO, font=self.f_body, anchor="w").pack(
-                side="left", padx=8, pady=6)
-            tk.Label(caja, text="25 palabras · no se puede leer desde aquí",
-                     fg=MUT, bg=CAMPO, font=self.f_small).pack(side="left")
+                     bg=CAMPO, font=self.f_body, anchor="w").pack(side="left")
+            W.Chip(caja, "Papel", "neutral", bg=CAMPO).pack(side="right",
+                                                            padx=8)
             return
         if kind == "huerfano":
+            icono.create_text(17, 17, text="", fill=WARN,
+                              font=(ICON_FONT, 15))
             tk.Label(caja, text=f"{datos.get('drive') or '?'} · registro sin ranura",
                      fg=WARN, bg=CAMPO, font=self.f_body, anchor="w").pack(
-                side="left", padx=8, pady=6)
+                side="left")
+            W.Chip(caja, "Sin ranura", "warn", bg=CAMPO).pack(side="right",
+                                                              padx=8)
             return
         serial = datos.get("serial")
         actual = str(serial) == str(self.serial)
-        titulo = (f"{datos.get('drive') or 'sin letra'} · "
-                  f"{datos.get('role') or datos.get('label') or 'pendrive'} "
-                  f"· serial {serial}")
-        estado = "conectada" if datos.get("connected") else "no conectada"
+        conectada = bool(datos.get("connected"))
+        registrada = bool(datos.get("registered"))
         if actual:
-            estado += " · abierta ahora"
-        if not datos.get("registered"):
-            estado += " · SIN REGISTRAR"
-        ultimo = str(datos.get("last") or "")
-        pie = (f"{estado} · último uso: {ultimo}" if ultimo
-               else f"{estado} · sin uso registrado")
-        tk.Label(caja, text=titulo, fg=FG, bg=CAMPO, font=self.f_body,
-                 anchor="w").pack(side="left", padx=8, pady=(6, 0))
-        tk.Label(caja, text=pie, fg=MUT, bg=CAMPO, font=self.f_small,
-                 anchor="w").pack(side="left")
+            estado, tipo = "Abierta ahora", "info"
+        elif conectada:
+            estado, tipo = "Conectada", "ok"
+        elif not registrada:
+            estado, tipo = "Sin registrar", "warn"
+        else:
+            estado, tipo = "No conectada", "neutral"
+        icono.create_text(17, 17, text="",
+                          fill=ACC if (conectada or actual) else MUT,
+                          font=(ICON_FONT, 15))
+        W.Chip(caja, estado, tipo, bg=CAMPO).pack(side="right", padx=(8, 6))
         if actual:
             self._text_btn(
                 caja, "Es la llave abierta",
@@ -2223,6 +2240,18 @@ class CofreGUI:
                 caja, "Dar de baja",
                 lambda s=serial, w=win: self._baja_pendrive(int(s), w),
                 danger=True).pack(side="right", padx=8)
+        texto = tk.Frame(caja, bg=CAMPO)
+        texto.pack(side="left", fill="x", expand=True)
+        titulo = (f"{datos.get('drive') or 'sin letra'} · "
+                  f"{datos.get('role') or datos.get('label') or 'pendrive'} "
+                  f"· serial {serial}")
+        tk.Label(texto, text=titulo, fg=FG, bg=CAMPO, font=self.f_body,
+                 anchor="w").pack(fill="x")
+        ultimo = str(datos.get("last") or "")
+        pie = ("último uso: " + self._fecha_humana(ultimo)
+               if ultimo else "sin uso registrado")
+        tk.Label(texto, text=pie, fg=MUT, bg=CAMPO, font=self.f_small,
+                 anchor="w").pack(fill="x")
 
     def _baja_pendrive(self, serial: int, win_keys) -> None:
         if not self.session:
@@ -2244,10 +2273,10 @@ class CofreGUI:
                  wraplength=600, justify="left").pack(fill="x", padx=18,
                                                       pady=(16, 6))
         tk.Label(win, text="Ese pendrive dejará de abrir el cofre. Si eliges "
-                           "rekey, también cambia la clave maestra: las copias "
-                           "viejas no se abrirán con la nueva y los pendrives "
-                           "que no estén conectados se quedarán fuera. El rekey "
-                           "cierra el tramo del registro y empieza otro.",
+                           "cambiar la clave maestra, las copias viejas no se "
+                           "abrirán con la nueva y los pendrives que no estén "
+                           "conectados se quedarán fuera. El cambio cierra el "
+                           "tramo del registro y empieza otro.",
                  fg=MUT, bg=PANEL, font=self.f_body, anchor="w",
                  wraplength=600, justify="left").pack(fill="x", padx=18)
         fila = tk.Frame(win, bg=PANEL)
@@ -2267,7 +2296,7 @@ class CofreGUI:
             self._rekey_gui(f"baja de {donde}")
 
         self._btn(fila, "Cancelar", win.destroy).pack(side="right")
-        self._btn(fila, "Dar de baja y rekey", con_rekey,
+        self._btn(fila, "Dar de baja y cambiar la clave", con_rekey,
                   accent=True).pack(side="right", padx=8)
         self._btn(fila, "Solo dar de baja", solo,
                   danger=True).pack(side="right", padx=8)
@@ -2299,7 +2328,7 @@ class CofreGUI:
         material = getattr(self.vault, "_material", {}) or {}
         stick = str(material.get("stick_path") or "")
         if not stick:
-            self.set_foot("sin el pendrive actual no se puede hacer rekey desde aquí")
+            self.set_foot("sin el pendrive actual no se puede cambiar la clave maestra")
             return
         self.set_foot("cambiando la clave maestra...")
         self.root.update_idletasks()
@@ -2332,15 +2361,15 @@ class CofreGUI:
                 self.refresh_list()
                 self.refresh_detail()
                 self._escribir_calendario()
-                self.set_foot("rekey hecho; el pendrive actual sigue abriendo")
+                self.set_foot("clave maestra cambiada; el pendrive actual sigue abriendo")
             except Exception as exc:               # noqa: BLE001
-                self.set_foot(f"rekey hecho, pero no se pudo reabrir: {exc}. "
+                self.set_foot(f"clave maestra cambiada, pero no se pudo reabrir: {exc}. "
                               "Bloquea y abre de nuevo")
-                self.lock(motivo="rekey", detalle="reabrir con el pendrive",
+                self.lock(motivo="cambio de clave", detalle="reabrir con el pendrive",
                           sin_evento=True)
         else:
-            self.set_foot("el rekey falló; el cofre sigue como estaba")
-        self._mostrar_salida("Rekey del cofre", salida.strip())
+            self.set_foot("no se pudo cambiar la clave maestra; el cofre sigue como estaba")
+        self._mostrar_salida("Cambiar la clave maestra", salida.strip())
 
     def _add_pendrive(self, win_keys) -> None:
         material = getattr(self.vault, "_material", {}) or {}
@@ -2445,24 +2474,20 @@ class CofreGUI:
 
     def _mostrar_codigo(self, codigo: str) -> None:
         win = self._sheet("Código de recuperación nuevo")
-        win.geometry("660x320")
+        win.geometry("700x460")
         tk.Label(win, text="Apunta estas 25 palabras en papel",
                  fg=FG, bg=PANEL, font=self.f_title, anchor="w").pack(
             fill="x", padx=18, pady=(16, 2))
         tk.Label(win, text="Se muestran una sola vez. No se guardan en ningún "
-                           "fichero. El código anterior ya no abre.",
+                           "fichero y no hay botón de copiar: el portapapeles "
+                           "guarda historial. El código anterior ya no abre.",
                  fg=MUT, bg=PANEL, font=self.f_small, anchor="w",
-                 wraplength=620, justify="left").pack(fill="x", padx=18)
-        caja = tk.Text(win, height=5, bg=CAMPO, fg=FG, font=self.f_mono,
-                       bd=0, highlightthickness=0, wrap="word")
-        caja.pack(fill="both", expand=True, padx=18, pady=10)
-        caja.insert("end", codigo)
-        caja.configure(state="disabled")
+                 wraplength=660, justify="left").pack(fill="x", padx=18)
+        from cofre import widgets as W
+        W.CodeGrid(win, codigo, bg=PANEL).pack(fill="x", padx=18, pady=10)
         fila = tk.Frame(win, bg=PANEL)
         fila.pack(fill="x", padx=18, pady=(0, 14))
         self._btn(fila, "Cerrar", win.destroy).pack(side="right")
-        self._btn(fila, "Copiar", lambda: self._copiar_texto(codigo)).pack(
-            side="right", padx=8)
 
     def _probar_codigo(self) -> None:
         win = self._sheet("Probar el código de recuperación")
@@ -2652,10 +2677,11 @@ class CofreGUI:
         """6.7: seguridad, generador, alertas, navegador, copias y Acerca de."""
         from cofre import alerts as alerts_mod
         from cofre import settings as st
+        from cofre import widgets as W
         cfg = st.load(self.vault_path)
         alertas = alerts_mod.load_settings(self.vault_path)
         win = self._sheet("Ajustes")
-        win.geometry("840x620")
+        win.geometry("840x660")
         cab = tk.Frame(win, bg=PANEL)
         cab.pack(fill="x", padx=16, pady=(12, 2))
         tk.Label(cab, text="Ajustes", fg=FG, bg=PANEL, font=self.f_title,
@@ -2689,18 +2715,13 @@ class CofreGUI:
             entrada.pack(side="left")
             return entrada
 
-        def opcion(parent, etiqueta: str, var, valores: list[str]):
+        def segmentado(parent, etiqueta: str, var, opciones, etiquetas):
             fila = tk.Frame(parent, bg=PANEL)
             fila.pack(fill="x", pady=2)
             tk.Label(fila, text=etiqueta, fg=MUT, bg=PANEL,
                      font=self.f_small, width=34, anchor="w").pack(side="left")
-            menu = tk.OptionMenu(fila, var, *valores)
-            menu.configure(bg=CAMPO, fg=FG, activebackground=PANEL2,
-                           activeforeground=FG, relief="flat",
-                           highlightthickness=0, font=self.f_body)
-            menu["menu"].configure(bg=CAMPO, fg=FG, font=self.f_body)
-            menu.pack(side="left")
-            return menu
+            W.Segmented(fila, var, opciones, etiquetas,
+                        bg=PANEL).pack(side="left")
 
         v_idle = tk.StringVar(value=str(cfg["idle_minutes"]))
         v_max = tk.StringVar(value=str(cfg["max_hours"]))
@@ -2726,29 +2747,63 @@ class CofreGUI:
         campo(izq, "Ocultar el valor revelado (s)", v_reveal)
 
         seccion(izq, "Generador")
-        opcion(izq, "Perfil por defecto", v_perfil, ["machine", "human"])
-        opcion(izq, "Palabras", v_palabras, ["4", "6", "8"])
-        opcion(izq, "Idioma", v_idioma, ["es", "en"])
+        segmentado(izq, "Perfil por defecto", v_perfil,
+                   ["machine", "human"], ["Para máquinas", "Palabras"])
+        segmentado(izq, "Palabras", v_palabras, ["4", "6", "8"],
+                   ["4", "6", "8"])
+        segmentado(izq, "Idioma", v_idioma, ["es", "en"], ["es", "en"])
 
         seccion(izq, "Umbrales de alertas")
         campo(izq, "Lecturas para una ráfaga", v_burst)
         campo(izq, "Minutos de la ráfaga", v_bmin)
-        campo(izq, "Hora rara: desde", v_desde)
-        campo(izq, "Hora rara: hasta", v_hasta)
+        campo(izq, "Horario inusual: desde", v_desde)
+        campo(izq, "Horario inusual: hasta", v_hasta)
         campo(izq, "Pausa entre alertas (min)", v_pausa)
         campo(izq, "Fallos de apertura seguidos", v_fallos)
         campo(izq, "Horas para rotación colgada", v_rot)
 
         seccion(der, "Navegador")
-        tk.Checkbutton(der, text="Conectar el puente al abrir el cofre",
-                       variable=v_bridge, bg=PANEL, fg=FG, selectcolor=CAMPO,
-                       activebackground=PANEL, activeforeground=FG,
-                       font=self.f_body).pack(anchor="w")
-        estado_nav = "conectado" if self.browser_on else "desconectado"
-        self._btn(der, f"Navegador: {estado_nav}",
-                  lambda e: self.toggle_browser()).pack(anchor="w", pady=4)
-        self._btn(der, "Emparejar de nuevo",
-                  lambda e: self._emparejar_host()).pack(anchor="w", pady=2)
+        fila_puente = tk.Frame(der, bg=PANEL)
+        fila_puente.pack(fill="x", pady=2)
+        tk.Label(fila_puente, text="Conectar el puente al abrir el cofre",
+                 fg=MUT, bg=PANEL, font=self.f_small, anchor="w").pack(
+            side="left", fill="x", expand=True)
+        W.Switch(fila_puente, v_bridge, bg=PANEL).pack(side="right")
+
+        v_nav = tk.BooleanVar(value=bool(self.browser_on))
+        fila_nav = tk.Frame(der, bg=PANEL)
+        fila_nav.pack(fill="x", pady=(6, 2))
+        punto = tk.Canvas(fila_nav, width=12, height=12, bg=PANEL,
+                          highlightthickness=0)
+        punto.pack(side="left", padx=(0, 6))
+        estado_nav = tk.Label(fila_nav, text="", fg=MUT, bg=PANEL,
+                              font=self.f_body, anchor="w")
+        estado_nav.pack(side="left")
+        self._btn(fila_nav, "Emparejar",
+                  lambda e: self._emparejar_host()).pack(side="right",
+                                                         padx=(8, 0))
+        tk.Label(fila_nav, text="Conectar", fg=MUT, bg=PANEL,
+                 font=self.f_small).pack(side="right", padx=(0, 4))
+        W.Switch(fila_nav, v_nav, bg=PANEL).pack(side="right")
+
+        def pintar_nav() -> None:
+            conectado = bool(self.browser_on)
+            punto.delete("all")
+            punto.create_oval(2, 2, 10, 10,
+                              fill=OK if conectado else LINE, outline="")
+            estado_nav.configure(
+                text="Conectado" if conectado else "Desconectado",
+                fg=OK if conectado else MUT)
+
+        def cambiar_nav(*_a) -> None:
+            if bool(v_nav.get()) != bool(self.browser_on):
+                self.toggle_browser()
+            if bool(v_nav.get()) != bool(self.browser_on):
+                v_nav.set(bool(self.browser_on))
+            pintar_nav()
+
+        v_nav.trace_add("write", cambiar_nav)
+        pintar_nav()
 
         seccion(der, "Copias")
         fila_copia = tk.Frame(der, bg=PANEL)
@@ -2779,9 +2834,6 @@ class CofreGUI:
         seccion(der, "Emergencia")
         self._btn(der, "Botón de pánico", self.open_panic,
                   danger=True).pack(anchor="w")
-
-        pie = tk.Frame(win, bg=PANEL)
-        pie.pack(fill="x", padx=16, pady=12)
 
         def guardar() -> None:
             try:
@@ -2814,7 +2866,9 @@ class CofreGUI:
             self.set_foot("ajustes guardados")
             win.destroy()
 
-        self._btn(pie, "Guardar", guardar, accent=True).pack(side="right")
+        # Guardar arriba, junto a Cerrar: abajo se quedaba cortado
+        self._btn(cab, "Guardar", guardar, accent=True).pack(side="right",
+                                                             padx=8)
 
     def _aplicar_settings(self, cfg: dict) -> None:
         self._cfg = dict(cfg)

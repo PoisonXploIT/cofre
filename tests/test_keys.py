@@ -11,6 +11,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from datetime import datetime
+
 from cofre import keys
 from cofre.v2 import VaultV2, new_recovery_slot, new_usb_slot
 from cofre.v2.recovery import new_code
@@ -71,6 +73,17 @@ class TestReporte(Base):
         recuperacion = [f for f in filas if f["kind"] == "recovery"]
         self.assertEqual(len(recuperacion), 1)
         self.assertEqual(recuperacion[0]["label"], "recuperacion")
+
+    def test_fechas_humanas(self):
+        ahora = datetime(2026, 11, 18, 19, 0)
+        self.assertEqual(keys.fecha_humana("2026-11-18T18:49:00", ahora),
+                         "hoy 18:49")
+        self.assertEqual(keys.fecha_humana("2026-11-17T09:05:00", ahora),
+                         "ayer 09:05")
+        self.assertEqual(keys.fecha_humana("2026-11-15T10:00:00", ahora),
+                         "hace 3 días")
+        self.assertEqual(keys.fecha_humana("2026-10-01T10:00:00", ahora),
+                         "01/10/2026 10:00")
 
     def test_registro_sin_ranura_avisa(self):
         filas = keys.reporte(self.data, self.registry, self.presentes,
