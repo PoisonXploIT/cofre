@@ -103,22 +103,69 @@ class Visitante(ast.NodeVisitor):
         self.generic_visit(nodo)
 
 
-def _leer_tope() -> int | None:
-    ruta = RAIZ / "tools" / "messages_top.txt"
+TOPE = RAIZ / "tools" / "messages_top.txt"
+CARAS = ("gui", "cli")
+
+
+def leer_topes(ruta: Path | None = None) -> tuple[dict[str, int], list[str]]:
+    """Devuelve los topes y las lineas de justificacion (las que empiezan por #).
+
+    Acepta el formato viejo (un solo numero suelto): eso era el tope de la GUI.
+    """
+    topes: dict[str, int] = {}
+    notas: list[str] = []
     try:
-        return int(ruta.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return None
+        texto = (ruta or TOPE).read_text(encoding="utf-8")
+    except OSError:
+        return topes, notas
+    for linea in texto.splitlines():
+        linea = linea.strip()
+        if not linea:
+            continue
+        if linea.startswith("#"):
+            notas.append(linea)
+            continue
+        partes = linea.split()
+        if len(partes) == 2 and partes[0].lower() in CARAS and partes[1].isdigit():
+            topes[partes[0].lower()] = int(partes[1])
+        elif linea.isdigit():                    # formato viejo: solo GUI
+            topes.setdefault("gui", int(linea))
+    return topes, notas
 
 
-def _guardar_tope(valor: int) -> None:
-    (RAIZ / "tools" / "messages_top.txt").write_text(
-        str(valor) + "\n", encoding="utf-8")
+def guardar_topes(topes: dict[str, int], notas: list[str],
+                  ruta: Path | None = None) -> None:
+    lineas = [f"{cara} {topes[cara]}" for cara in CARAS if cara in topes]
+    lineas.extend(notas)
+    (ruta or TOPE).write_text("\n".join(lineas) + "\n", encoding="utf-8")
+
+
+def resolver(cara: str, valor: int, tope: int | None, motivo: str) -> tuple[int, str]:
+    """Decide que hacer con un recuento. Devuelve (tope_nuevo, estado).
+
+    Estados: creado, igual, bajado, subido, fallo.
+    """
+    if tope is None:
+        return valor, "creado"
+    if valor == tope:
+        return tope, "igual"
+    if valor < tope:
+        return valor, "bajado"
+    if motivo.strip():
+        return valor, "subido"
+    return tope, "fallo"
+
 
 
 def main(argv: list[str]) -> int:
     manual = "--max" in argv
-    tope = int(argv[argv.index("--max") + 1]) if manual else _leer_tope()
+    motivo = ""
+    if "--justificar" in argv:
+        pos = argv.index("--justificar")
+        motivo = argv[pos + 1] if pos + 1 < len(argv) else ""
+        if not motivo.strip():
+            print("FALLO: --justificar necesita un motivo entre comillas: por que sube")
+            return 2
     gui, cli = [], []
     for nombre in GUI:
         ruta = COFRE / nombre
@@ -146,21 +193,41 @@ def main(argv: list[str]) -> int:
         print("Pendientes (primeros 200):")
         for fichero, linea, texto, contexto in gui[:200]:
             print(f"  {fichero}:{linea} [{contexto}] {texto[:90]}")
-    if tope is None:
-        _guardar_tope(len(gui))
-        print(f"GUI pendientes: {len(gui)} (tope creado); "
+
+    if manual:                          # comprobacion a mano: no toca el fichero
+        tope = int(argv[argv.index("--max") + 1])
+        if len(gui) > tope:
+            print(chr(10) + f"FALLO: {len(gui)} pendientes > tope {tope}")
+            return 1
+        print(f"GUI pendientes: {len(gui)} (max {tope}, sin escribir); "
               f"CLI tecnicos en lista blanca: {len(cli)}")
         return 0
-    if len(gui) > tope:
-        print(chr(10) + f"FALLO: {len(gui)} pendientes > tope {tope}")
-        return 1
-    if not manual and len(gui) < tope:
-        _guardar_tope(len(gui))
-        print(f"tope bajado de {tope} a {len(gui)}")
-        tope = len(gui)
-    print(f"GUI pendientes: {len(gui)} (tope {tope}); "
-          f"CLI tecnicos en lista blanca: {len(cli)}")
-    return 0
+
+    topes, notas = leer_topes()
+    hoy = __import__("datetime").date.today().isoformat()
+    fallos = 0
+    for cara, valor in (("gui", len(gui)), ("cli", len(cli))):
+        antes = topes.get(cara)
+        nuevo, estado = resolver(cara, valor, antes, motivo)
+        if estado == "creado":
+            topes[cara] = nuevo
+            print(f"tope de {cara} creado en {nuevo}")
+        elif estado == "bajado":
+            topes[cara] = nuevo
+            print(f"tope de {cara} bajado de {antes} a {nuevo}")
+        elif estado == "subido":
+            notas.append(f"# {hoy} {cara} de {antes} a {nuevo}: {motivo.strip()}")
+            topes[cara] = nuevo
+            print(f"tope de {cara} subido de {antes} a {nuevo} "
+                  f"(justificado: {motivo.strip()})")
+        elif estado == "fallo":
+            fallos += 1
+            print(f"FALLO: {cara} {valor} > tope {antes}. Si es inevitable, "
+                  f"--justificar \"motivo\" y dilo en el commit.")
+    guardar_topes(topes, notas)
+    print(f"GUI pendientes: {len(gui)} (tope {topes.get('gui')}); "
+          f"CLI tecnicos: {len(cli)} (tope {topes.get('cli')})")
+    return 1 if fallos else 0
 
 
 if __name__ == "__main__":

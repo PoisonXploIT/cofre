@@ -60,3 +60,52 @@ class TestCatalogo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTrinqueteDeTextos(unittest.TestCase):
+    """2026-11-18: el tope tambien para el CLI y sin subidas silenciosas."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "tools"))
+        import messages_probe
+        self.probe = messages_probe
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-tope-"))
+        self.ruta = self.tmp / "messages_top.txt"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_lee_el_formato_viejo(self):
+        self.ruta.write_text("266\n", encoding="utf-8")
+        topes, notas = self.probe.leer_topes(self.ruta)
+        self.assertEqual(topes, {"gui": 266})
+        self.assertEqual(notas, [])
+
+    def test_lee_las_dos_caras_y_las_notas(self):
+        self.ruta.write_text("gui 265\ncli 279\n# motivo\n", encoding="utf-8")
+        topes, notas = self.probe.leer_topes(self.ruta)
+        self.assertEqual(topes, {"gui": 265, "cli": 279})
+        self.assertEqual(notas, ["# motivo"])
+
+    def test_ida_y_vuelta(self):
+        self.probe.guardar_topes({"gui": 1, "cli": 2}, ["# x"], self.ruta)
+        topes, notas = self.probe.leer_topes(self.ruta)
+        self.assertEqual(topes, {"gui": 1, "cli": 2})
+        self.assertEqual(notas, ["# x"])
+
+    def test_baja_sola(self):
+        self.assertEqual(self.probe.resolver("gui", 10, 12, ""), (10, "bajado"))
+        self.assertEqual(self.probe.resolver("cli", 10, 10, ""), (10, "igual"))
+
+    def test_sube_solo_con_motivo(self):
+        self.assertEqual(self.probe.resolver("cli", 12, 10, ""), (10, "fallo"))
+        self.assertEqual(self.probe.resolver("cli", 12, 10, "  "), (10, "fallo"))
+        self.assertEqual(self.probe.resolver("cli", 12, 10, "nuevo comando"),
+                         (12, "subido"))
+
+    def test_el_fichero_real_tiene_las_dos_caras(self):
+        topes, _notas = self.probe.leer_topes(REPO / "tools" / "messages_top.txt")
+        self.assertIn("gui", topes)
+        self.assertIn("cli", topes)
