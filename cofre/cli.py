@@ -182,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
                                     help="id, estado y caducidad de un token (sin el valor)"))
     ti.add_argument("name")
 
+    he = with_common(sub.add_parser(
+        "health", help="comprobar la salud de cada credencial con su proveedor"))
+    he.add_argument("--json", action="store_true",
+                    help="salida en JSON (sin valores)")
+
     ap = with_common(sub.add_parser("app-exec",
                                     help="ejecutar un comando con un token de GitHub App (1 h)"))
     ap.add_argument("--clave", default="GH_APP_PRIVATE_KEY",
@@ -408,7 +413,8 @@ def main(argv: list[str]) -> int:
     vault = Vault(vault_path)
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
-                  "migrate", "stick-add-v2", "check", "list", "resume"}
+                  "migrate", "stick-add-v2", "check", "list", "resume",
+                  "health"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -749,6 +755,49 @@ def main(argv: list[str]) -> int:
             record(str(vault_path), "alert", args.gate, None, name=a.rule,
                    ok=False, detail=f"{a.severity}: {a.text}"[:150])
         estado_path.write_text(json.dumps(estado.to_dict(), indent=2), encoding="utf-8")
+        return 0
+
+    if args.command == "health":
+        try:
+            _session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        if not vault.is_v2():
+            print("la salud de las credenciales necesita un cofre v2",
+                  file=sys.stderr)
+            return 1
+        store = vault._v2store()
+        if store.master is None:
+            print("no se pudo abrir el cofre", file=sys.stderr)
+            return 1
+        from cofre import health
+        resultados = health.revisar(store, store.master)
+        health.aplicar(store, store.master, resultados)
+        if args.json:
+            print(json.dumps([{"nombre": r.nombre, "estado": r.estado,
+                               "detalle": r.detalle, "caduca": r.caduca,
+                               "comprobado": r.comprobado}
+                              for r in resultados], ensure_ascii=False, indent=2))
+        else:
+            for resultado in resultados:
+                print(f"{resultado.nombre:28} {resultado.estado:14} "
+                      f"{resultado.detalle}")
+            cuenta = health.resumen(resultados)
+            print("")
+            print(" · ".join(f"{estado}: {n}" for estado, n in cuenta.items())
+                  or "sin credenciales que comprobar")
+        detalle = ", ".join(f"{estado}={n}"
+                            for estado, n in health.resumen(resultados).items())
+        record(str(vault_path), "health", args.gate, serial, name="-",
+               ok=True, detail=(detalle or "sin credenciales")[:150])
+        from cofre.audit import stamp_vault
+        stamp_vault(vault)
         return 0
 
     if args.command == "token-info":

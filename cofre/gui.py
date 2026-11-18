@@ -22,7 +22,9 @@ Lo que aplica:
 from __future__ import annotations
 
 import os
+import queue
 import sys
+import threading
 from pathlib import Path
 
 import tkinter as tk
@@ -1490,6 +1492,79 @@ class CofreGUI:
             record(self.vault_path, "alert", self.gate, self.serial,
                    name="rotación-interrumpida", ok=False, detail=texto[:150])
 
+    def _comprobar_salud(self) -> None:
+        """5.9: preguntar a los proveedores en un hilo, sin bloquear Tkinter."""
+        if not self.session:
+            self.set_foot("el cofre esta bloqueado")
+            return
+        if getattr(self, "_salud_busy", False):
+            self.set_foot("ya hay una comprobación de salud en curso")
+            return
+        try:
+            store = self.vault._v2store()
+            master = store.master
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo abrir el cofre: {exc}")
+            return
+        if master is None:
+            self.set_foot("el cofre esta bloqueado")
+            return
+        if getattr(self, "_salud_cola", None) is None:
+            self._salud_cola = queue.Queue()
+        self._salud_busy = True
+        self.set_foot("comprobando credenciales con sus proveedores...")
+        from cofre import health
+
+        def trabajo():
+            try:
+                resultados = health.revisar(store, master)
+                self._salud_cola.put((resultados, None))
+            except Exception as exc:               # noqa: BLE001
+                self._salud_cola.put((None, exc))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _recoger_salud(self) -> None:
+        """Lo llama el sondeo: aplicar el resultado sin tocar Tk desde el hilo."""
+        cola = getattr(self, "_salud_cola", None)
+        if cola is None:
+            return
+        try:
+            resultados, error = cola.get_nowait()
+        except queue.Empty:
+            return
+        self._salud_terminada(resultados, error)
+
+    def _salud_terminada(self, resultados, error) -> None:
+        self._salud_busy = False
+        if error is not None:
+            self.set_foot(f"no se pudo comprobar la salud: {error}")
+            return
+        if not self.session:
+            return
+        try:
+            from cofre import health
+            store = self.vault._v2store()
+            if store.master is None:
+                return
+            health.aplicar(store, store.master, resultados)
+            cuenta = health.resumen(resultados)
+            record(self.vault_path, "health", self.gate, self.serial, name="-",
+                   ok=True,
+                   detail=", ".join(f"{k}={v}" for k, v in cuenta.items())[:150])
+            from cofre.audit import stamp_vault
+            stamp_vault(self.vault)
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo guardar la salud: {exc}")
+            return
+        resumen = ", ".join(f"{health.ETIQUETAS.get(k, k)} {v}"
+                            for k, v in cuenta.items()) or "sin credenciales"
+        self.set_foot("salud comprobada: " + resumen)
+        if getattr(self, "vista", "") == "salud":
+            self._mostrar_vista("salud")
+        elif self.selected:
+            self.refresh_detail()
+
     def _check_alerts(self) -> None:
         """3.2: evaluar solo lo nuevo, registrar cada alerta y avisar."""
         try:
@@ -1537,6 +1612,7 @@ class CofreGUI:
             self.set_foot(texto)
 
     def _poll(self) -> None:
+        self._recoger_salud()
         self._check_session()
         self._check_alerts()
         self._check_rotation()
@@ -1767,6 +1843,42 @@ class CofreGUI:
             for w in (tarjeta, n_lab, t_lab):
                 w.bind("<Button-1>", lambda _e, f=filtro: (
                     self.set_filtro(f), self._mostrar_vista("detalle")))
+
+        # 5.9: comprobar cada credencial con su proveedor (en un hilo) y
+        # mostrar los avisos de la ultima comprobacion guardada.
+        fila_salud = tk.Frame(panel, bg=PANEL2)
+        fila_salud.pack(fill="x", pady=(0, 6))
+        self._text_btn(fila_salud, "Comprobar ahora",
+                       self._comprobar_salud).pack(side="left")
+        if getattr(self, "_salud_busy", False):
+            tk.Label(fila_salud, text="comprobando...", fg=MUT, bg=PANEL2,
+                     font=self.f_small).pack(side="left", padx=(8, 0))
+        from cofre import health as _salud
+        avisos = [(n, str(m.get("health") or ""),
+                   str(m.get("health_detail") or ""))
+                  for n, m in metas.items()
+                  if str(m.get("health") or "") in
+                  ("invalida", "caduca", "rotación", "duplicada", "debil")]
+        if avisos:
+            tk.Label(panel,
+                     text=(f"{len(avisos)} credenciales con aviso"
+                           if len(avisos) != 1 else "1 credencial con aviso"),
+                     fg=WARNFG, bg=PANEL2, font=self.f_sub,
+                     anchor="w").pack(fill="x", pady=(4, 2))
+            for nombre, estado, detalle in avisos:
+                tk.Label(panel,
+                         text=(f"{nombre} · {_salud.ETIQUETAS.get(estado, estado)}"
+                               f" · {detalle}"),
+                         fg=MUT, bg=PANEL2, font=self.f_small,
+                         anchor="w").pack(fill="x")
+        else:
+            comprobadas = sum(1 for m in metas.values()
+                              if m.get("last_verified") or m.get("health"))
+            tk.Label(panel,
+                     text=("sin avisos de salud" if comprobadas
+                           else "sin comprobar todavía"),
+                     fg=FAINT, bg=PANEL2, font=self.f_small,
+                     anchor="w").pack(fill="x", pady=(2, 0))
 
         try:
             from cofre.audit import pending_unsigned, verify_vault
@@ -2338,6 +2450,11 @@ class CofreGUI:
         caduca = str(meta.get("expires_at") or "")
         if caduca:
             etiquetas.append((f"caduca {caduca}", "rot"))
+        salud = str(meta.get("health") or "")
+        if salud:
+            from cofre import health as _salud
+            etiquetas.append((_salud.ETIQUETAS.get(salud, salud),
+                              "ok" if salud == "ok" else "rot"))
         for texto, kind in etiquetas:
             self._chip(self.chips_row, texto, kind).pack(side="left", padx=(0, 6))
 
@@ -2369,6 +2486,12 @@ class CofreGUI:
             lineas.append(f"rotar cada {meta['rotate_every_days']} días")
         if meta.get("last_rotated"):
             lineas.append(f"última rotación: {meta['last_rotated']}")
+        if salud:
+            detalle_salud = str(meta.get("health_detail") or "")
+            lineas.append("salud: " + salud +
+                          (f" ({detalle_salud})" if detalle_salud else ""))
+        if meta.get("last_verified"):
+            lineas.append(f"comprobada: {str(meta['last_verified'])[:16]}")
         if not lineas:
             lineas.append("sin datos de ciclo de vida")
         for linea in lineas:

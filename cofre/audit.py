@@ -57,7 +57,7 @@ PRIVILEGED = {
     "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
-    "discard",
+    "discard", "health",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -354,6 +354,7 @@ VERBS = {
     "audit-verify": "log verificado",
     "revoke": "credencial antigua revocada",
     "discard": "aviso de credencial antigua descartado",
+    "health": "salud de credenciales comprobada",
 }
 
 
