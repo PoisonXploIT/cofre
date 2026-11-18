@@ -11,7 +11,10 @@ Las reglas son las mismas que ya aplica serve.py y no se duplican aqui:
   - assign: anadir el host actual a los dominios de un secreto (4.6). Pide
             confirmacion en la GUI: una pagina no puede autorizarse sola;
   - save:   "guardar este sitio en COFRE" (4.8): abre la hoja de alta con el
-            dominio puesto. El valor se teclea en la GUI, no llega de la pagina.
+            dominio puesto. El valor se teclea en la GUI, no llega de la pagina;
+  - generate: crear un secreto nuevo con contrasena generada para este sitio
+            (4.7), con confirmacion en la GUI. Devuelve el valor solo por la
+            tuberia local, para rellenar el formulario de registro.
 
 Se usa desde el hilo de la GUI (BridgeController.poll), asi que aqui si se puede
 leer el cofre con la sesion de la ventana.
@@ -19,9 +22,17 @@ leer el cofre con la sesion de la ventana.
 
 from __future__ import annotations
 
+import re
+
 from cofre.audit import record
 from cofre.hosts import HostsError, allows, host_matches
 from cofre.policy import allowed as policy_allowed, needs_confirm
+
+
+def nombre_sugerido(host: str) -> str:
+    """BANCO_EXAMPLE a partir de banco.example (4.7)."""
+    limpio = re.sub(r"[^A-Za-z0-9]+", "_", str(host or "")).strip("_").upper()
+    return (limpio or "SITIO")[:40]
 
 
 def _domain(payload: dict) -> str:
@@ -232,5 +243,52 @@ def dispatch(app, message: dict) -> dict:
             return {"ok": False, "error": "esta ventana no sabe abrir la hoja"}
         app.ui_call(abrir, domain, usuario)
         return {"ok": True, "host": domain, "opened": True}
+
+    if tipo == "generate":
+        # 4.7: contraseña nueva y entrada nueva para este sitio, con confirmacion.
+        # Se devuelve el valor para rellenar el formulario; no se escribe en el log.
+        domain = _domain(message)
+        if not domain or any(c in domain for c in "/*:? "):
+            return {"ok": False, "error": "el host de la pagina no vale"}
+        nombre = str(message.get("name", "") or "").strip().upper()
+        if not nombre:
+            nombre = nombre_sugerido(domain)
+        if not re.fullmatch(r"[A-Z0-9_.\-]{3,60}", nombre):
+            return {"ok": False,
+                    "error": "el nombre solo admite letras, números, guion y guion bajo"}
+        if nombre in set(app.vault.names()):
+            return {"ok": False, "error": f"ya existe un secreto llamado {nombre}"}
+        otorgado = app.request_confirm(f"Navegador - {domain}",
+                                       f"crear '{nombre}' con una contraseña nueva",
+                                       contexto=f"generate:{domain}")
+        if otorgado == "deny":
+            record(app.vault_path, "add", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"{domain}: confirmación denegada")
+            return {"ok": False, "error": "confirmación denegada en COFRE"}
+        from cofre.gen import machine_password
+        valor = machine_password()
+        try:
+            app.vault.add(app.session, nombre, valor, ["navegador"], [domain])
+            if app.vault.is_v2():
+                store = app.vault._v2store()
+                idx = store.index(store._data, store.master)
+                entrada = (idx.get("entries") or {}).get(nombre)
+                if entrada is not None:
+                    entrada["type"] = "password"
+                    store._write_index(store._data, store.master, idx)
+                    store.save(store._data)
+        except Exception as exc:                     # noqa: BLE001
+            record(app.vault_path, "add", app.gate, app.serial, name=nombre,
+                   ok=False, detail=f"{domain}: {type(exc).__name__}")
+            return {"ok": False, "error": "no se pudo guardar el secreto nuevo"}
+        record(app.vault_path, "add", app.gate, app.serial, name=nombre, ok=True,
+               detail=f"generada para {domain}")
+        recargar = getattr(app, "ui_call", None)
+        if recargar is not None:
+            try:
+                recargar(app.refresh_list)
+            except Exception:
+                pass
+        return {"ok": True, "name": nombre, "value": valor, "host": domain}
 
     return {"ok": False, "error": f"tipo desconocido: {tipo or '(vacio)'}"}

@@ -150,6 +150,52 @@ function cofreUsuario() {
   return v.length > 0 && v.length <= 80 ? v : "";
 }
 
+// 4.7: generar una contrasena nueva y guardarla para este sitio. La confirmacion
+// la pide COFRE en su ventana; aqui solo se rellena el formulario con el valor.
+function cofreFillAll(value) {
+  function visible(el) {
+    if (!el || el.disabled || el.readOnly) return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= 8 && r.height >= 8 && el.type === "password";
+  }
+  const campos = [...document.querySelectorAll("input[type=password]")].filter(visible);
+  for (const el of campos) {
+    el.focus();
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  return { filled: campos.length };
+}
+
+async function generarYGuardar() {
+  const host = hostOf(tab?.url || "");
+  const nombre = ($("gen_name").value || "").trim().toUpperCase();
+  if (!host) {
+    $("foot").textContent = "no hay pestana activa";
+    return;
+  }
+  $("foot").textContent = "esperando la confirmación en COFRE...";
+  const res = await send({ type: "generate", domain: host, name: nombre });
+  if (!res.ok) {
+    $("foot").textContent = res.error || "no se pudo generar";
+    return;
+  }
+  try {
+    const r = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, func: cofreFillAll, args: [res.value],
+    });
+    const n = r?.[0]?.result?.filled || 0;
+    $("foot").textContent = n
+      ? `guardado como ${res.name} y rellenado en ${n} campo(s). Apunta el nombre; el valor está en COFRE.`
+      : `guardado como ${res.name}, pero no encontré campos de contraseña en la página.`;
+    if (n) setTimeout(() => window.close(), 1600);
+  } catch (e) {
+    $("foot").textContent = "guardado, pero no se pudo rellenar: " + e.message;
+  }
+  await refresh();
+}
+
 async function saveSite() {
   const host = hostOf(tab?.url || "");
   if (!host) {
@@ -288,6 +334,14 @@ async function fill(name) {
 }
 
 $("guardar_sitio").addEventListener("click", saveSite);
+$("gen_open").addEventListener("click", () => {
+  const host = hostOf(tab?.url || "");
+  const sugerido = host.split(".")[0].replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+  $("gen_name").value = sugerido || "SITIO";
+  $("gen").classList.toggle("hidden");
+  $("gen_name").focus();
+});
+$("gen_go").addEventListener("click", generarYGuardar);
 $("search").addEventListener("input", render);
 $("search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {

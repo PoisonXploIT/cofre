@@ -71,7 +71,7 @@ updateBadge();
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg?.type) return false;
-  if (!["status", "list", "get", "match", "assign", "save"].includes(msg.type)) return false;
+  if (!["status", "list", "get", "match", "assign", "save", "generate"].includes(msg.type)) return false;
   call(msg).then((r) => {
     if (msg.type === "status" || msg.type === "assign") updateBadge();
     sendResponse(r);

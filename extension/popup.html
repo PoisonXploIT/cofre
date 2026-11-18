@@ -72,6 +72,13 @@
       border: 1px solid var(--border); border-radius: 6px; font-size: 11px;
     }
     .wide:hover { border-color: var(--accent); color: var(--text); }
+    .hidden { display: none; }
+    #gen_name {
+      width: 100%; margin-top: 8px; padding: 6px 8px;
+      background: var(--card); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; outline: none; font-size: 11px;
+    }
+    #gen_name:focus { border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -90,7 +97,13 @@
       <label><input type="checkbox" id="focused"> Rellenar el campo enfocado</label>
     </div>
     <div id="list"></div>
+    <div id="gen" class="hidden">
+      <input id="gen_name" type="text" placeholder="NOMBRE_DEL_SECRETO"
+             autocomplete="off">
+      <button id="gen_go" class="wide">Generar y rellenar</button>
+    </div>
     <button id="guardar_sitio" class="wide">Guardar este sitio en COFRE</button>
+    <button id="gen_open" class="wide">Generar contraseña para este sitio</button>
   </main>
   <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto. Ctrl+Shift+L abre este aviso.</footer>
   <script src="popup.js"></script>

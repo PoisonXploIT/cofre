@@ -44,8 +44,14 @@ class FakeVault:
     def set_urls(self, nombre, urls):
         self.datos[nombre]["urls"] = list(urls)
 
+    def add(self, session, nombre, valor, tags=None, urls=None):
+        self.datos[nombre] = {"type": "api_key", "tags": list(tags or []),
+                              "urls": list(urls or [])}
+
     def is_v2(self):
-        return True
+        # cofre falso sin indice: el camino v2 (tipo password) se prueba en
+        # tests/test_v2.py con un cofre de verdad
+        return False
 
 
 class FakeApp:
@@ -180,6 +186,77 @@ class TestSave(unittest.TestCase):
         app.open_new_for_site = lambda *a, **k: None
         r = bridge_ops.dispatch(app, {"type": "save", "domain": "banco.example"})
         self.assertNotIn("value", json.dumps(r))
+
+
+class TestGenerate(unittest.TestCase):
+    """4.7: generar contraseña y entrada nueva para el sitio, con confirmación."""
+
+    def _app(self, respuesta="grant"):
+        app = FakeApp(respuesta)
+        app.ui_call = lambda *a, **k: None
+        app.refresh_list = lambda: None
+        app.anadidos = []
+        original = app.vault.add
+
+        def add(session, nombre, valor, tags=None, urls=None):
+            app.anadidos.append((nombre, valor, list(tags or []), list(urls or [])))
+            return original(session, nombre, valor, tags, urls)
+
+        app.vault.add = add
+        return app
+
+    def test_crea_la_entrada_y_devuelve_el_valor(self):
+        app = self._app()
+        r = bridge_ops.dispatch(app, {"type": "generate", "domain": "banco.example"})
+        self.assertTrue(r["ok"], r.get("error"))
+        self.assertEqual(r["name"], "BANCO_EXAMPLE")
+        self.assertGreaterEqual(len(r["value"]), 20)
+        nombre, valor, tags, urls = app.anadidos[0]
+        self.assertEqual(nombre, "BANCO_EXAMPLE")
+        self.assertEqual(urls, ["banco.example"])
+        self.assertIn("navegador", tags)
+        self.assertEqual(app.llamadas[0][2], "generate:banco.example")
+        self.assertNotIn(r["value"], json.dumps(
+            [e.get("detail") for e in audit._events(app.vault_path)]))
+
+    def test_negado_no_crea_nada(self):
+        app = self._app("deny")
+        r = bridge_ops.dispatch(app, {"type": "generate", "domain": "banco.example"})
+        self.assertFalse(r["ok"])
+        self.assertEqual(app.anadidos, [])
+
+    def test_nombre_repetido_no_pisa(self):
+        app = self._app()
+        r = bridge_ops.dispatch(app, {"type": "generate", "name": "TIENDA",
+                                      "domain": "banco.example"})
+        self.assertTrue(r["ok"])
+        r2 = bridge_ops.dispatch(app, {"type": "generate", "name": "TIENDA",
+                                       "domain": "banco.example"})
+        self.assertFalse(r2["ok"])
+        self.assertIn("ya existe", r2["error"])
+        self.assertEqual(len(app.anadidos), 1)
+
+    def test_nombre_invalido(self):
+        app = self._app()
+        for raro in ("con espacio", "a/b", "ñ"):
+            with self.subTest(nombre=raro):
+                r = bridge_ops.dispatch(app, {"type": "generate", "name": raro,
+                                              "domain": "banco.example"})
+                self.assertFalse(r["ok"])
+        self.assertEqual(app.anadidos, [])
+
+    def test_host_raro_no_genera(self):
+        app = self._app()
+        for raro in ("", "*.x", "x/y", "x?y"):
+            with self.subTest(host=raro):
+                r = bridge_ops.dispatch(app, {"type": "generate", "domain": raro})
+                self.assertFalse(r["ok"])
+        self.assertEqual(app.anadidos, [])
+
+    def test_nombre_sugerido(self):
+        self.assertEqual(bridge_ops.nombre_sugerido("dash.cloudflare.com"),
+                         "DASH_CLOUDFLARE_COM")
+        self.assertEqual(bridge_ops.nombre_sugerido(""), "SITIO")
 
 
 if __name__ == "__main__":
