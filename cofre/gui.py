@@ -169,7 +169,9 @@ class CofreGUI:
         frame = tk.Frame(parent, bg=fondo)
         lab = tk.Label(frame, text=texto, fg=color, bg=fondo,
                        font=self.f_body if alinear == "w" else self.f_small,
-                       cursor="hand2", anchor=alinear,
+                       cursor="hand2", anchor=alinear, takefocus=1,
+                       highlightthickness=2, highlightbackground=fondo,
+                       highlightcolor=ACC,
                        padx=6 if alinear == "w" else 0, pady=3 if alinear == "w" else 0)
         if alinear == "w":
             lab.pack(fill="x")
@@ -185,6 +187,8 @@ class CofreGUI:
             command()
 
         lab.bind("<Button-1>", click)
+        lab.bind("<Return>", click)
+        lab.bind("<space>", click)
         lab.bind("<Enter>", lambda _e: lab.configure(
             fg=DANGER if danger else ACC, bg=CAMPO) if frame._enabled else None)
         lab.bind("<Leave>", lambda _e: lab.configure(fg=color, bg=fondo))
@@ -383,6 +387,7 @@ class CofreGUI:
             highlightbackground=ACC))
         self.query_entry.bind("<FocusOut>", lambda _e: caja_buscar.configure(
             highlightbackground=LINE))
+        self.query_entry.bind("<Down>", self._enfocar_lista)
 
         # ---------- banda de alertas (E7) ----------
         self.alert_band = tk.Frame(self.root, bg=WARNBG)
@@ -1044,6 +1049,7 @@ class CofreGUI:
                 self._btn(empty, "Guardar el primero", self._focus_new,
                           accent=True).pack(anchor="w")
             return
+        self._rows = {}
         for n in names:
             meta = self.vault.meta(n) or {}
             proveedor = str(meta.get("provider") or "") or self._proveedor_por_nombre(n)
@@ -1060,7 +1066,8 @@ class CofreGUI:
                 from cofre import widgets as W
                 L = W.ListRow(fila, n, sub, inicial=(proveedor or n)[:1].upper(),
                               chip=chip, on_click=lambda _t, name=n: self._click_row(name),
-                              bg=PANEL, color=W.color_de_proveedor(proveedor or n))
+                              bg=PANEL, color=W.color_de_proveedor(proveedor or n),
+                              on_move=self._mover_lista)
             except Exception:
                 L = None
             if L is None:
@@ -1070,8 +1077,34 @@ class CofreGUI:
                 lab.bind("<Button-1>", lambda _e, name=n: self._click_row(name))
             else:
                 L.pack(fill="x")
+                self._rows[n] = L
                 if n == self.selected:
                     L.set_seleccionada(True)
+
+    def _mover_lista(self, delta: int) -> None:
+        """Flechas dentro de una fila: cambia de secreto y mantiene el foco."""
+        self.move_selection(delta)
+        fila = getattr(self, "_rows", {}).get(self.selected)
+        if fila is not None:
+            try:
+                fila.canvas.focus_set()
+            except Exception:
+                pass
+
+    def _enfocar_lista(self, event=None):
+        """Flecha abajo en el buscador: primer resultado con el foco."""
+        nombres = getattr(self, "_names", [])
+        if not nombres:
+            return "break"
+        if self.selected not in nombres:
+            self.select(nombres[0])
+        fila = getattr(self, "_rows", {}).get(self.selected)
+        if fila is not None:
+            try:
+                fila.canvas.focus_set()
+            except Exception:
+                pass
+        return "break"
 
     def _click_row(self, name: str) -> None:
         """Seleccionar con el raton y dejar el foco donde Ctrl+C si copia."""

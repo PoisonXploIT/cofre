@@ -342,19 +342,28 @@ class ListRow(tk.Frame):
 
     def __init__(self, parent, titulo: str, subtitulo: str = "", inicial: str = "",
                  chip: tuple[str, str] | None = None, on_click=None,
-                 bg: str | None = None, color: str | None = None):
+                 bg: str | None = None, color: str | None = None,
+                 on_move=None):
         self._bg = bg or SURFACE
         super().__init__(parent, bg=self._bg, bd=0, highlightthickness=0)
         self.on_click = on_click
+        self.on_move = on_move
         self.seleccionada = False
+        self._foco = False
         self._f_titulo = _font(self, "mono")
         self._f_meta = _font(self, "label")
 
         self.canvas = tk.Canvas(self, height=self.ALTO, bg=self._bg, bd=0,
-                                highlightthickness=0)
+                                highlightthickness=0, takefocus=1)
         self.canvas.pack(fill="x", expand=True)
         self.canvas.bind("<Configure>", lambda _e: self._dibujar())
         self.canvas.bind("<Button-1>", self._click)
+        self.canvas.bind("<Return>", self._click)
+        self.canvas.bind("<space>", self._click)
+        self.canvas.bind("<Up>", lambda _e: self._mover(-1))
+        self.canvas.bind("<Down>", lambda _e: self._mover(1))
+        self.canvas.bind("<FocusIn>", self._focus_in)
+        self.canvas.bind("<FocusOut>", self._focus_out)
         self._titulo = titulo
         self._subtitulo = subtitulo
         self._inicial = (inicial or titulo[:1] or "?").upper()
@@ -367,6 +376,18 @@ class ListRow(tk.Frame):
     def _click(self, _e=None):
         if callable(self.on_click):
             self.on_click(self._titulo)
+
+    def _mover(self, delta: int):
+        if callable(self.on_move):
+            self.on_move(delta)
+
+    def _focus_in(self, _e=None):
+        self._foco = True
+        self._dibujar()
+
+    def _focus_out(self, _e=None):
+        self._foco = False
+        self._dibujar()
 
     def _hover(self, dentro: bool):
         self._encima = dentro
@@ -383,7 +404,8 @@ class ListRow(tk.Frame):
         alto = self.ALTO
         fondo = RAISED if (self.seleccionada or self._encima) else self._bg
         round_rect(self.canvas, 2, 2, ancho - 2, alto - 2, RADIUS["row"],
-                   fill=fondo, outline="")
+                   fill=fondo, outline=ACCENT if self._foco else "",
+                   width=2 if self._foco else 0)
         # cuadro del proveedor
         self.canvas.create_rectangle(14, 12, 46, 44, fill=C["card"], outline="")
         self.canvas.create_text(30, 28, text=self._inicial, fill=MUTED,
