@@ -2230,7 +2230,7 @@ class CofreGUI:
         try:
             host = clean_host(valor)
         except HostsError as exc:
-            self.set_foot(f"dominio invalido: {exc}")
+            self.set_foot(f"dominio inválido: {exc}")
             return
         if self.request_confirm(f"Tu - asignar sitio", self.selected) == "deny":
             self.set_foot("asignacion cancelada")

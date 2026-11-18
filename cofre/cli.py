@@ -744,7 +744,7 @@ def main(argv: list[str]) -> int:
               + (f" (caduca {verificacion.expires_at})" if verificacion.expires_at else "")
               + (f" - {verificacion.detail}" if verificacion.detail else ""))
         modo = "B (crear reemplazo y desplegar)" if consumidores else "A (roll del valor)"
-        print(f"modo de rotacion: {modo}")
+        print(f"modo de rotación: {modo}")
         if consumidores:
             print("consumidores que habria que actualizar: " + ", ".join(consumidores))
         if args.dry_run:
@@ -784,7 +784,7 @@ def main(argv: list[str]) -> int:
             stamp_vault(vault)
             return 0
         except ProviderError as exc:
-            print(f"la rotacion fallo: {exc}", file=sys.stderr)
+            print(f"la rotación fallo: {exc}", file=sys.stderr)
             record(str(vault_path), "rotate", args.gate, serial, name=args.name,
                    ok=False, detail=str(exc)[:150])
             return 1
@@ -929,7 +929,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {nombre:28} {', '.join(mapping[nombre])}")
             return 0
         except HostsError as exc:
-            print(f"dominio invalido: {exc}", file=sys.stderr)
+            print(f"dominio inválido: {exc}", file=sys.stderr)
             return 1
 
     if args.command == "salt":

@@ -107,7 +107,7 @@ def read_message(stream) -> dict | None:
     try:
         data = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        log(f"JSON invalido: {exc}")
+        log(f"JSON inválido: {exc}")
         return None
     return data if isinstance(data, dict) else None
 
@@ -297,7 +297,7 @@ def server_is_trusted(handle) -> tuple[bool, str]:
         return False, f"el servidor es de otro usuario ({sid or 'desconocido'})"
 
     if os.environ.get("COFRE_NM_TEST_SKIP_CMDLINE") == "1":
-        return True, f"pid {server_pid} (linea de comandos no comprobada: modo prueba)"
+        return True, f"pid {server_pid} (línea de comandos no comprobada: modo prueba)"
 
     cmd = command_line_of(server_pid)
     if cmd and not cmdline_ok(cmd):

@@ -114,7 +114,7 @@ def get_salt(vault_path: str | Path, create: bool = False) -> bytes:
         return salt
 
     raise SaltMissing(
-        f"no existe la sal del cofre ({sp}). Sin ella la clave de sesion no se "
+        f"no existe la sal del cofre ({sp}). Sin ella la clave de sesión no se "
         "puede derivar y el cofre no se abre. Si tienes una copia de cofre.json "
         "con el campo 'salt', restaura esa sal. Si no, el cofre esta perdido: "
         "hay que inicializar uno nuevo (init) y rellenar los secretos."

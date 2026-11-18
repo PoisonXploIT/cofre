@@ -106,7 +106,7 @@ class Session:
                     f"({self.settings['idle_minutes']} min sin usarlo)")
         if reason == "tiempo maximo":
             return (f"cofre bloqueado por tiempo maximo "
-                    f"({self.settings['max_hours']} h de sesion)")
+                    f"({self.settings['max_hours']} h de sesión)")
         if reason == "el equipo estuvo suspendido":
             return "cofre bloqueado: el equipo estuvo suspendido"
         if reason == "windows bloqueado":

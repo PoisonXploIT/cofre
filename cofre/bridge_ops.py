@@ -60,7 +60,7 @@ def dispatch(app, message: dict) -> dict:
         if app.vault.is_v2():
             patrones = app.vault.urls(nombre)
             if not patrones:
-                permitido, motivo = False, f"'{nombre}' no tiene ningun sitio asignado"
+                permitido, motivo = False, f"'{nombre}' no tiene ningún sitio asignado"
             elif not host_matches(domain, patrones):
                 permitido, motivo = False, f"'{domain}' no esta asignado a '{nombre}'"
             else:

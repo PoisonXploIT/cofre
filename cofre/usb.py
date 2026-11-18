@@ -270,7 +270,7 @@ def find_stick(extra_paths: list[str] | None = None, vault_path: str | Path | No
     cands = _candidates(extra_paths)
     if not cands:
         raise StickNotFound(
-            f"no se encontró {KEY_FILENAME} en ningun volumen. "
+            f"no se encontró {KEY_FILENAME} en ningún volumen. "
             "Conecta el pendrive o us --stick E:\\COFRE.KEY"
         )
 

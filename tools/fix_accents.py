@@ -41,6 +41,8 @@ PALABRAS = {
 
 import re
 
+MARCA_SALTAR = "no-tildes"   # linea que no se debe acentuar a proposito
+
 PATRON = re.compile(r"\b(" + "|".join(sorted(PALABRAS)) + r")\b")
 
 
@@ -48,15 +50,48 @@ def acentuar(texto: str) -> str:
     return PATRON.sub(lambda m: PALABRAS[m.group(1)], texto)
 
 
+# En Python 3.12+ el tokenizador separa las f-strings en FSTRING_START, varios
+# FSTRING_MIDDLE (el texto) y FSTRING_END, dejando las expresiones {..} como
+# codigo aparte. Antes de 3.12 una f-string entera es UN token de texto, nombres
+# incluidos: por eso se nos colo "_rotacion_pendiente" una vez.
+TIENE_FSTRING_TOKENS = hasattr(tokenize, "FSTRING_MIDDLE")
+
+
+def es_fstring(tok) -> bool:
+    if tok.type != tokenize.STRING:
+        return False
+    prefijo = tok.string.lstrip()[:3].lower()
+    return "f" in prefijo
+
+
 def procesar(path: Path, comentarios: bool, aplicar: bool) -> bool:
     """Devuelve True si cambiaria (o cambio) algo."""
     original = path.read_text(encoding="utf-8")
     cambios = []
+    omitidas = []
+    lineas_texto = original.splitlines()
     try:
         for tok in tokenize.generate_tokens(io.StringIO(original).readline):
+            try:
+                if MARCA_SALTAR in lineas_texto[tok.start[0] - 1]:
+                    continue
+            except IndexError:
+                pass
+            if TIENE_FSTRING_TOKENS and tok.type == tokenize.FSTRING_MIDDLE:
+                # 3.12+: solo la parte de texto, nunca lo de dentro de {..}
+                nuevo = acentuar(tok.string)
+                if nuevo != tok.string:
+                    cambios.append((tok.start, tok.end, nuevo))
+                continue
             if tok.type == tokenize.STRING:
                 # las cadenas multilinea se dejan: mover indices ahi es fragil
                 if tok.start[0] != tok.end[0]:
+                    if es_fstring(tok):
+                        omitidas.append((tok.start[0], tok.string[:50]))
+                    continue
+                if es_fstring(tok) and not TIENE_FSTRING_TOKENS:
+                    # Python viejo: no se distingue el texto de los nombres
+                    omitidas.append((tok.start[0], tok.string[:50]))
                     continue
                 nuevo = acentuar(tok.string)
                 if nuevo != tok.string:
@@ -67,6 +102,9 @@ def procesar(path: Path, comentarios: bool, aplicar: bool) -> bool:
                     cambios.append((tok.start, tok.end, nuevo))
     except tokenize.TokenError:
         return False
+    if omitidas:
+        for linea, trozo in omitidas[:5]:
+            print(f"{path}:{linea}: f-string omitida (revisar a mano): {trozo!r}")
     if not cambios:
         return False
     if not aplicar:

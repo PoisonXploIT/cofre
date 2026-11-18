@@ -143,7 +143,7 @@ class _Handler(BaseHTTPRequestHandler):
             if vault.is_v2():
                 patrones = vault.urls(name)
                 if not patrones:
-                    permitido, motivo = False, f"'{name}' no tiene ningun sitio asignado"
+                    permitido, motivo = False, f"'{name}' no tiene ningún sitio asignado"
                 elif not host_matches(domain, patrones):
                     permitido, motivo = False, f"'{domain}' no esta asignado a '{name}'"
                 else:

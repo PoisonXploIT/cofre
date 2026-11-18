@@ -47,7 +47,7 @@ def check_code(code: str) -> tuple[bool, str]:
     limpio = normalize(code)
     partes = limpio.split(" ")
     if len(partes) != WORDS + 1:
-        return False, f"el codigo tiene {len(partes) - 1} palabras y deberian ser {WORDS} mas la de control"
+        return False, f"el código tiene {len(partes) - 1} palabras y deberian ser {WORDS} mas la de control"
     texto = " ".join(partes[:-1])
     esperada = control_word(texto, palabras)
     if partes[-1] != normalize(esperada):

@@ -232,7 +232,7 @@ class EntrySheet:
             try:
                 sitios.append(clean_host(parte))
             except HostsError as exc:
-                self.aviso.configure(text=f"sitio invalido: {exc}")
+                self.aviso.configure(text=f"sitio inválido: {exc}")
                 return
         tipo = self.tipo_var.get()
         try:

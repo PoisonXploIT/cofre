@@ -68,7 +68,7 @@ def allowed(meta: dict, channel: str) -> tuple[bool, str]:
     pol = effective(meta)
     if str(meta.get("type") or "") == "canary":
         nombre = meta.get("name") or "este secreto"
-        return False, f"'{nombre}' es un senuelo: no se entrega por ningun canal"
+        return False, f"'{nombre}' es un senuelo: no se entrega por ningún canal"
     if not pol.get(channel, False):
         nombre = meta.get("name") or "este secreto"
         if channel == "browser":

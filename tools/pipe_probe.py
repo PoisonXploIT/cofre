@@ -246,7 +246,7 @@ def main() -> int:
 
     logtxt = LOG_PATH.read_text(encoding="utf-8") if LOG_PATH.exists() else ""
     check("7. el log no contiene valores", "secreto" not in logtxt.lower(),
-          f"{len(logtxt.splitlines())} lineas en nmhost.log")
+          f"{len(logtxt.splitlines())} líneas en nmhost.log")
 
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)

@@ -190,7 +190,7 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
     if anclas:
         ultimo = max(anclas, key=lambda e: int(e.get("seq", 0)))
         encontradas.append(Alert("reanclaje", "media",
-                                 f"log re-anclado en la linea {ultimo.get('seq')} "
+                                 f"log re-anclado en la línea {ultimo.get('seq')} "
                                  f"({ultimo.get('detail') or 'sin motivo escrito'})",
                                  int(ultimo.get("seq", 0))))
 
