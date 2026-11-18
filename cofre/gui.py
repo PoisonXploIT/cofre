@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -2119,7 +2120,90 @@ class CofreGUI:
         etiqueta = "Desconectar navegador" if self.browser_on else "Conectar navegador"
         self._btn(fila, etiqueta, lambda e: (self.toggle_browser(), win.destroy())
                   ).pack(side="right")
+        fila_emergencia = tk.Frame(win, bg=PANEL)
+        fila_emergencia.pack(fill="x", padx=12, pady=(8, 0))
+        tk.Label(fila_emergencia, text="Emergencia", fg=DANGER, bg=PANEL,
+                 font=self.f_sub).pack(side="left")
+        self._btn(fila_emergencia, "Botón de pánico", self.open_panic,
+                  danger=True).pack(side="right")
         self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
+
+    def open_panic(self) -> None:
+        """5.10: la emergencia se ve aquí; la ejecucion va en una terminal."""
+        win = self._sheet("COFRE - emergencia")
+        win.geometry("660x500")
+        tk.Label(win, text="Botón de pánico", fg=DANGER, bg=PANEL,
+                 font=self.f_title, anchor="w").pack(fill="x", padx=18,
+                                                     pady=(16, 4))
+        texto = tk.Text(win, bg=PANEL, fg=FG, font=self.f_mono, bd=0,
+                        highlightthickness=0, wrap="word", height=18)
+        texto.pack(fill="both", expand=True, padx=18, pady=(0, 8))
+        cuerpo = chr(10).join([
+            "El pánico, en este orden:",
+            "  1. Cloudflare: roll de cada token; el administrador, el último.",
+            "  2. GitHub PAT: revocación por valor.",
+            "  3. GitHub App: regenerar la clave privada en la web.",
+            "  4. Otros proveedores: URL para revocar a mano.",
+            "  5. Señuelos: no se tocan.",
+            "  6. Código de recuperación nuevo y rekey: este pendrive sigue;",
+            "     los demás se quedan fuera y hay que volver a darles llave.",
+            "",
+            "El código nuevo se muestra UNA vez. Ten papel a mano.",
+            "",
+            "Este botón NO ejecuta el pánico: abre la emergencia, deja ver el",
+            "plan y el comando. La ejecución se hace en una terminal, donde el",
+            "código se ve y se apunta:",
+            "",
+            "  run.cmd panic --dry-run   (primero, sin tocar nada)",
+            "  run.cmd panic             (pide teclear REVOCAR TODO)",
+        ])
+        texto.insert("end", cuerpo)
+        texto.configure(state="disabled")
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=(0, 12))
+        self._btn(fila, "Cerrar", win.destroy).pack(side="right")
+        self._btn(fila, "Copiar comando", self._copiar_panico).pack(
+            side="right", padx=8)
+        self._btn(fila, "Ver el plan", lambda: self._plan_panico(texto)).pack(
+            side="right", padx=8)
+
+    def _copiar_panico(self) -> None:
+        try:
+            from cofre.clipboard import copy_text
+            copy_text("run.cmd panic --dry-run")
+            self.set_foot("copiado: primero el plan (dry-run), sin tocar nada")
+        except Exception as exc:                       # noqa: BLE001
+            self.set_foot(f"no se pudo copiar: {exc}")
+
+    def _plan_panico(self, texto) -> None:
+        """Ejecutar solo el dry-run del CLI y enseñar el plan, sin tocar nada."""
+        material = getattr(self.vault, "_material", {}) or {}
+        stick = str(material.get("stick_path") or "")
+        if not stick:
+            self._insertar_plan(texto, "sin pendrive no se puede abrir el cofre "
+                                      "desde otra consola: ejecuta run.cmd panic "
+                                      "en una terminal con la llave conectada")
+            return
+        comando = [sys.executable, "-m", "cofre.cli", "--gate", self.gate,
+                   "--stick", stick, "--vault", self.vault_path,
+                   "panic", "--dry-run"]
+        entorno = dict(os.environ, COFRE_VAULT=str(self.vault_path))
+        if material.get("pin"):
+            entorno["COFRE_PIN"] = str(material["pin"])
+        try:
+            proc = subprocess.run(comando, capture_output=True, text=True,
+                                  env=entorno, timeout=180)
+            salida = (proc.stdout or "") + (proc.stderr or "")
+        except Exception as exc:                       # noqa: BLE001
+            salida = f"no se pudo ejecutar el plan: {exc}"
+        self._insertar_plan(texto, salida.strip() or "(sin salida)")
+
+    def _insertar_plan(self, texto, salida: str) -> None:
+        texto.configure(state="normal")
+        texto.insert("end", chr(10) + chr(10) + "PLAN (dry-run, no toca nada):"
+                     + chr(10) + salida + chr(10))
+        texto.see("end")
+        texto.configure(state="disabled")
 
     def open_audit(self, event=None) -> None:
         """Verificar la cadena del registro y ensenar las ultimas entradas.

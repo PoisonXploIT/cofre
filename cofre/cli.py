@@ -201,6 +201,15 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--opcion", choices=["continuar", "deshacer"], default="")
     rs.add_argument("--si", action="store_true", help="no pedir confirmación")
 
+    pa = with_common(sub.add_parser(
+        "panic", help="emergencia: revocar todo y rehacer la clave maestra"))
+    pa.add_argument("--dry-run", action="store_true",
+                    help="enseñar el plan, sin tocar nada")
+    pa.add_argument("--si", action="store_true",
+                    help="no pedir la confirmación")
+    pa.add_argument("--admin", default="",
+                    help="secreto con permisos de gestión (Cloudflare)")
+
     du = with_common(sub.add_parser(
         "due", help="recordatorios del calendario (sin abrir el cofre)"))
     du.add_argument("--notify", action="store_true",
@@ -414,7 +423,7 @@ def main(argv: list[str]) -> int:
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
                   "migrate", "stick-add-v2", "check", "list", "resume",
-                  "health"}
+                  "health", "panic"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -1094,6 +1103,115 @@ def main(argv: list[str]) -> int:
                ok=False, detail=("interrumpida: " + mensaje)[:150])
         stamp_vault(vault)
         return 1
+
+    if args.command == "panic":
+        try:
+            session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        if not vault.is_v2():
+            print("el pánico necesita un cofre v2", file=sys.stderr)
+            return 1
+        store = vault._v2store()
+        if store.master is None:
+            print("no se pudo abrir el cofre", file=sys.stderr)
+            return 1
+        from cofre import panic
+        admin_nombre = args.admin or "CLOUDFLARE_TOKEN_ADMIN"
+        admin_meta = dict(vault.meta(admin_nombre) or {})
+        admin_valor = ""
+        if admin_meta:
+            try:
+                admin_valor = vault.get(session, admin_nombre)
+            except Exception:
+                admin_valor = ""
+        plan = panic.planificar(store, store.master, bool(admin_meta))
+        print("PANICO - plan" + (" (dry-run: no se toca nada)" if args.dry_run else ""))
+        for accion in plan.acciones:
+            linea = f"  {accion.tipo:7} {accion.nombre}  {accion.detalle}"
+            if accion.url:
+                linea += f"  {accion.url}"
+            print(linea)
+        for aviso in plan.avisos:
+            print(f"  AVISO: {aviso}")
+        if plan.canarios:
+            print("  canarios que NO se tocan: " + ", ".join(plan.canarios))
+        print("  despues: código de recuperacion nuevo y rekey; los pendrives "
+              "que no esten conectados se quedan fuera")
+        if args.dry_run:
+            return 0
+        if not args.si:
+            print("Escribe REVOCAR TODO para confirmar: ", end="", flush=True)
+            if sys.stdin.readline().strip() != "REVOCAR TODO":
+                print("cancelado: no se ha tocado nada")
+                return 1
+        resultados = panic.ejecutar(store, store.master, plan, admin_valor)
+        fallos = 0
+        for accion, ok, detalle in resultados:
+            print(f"  {'OK   ' if ok else 'FALLA'} {accion.tipo} "
+                  f"{accion.nombre}: {detalle}")
+            if not ok:
+                fallos += 1
+        record(str(vault_path), "panic", args.gate, serial, name="-",
+               ok=(fallos == 0),
+               detail=(f"{len(plan.acciones)} acciones, {fallos} fallos; "
+                       f"roll={plan.cuenta('roll')} "
+                       f"revoke={plan.cuenta('revoke')}")[:150])
+        codigo = ""
+        try:
+            from cofre import audit as audit_mod
+            from cofre.paths import atomic_write
+            from cofre.v2 import rekey as rekey_mod
+            etiqueta = ""
+            if (store.slot or {}).get("kind") == "usb":
+                etiqueta = str(store.slot.get("label") or "")
+            prep = rekey_mod.preparar(
+                store._vault, store._data, store.master,
+                stick_key=material.get("stick_key"),
+                serial=material.get("serial"),
+                label=etiqueta, pin=material.get("pin", ""))
+            log = audit_mod.audit_path(vault_path)
+            log_antes = log.read_text(encoding="utf-8") if log.exists() else ""
+            viejo = store.master
+            try:
+                audit_mod.rekey_log(str(vault_path), viejo, prep.master)
+                rekey_mod.guardar(store._vault, prep)
+            except Exception:
+                if log_antes:
+                    atomic_write(log, log_antes)
+                raise
+            store._data = prep.data
+            store.master = prep.master
+            store.slot = prep.usb_slot
+            audit_mod.set_key(prep.master)
+            audit_mod.bind_store(store)
+            audit_mod.stamp(store, prep.master)
+            record(str(vault_path), "rekey", args.gate, serial, name="-",
+                   ok=True,
+                   detail=(f"panico: clave maestra nueva; "
+                           f"{len(prep.perdidos)} slots fuera")[:150])
+            codigo = prep.codigo
+        except Exception as exc:                   # noqa: BLE001
+            fallos += 1
+            print(f"no se pudo hacer el rekey: {exc}", file=sys.stderr)
+            print("los tokens ya estan revocados; el cofre sigue con la clave "
+                  "anterior", file=sys.stderr)
+        if codigo:
+            print("")
+            print("rekey hecho. Codigo de recuperacion nuevo (se muestra UNA vez):")
+            print("  " + codigo)
+            print("Apunta el código en papel. Los pendrives que no estaban "
+                  "conectados se han quedado fuera; vuelve a darles llave con "
+                  "'stick-add-v2'.")
+        from cofre.audit import stamp_vault
+        stamp_vault(vault)
+        return 0 if fallos == 0 else 1
 
     if args.command == "stick-list":
         return cmd_stick_list(str(vault_path))

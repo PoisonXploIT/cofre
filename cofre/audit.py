@@ -57,7 +57,7 @@ PRIVILEGED = {
     "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
-    "discard", "health",
+    "discard", "health", "panic", "rekey",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -355,6 +355,8 @@ VERBS = {
     "revoke": "credencial antigua revocada",
     "discard": "aviso de credencial antigua descartado",
     "health": "salud de credenciales comprobada",
+    "panic": "boton de panico",
+    "rekey": "clave maestra cambiada",
 }
 
 
@@ -461,6 +463,52 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     if sin_firma:
         detalle += f", {sin_firma} sin firma (escritas con el cofre cerrado)"
     return True, detalle
+
+
+def rekey_log(vault_path: str | Path, old_master: bytes,
+              new_master: bytes) -> int:
+    """Re-firmar el log con la clave nueva, tras verificar la vieja.
+
+    Conserva eventos, seq y el `prev` de la primera linea (que puede apuntar a
+    una linea ya archivada); recalcula las firmas y la cadena. Si una linea no
+    cuadra con la clave vieja, aborta sin escribir nada: el rekey no puede
+    tapar una manipulacion previa.
+    """
+    p = audit_path(vault_path)
+    if not p.exists():
+        return 0
+    vieja = _subkey(old_master)
+    nueva = _subkey(new_master)
+    salida: list[str] = []
+    prev_original = None      # hash de la linea anterior tal como estaba
+    prev_nuevo = None         # hash de la linea anterior ya re-firmada
+    for numero, texto in enumerate(p.read_text(encoding="utf-8").splitlines(),
+                                   start=1):
+        try:
+            ev = json.loads(texto)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"línea {numero}: no es JSON") from exc
+        if prev_original is not None and ev.get("prev") != prev_original:
+            raise RuntimeError(f"línea {numero}: la cadena no cuadra")
+        mac = ev.pop("mac", None)
+        if mac is not None:
+            esperado = hmac.new(vieja, _canonical(ev), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(mac, esperado):
+                raise RuntimeError(f"línea {numero}: la firma vieja no cuadra")
+        # la cadena nueva empieza en el prev de la primera linea (puede apuntar
+        # a una linea archivada); a partir de ahi, cada prev es el hash nuevo
+        if prev_nuevo is not None:
+            ev["prev"] = prev_nuevo
+        if mac is not None:
+            ev["mac"] = hmac.new(nueva, _canonical(ev), hashlib.sha256).hexdigest()
+        else:
+            ev["mac"] = None
+        nuevo_texto = json.dumps(ev, sort_keys=True, separators=(",", ":"))
+        salida.append(nuevo_texto)
+        prev_original = _line_hash(texto)
+        prev_nuevo = _line_hash(nuevo_texto)
+    atomic_write(p, "\n".join(salida) + "\n")
+    return len(salida)
 
 
 def pending_unsigned(vault_path: str | Path) -> int:
