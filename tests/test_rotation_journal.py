@@ -48,8 +48,9 @@ class Escenario:
         self.store = open_any(self.vault)
         self.store._data = self.store._vault.load()
         self.store.master = self.master
-        self.v2 = VaultV2(self.vault)
-        self.data = VaultV2(self.vault).load()
+        # una sola vista del cofre: la del store, para que el diario y las
+        # entradas no se pisen
+        self.v2 = self.store._vault
         self.fake = FakeCloudflare()
         self.base = self.fake.start()
         os.environ["COFRE_CLOUDFLARE_API"] = self.base
@@ -64,32 +65,32 @@ class Escenario:
     # -- helpers que imitan al motor -----------------------------------
 
     def guardar_pendiente(self, valor: str, ref: dict | None = None):
-        contenido = self.v2.blob(self.data, self.master, "CF_API")
+        contenido = self.v2.blob(self.store._data, self.master, "CF_API")
         contenido["pending"] = {"value": valor, "ref": ref or {},
                                 "desde": "2026-11-17T22:00:00"}
-        self.v2.set_blob(self.data, self.master, "CF_API", contenido)
-        self.v2.save(self.data)
+        self.v2.set_blob(self.store._data, self.master, "CF_API", contenido)
+        self.v2.save(self.store._data)
 
     def promover(self):
-        contenido = self.v2.blob(self.data, self.master, "CF_API")
+        contenido = self.v2.blob(self.store._data, self.master, "CF_API")
         pendiente = contenido.pop("pending", None)
         if not pendiente:
             return
         contenido.setdefault("history", []).append(
             {"value": contenido["value"], "replaced": "2026-11-17T22:10:00"})
         contenido["value"] = pendiente["value"]
-        self.v2.set_blob(self.data, self.master, "CF_API", contenido)
-        self.v2.save(self.data)
-        R.promote(self.vault)
+        self.v2.set_blob(self.store._data, self.master, "CF_API", contenido)
+        self.v2.save(self.store._data)
+        R.promote(self.store, self.master)
 
     def descartar_pendiente(self):
-        contenido = self.v2.blob(self.data, self.master, "CF_API")
+        contenido = self.v2.blob(self.store._data, self.master, "CF_API")
         contenido.pop("pending", None)
-        self.v2.set_blob(self.data, self.master, "CF_API", contenido)
-        self.v2.save(self.data)
+        self.v2.set_blob(self.store._data, self.master, "CF_API", contenido)
+        self.v2.save(self.store._data)
 
     def valor(self) -> str:
-        return self.v2.get(self.data, self.master, "CF_API")
+        return self.v2.get(self.store._data, self.master, "CF_API")
 
     def desplegar(self, valor: str, destinos: list[str] | None = None):
         return deploy(destinos or self.destinos, valor,
@@ -100,41 +101,41 @@ class TestFases(unittest.TestCase):
     def setUp(self):
         self.e = Escenario()
         self.e.guardar_pendiente("valor-nuevo")
-        R.begin(self.e.vault, "CF_API", "cloudflare", "valor-nuevo",
+        R.begin(self.e.store, self.e.master, "CF_API", "cloudflare", "valor-nuevo",
                 {"token_id": "nuevo"}, self.e.destinos)
 
     def tearDown(self):
         self.e.cerrar()
 
     def test_antes_de_promover_se_recomienda_deshacer(self):
-        plan = R.plan_resume(self.e.vault)
+        plan = R.plan_resume(self.e.store, self.e.master)
         self.assertEqual(plan["recomendada"], "deshacer")
         self.assertIn("continuar", plan["opciones"])
 
     def test_despues_de_promover_se_recomienda_continuar(self):
         self.e.promover()
-        plan = R.plan_resume(self.e.vault)
+        plan = R.plan_resume(self.e.store, self.e.master)
         self.assertEqual(plan["recomendada"], "continuar")
 
     def test_revocada_solo_continuar(self):
         self.e.promover()
-        R.mark_revoked(self.e.vault)
-        plan = R.plan_resume(self.e.vault)
+        R.mark_revoked(self.e.store, self.e.master)
+        plan = R.plan_resume(self.e.store, self.e.master)
         self.assertEqual(plan["opciones"], ["continuar"])
 
     def test_viejo_no_valido_solo_continuar(self):
-        diario = R.Journal.cargar(self.e.vault)
+        diario = R.Journal.cargar(self.e.store, self.e.master)
         diario.datos["viejo_valido"] = False
         diario.guardar()
-        plan = R.plan_resume(self.e.vault)
+        plan = R.plan_resume(self.e.store, self.e.master)
         self.assertEqual(plan["opciones"], ["continuar"])
         self.assertIn("ya no es válido", plan["explicación"])
 
     def test_aviso_de_diario_viejo(self):
-        diario = R.Journal.cargar(self.e.vault)
+        diario = R.Journal.cargar(self.e.store, self.e.master)
         diario.datos["iniciada"] = "2026-11-15T10:00:00"
         diario.guardar()
-        self.assertTrue(R.plan_resume(self.e.vault)["aviso"])
+        self.assertTrue(R.plan_resume(self.e.store, self.e.master)["aviso"])
 
 
 class TestDeshacerConDosDeTres(unittest.TestCase):
@@ -143,7 +144,7 @@ class TestDeshacerConDosDeTres(unittest.TestCase):
         self.destinos = ["cfw:cuenta:worker:A", "cfw:cuenta:worker:B",
                          "cfw:cuenta:worker:C"]
         self.e.destinos = self.destinos
-        R.begin(self.e.vault, "CF_API", "cloudflare", "valor-nuevo",
+        R.begin(self.e.store, self.e.master, "CF_API", "cloudflare", "valor-nuevo",
                 {"token_id": "nuevo"}, self.destinos)
 
     def tearDown(self):
@@ -153,37 +154,37 @@ class TestDeshacerConDosDeTres(unittest.TestCase):
         # se despliega solo en dos y se marca lo hecho
         self.e.guardar_pendiente("valor-nuevo")
         self.e.desplegar("valor-nuevo", self.destinos[:2])
-        R.marcar_destino(self.e.vault, self.destinos[0], "hecho")
-        R.marcar_destino(self.e.vault, self.destinos[1], "hecho")
-        plan = R.plan_resume(self.e.vault)
+        R.marcar_destino(self.e.store, self.e.master, self.destinos[0], "hecho")
+        R.marcar_destino(self.e.store, self.e.master, self.destinos[1], "hecho")
+        plan = R.plan_resume(self.e.store, self.e.master)
         self.assertEqual(plan["recomendada"], "deshacer")
 
         # deshacer: volver a poner el viejo en los ya cambiados y descartar
         hechos = [d for d, st in plan["destinos"].items() if st == "hecho"]
         self.e.desplegar("valor-viejo", hechos)
         self.e.descartar_pendiente()
-        R.finish(self.e.vault)
+        R.finish(self.e.store, self.e.master)
 
         secretos = self.e.fake.secretos["worker"]
         self.assertEqual(secretos["A"], "valor-viejo")
         self.assertEqual(secretos["B"], "valor-viejo")
         # el tercero nunca se toco: sigue con el viejo por definicion
         self.assertNotIn("C", secretos)
-        contenido = self.e.v2.blob(self.e.data, self.e.master, "CF_API")
+        contenido = self.e.v2.blob(self.e.store._data, self.e.master, "CF_API")
         self.assertNotIn("pending", contenido)
         self.assertEqual(contenido["value"], "valor-viejo")
-        self.assertIsNone(R.plan_resume(self.e.vault))
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
 
     def test_continuar_tras_promover_revoca_y_cierra(self):
         self.e.guardar_pendiente("valor-nuevo")
         self.e.desplegar("valor-nuevo")
         self.e.promover()
-        R.mark_revoked(self.e.vault)
-        R.finish(self.e.vault)
+        R.mark_revoked(self.e.store, self.e.master)
+        R.finish(self.e.store, self.e.master)
         self.assertEqual(self.e.valor(), "valor-nuevo")
         # el segundo escenario usa destinos A y B sobre el script "worker"
         self.assertEqual(self.e.fake.secretos["worker"]["A"], "valor-nuevo")
-        self.assertIsNone(R.plan_resume(self.e.vault))
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
 
 
 class TestPendienteEnElCofre(unittest.TestCase):
@@ -193,15 +194,110 @@ class TestPendienteEnElCofre(unittest.TestCase):
             e.guardar_pendiente("valor-nuevo", {"token_id": "n1"})
             crudo = e.vault.read_text(encoding="utf-8")
             self.assertNotIn("valor-nuevo", crudo, "el pendiente no va en claro")
-            contenido = e.v2.blob(e.data, e.master, "CF_API")
+            contenido = e.v2.blob(e.store._data, e.master, "CF_API")
             self.assertEqual(contenido["pending"]["value"], "valor-nuevo")
             # y el diario no lleva valores
-            R.begin(e.vault, "CF_API", "cloudflare", "valor-nuevo", {}, [])
-            diario = R.journal_path(e.vault).read_text(encoding="utf-8")
-            self.assertNotIn("valor-nuevo", diario)
+            R.begin(e.store, e.master, "CF_API", "cloudflare", "valor-nuevo", {}, [])
+            datos = R.Journal.cargar(e.store, e.master).datos
+            self.assertNotIn("valor-nuevo", json.dumps(datos))
         finally:
             e.cerrar()
 
 
+class TestDiarioNoSePuedeFalsificar(unittest.TestCase):
+    """Antes el diario era un fichero en claro: cambiar el ID de la credencial
+    nueva hacia que 'deshacer' borrase otro token. Ahora va cifrado y cualquier
+    cambio se detecta."""
+
+    def setUp(self):
+        self.e = Escenario()
+        self.e.guardar_pendiente("valor-nuevo", {"token_id": "nuevo"})
+        R.begin(self.e.store, self.e.master, "CF_API", "cloudflare",
+                "valor-nuevo", {"token_id": "nuevo"}, self.e.destinos)
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def test_no_hay_fichero_en_claro(self):
+        self.assertFalse((self.e.tmp / ".cofre-rotation.json").exists())
+
+    def test_editar_el_diario_rompe_el_descifrado(self):
+        crudo = self.e.vault.read_text(encoding="utf-8")
+        datos = json.loads(crudo)
+        # se manipula el indice cifrado: el AAD y la firma lo detectan
+        datos["index"]["c"] = datos["index"]["c"][:-8] + "00000000"
+        self.e.vault.write_text(json.dumps(datos), encoding="utf-8")
+        store = self.e.store
+        store._data = store._vault.load()
+        with self.assertRaises(R.JournalError):
+            R.plan_resume(store, store.master)
+
+    def test_un_token_ajeno_no_llega_a_borrarse(self):
+        # el ID vive cifrado: no se puede cambiar desde fuera, asi que
+        # 'deshacer' no puede apuntar a otro token
+        datos = R.Journal.cargar(self.e.store, self.e.master).datos
+        self.assertEqual(datos["ref_nueva"]["token_id"], "nuevo")
+        self.assertNotIn("nuevo", self.e.vault.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFalloEnCadaFase(unittest.TestCase):
+    """El motor deja el diario en la fase correcta si algo falla."""
+
+    def setUp(self):
+        self.e = Escenario()
+        self.destinos = ["cfw:cuenta:worker:U", "cfw:cuenta:worker:V"]
+
+    def tearDown(self):
+        self.e.cerrar()
+
+    def _correr(self, falla_en: str, revocar_viejo: bool = True):
+        desplegados = []
+        revocados = []
+
+        def desplegar(destinos, valor):
+            if falla_en == "desplegar" and len(desplegados) == 1:
+                raise RuntimeError("fallo simulado al desplegar")
+            desplegados.append((destinos[0], valor))
+
+        def revocar():
+            if falla_en == "revocar":
+                raise RuntimeError("fallo simulado al revocar")
+            revocados.append("viejo")
+
+        return R.run_rotation(
+            self.e.store, self.e.master, "CF_API", "cloudflare", "valor-nuevo",
+            {"token_id": "nuevo"}, self.destinos, desplegar, revocar,
+            revocar_viejo=revocar_viejo), desplegados, revocados
+
+    def test_fallo_al_desplegar_deja_fase_intermedia(self):
+        resultado, desplegados, _ = self._correr("desplegar")
+        self.assertIn("interrumpida", resultado)
+        plan = R.plan_resume(self.e.store, self.e.master)
+        self.assertIn(plan["fase"], ("desplegando", "pendiente_creada"))
+        self.assertEqual(plan["recomendada"], "deshacer")
+
+    def test_fallo_al_revocar_deja_promovida(self):
+        resultado, desplegados, revocados = self._correr("revocar")
+        self.assertIn("interrumpida", resultado)
+        plan = R.plan_resume(self.e.store, self.e.master)
+        self.assertEqual(plan["fase"], "promovida")
+        self.assertEqual(plan["recomendada"], "continuar")
+        self.assertEqual(revocados, [])
+
+    def test_sin_revocar_queda_promovida(self):
+        resultado, desplegados, revocados = self._correr("nada", revocar_viejo=False)
+        self.assertEqual(resultado, "completada")
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))
+        self.assertEqual(revocados, [])
+        self.assertEqual(len(desplegados), 2)
+        self.assertEqual(self.e.valor(), "valor-nuevo")
+
+    def test_ciclo_completo_cierra_el_diario(self):
+        resultado, _, revocados = self._correr("nada")
+        self.assertEqual(resultado, "completada")
+        self.assertEqual(revocados, ["viejo"])
+        self.assertIsNone(R.plan_resume(self.e.store, self.e.master))

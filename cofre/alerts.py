@@ -32,6 +32,7 @@ DEFAULTS = {
     "odd_to": 6,
     "cooldown_minutes": 10,
     "open_failures": 3,
+    "rotation_hours": 24,      # diario de rotacion abierto demasiado tiempo
 }
 
 READ_EVENTS = {"get", "browser-get", "clipboard", "reveal"}
@@ -194,6 +195,7 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
                                  f"({ultimo.get('detail') or 'sin motivo escrito'})",
                                  int(ultimo.get("seq", 0))))
 
+    # rotacion estancada: se evalua fuera de los eventos (lo mira la GUI)
     # log manipulado: cuenta el ULTIMO veredicto, no los historicos que ya se
     # resolvieron con un re-anclaje
     veredictos = [e for e in events if e.get("ev") == "audit-verify"]

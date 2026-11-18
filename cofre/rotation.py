@@ -33,15 +33,19 @@ from pathlib import Path
 
 from cofre.paths import atomic_write
 
-JOURNAL_NAME = ".cofre-rotation.json"
+# El diario vive dentro del indice cifrado, no en un fichero aparte: si alguien
+# cambia el ID de la credencial nueva por el de otro token, el descifrado falla y
+# resume se niega a actuar. Un fichero en claro permitia que COFRE borrase el
+# token equivocado por orden de un tercero.
+JOURNAL_KEY = "rotation"
 MARGEN_ALERTA_HORAS = 24
 
 FASES = ("comenzada", "pendiente_creada", "desplegando", "desplegada",
          "promovida", "revocada")
 
 
-def journal_path(vault_path: str | Path) -> Path:
-    return Path(vault_path).parent / JOURNAL_NAME
+class JournalError(RuntimeError):
+    """El diario no se puede leer o no cuadra: no se actua."""
 
 
 def _ahora() -> str:
@@ -49,30 +53,48 @@ def _ahora() -> str:
 
 
 class Journal:
-    def __init__(self, vault_path: str | Path, datos: dict | None = None):
-        self.path = journal_path(vault_path)
-        self.datos = datos if datos is not None else (self.cargar() or {})
+    """Diario de rotación guardado en el indice cifrado del cofre."""
+
+    def __init__(self, store, master: bytes, datos: dict):
+        # store: el cofre abierto; master: la clave en memoria solo mientras dura
+        self.store = store
+        self.master = master
+        self.datos = datos
+        self.path = store.path
+
+    # ------------------------------------------------------------ lectura
 
     @classmethod
-    def cargar(cls, vault_path: str | Path) -> "Journal | None":
-        p = journal_path(vault_path)
-        if not p.exists():
-            return None
+    def cargar(cls, store, master: bytes) -> "Journal | None":
         try:
-            return cls(vault_path, json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
+            idx = store.index(store._data, master)
+        except Exception as exc:                       # noqa: BLE001
+            raise JournalError(
+                "el indice del cofre no se puede descifrar: no se actua") from exc
+        datos = (idx.get("settings") or {}).get(JOURNAL_KEY)
+        if not datos:
             return None
+        if not isinstance(datos, dict):
+            raise JournalError("el diario de rotación tiene forma inesperada")
+        return cls(store, master, datos)
 
-    # ------------------------------------------------------------ estado
+    # ------------------------------------------------------------ escritura
 
     def guardar(self) -> None:
-        atomic_write(self.path, json.dumps(self.datos, indent=2, sort_keys=True))
+        idx = self.store.index(self.store._data, self.master)
+        idx.setdefault("settings", {})[JOURNAL_KEY] = self.datos
+        self.store._write_index(self.store._data, self.master, idx)
+        self.store.save(self.store._data)
 
     def borrar(self) -> None:
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+        idx = self.store.index(self.store._data, self.master)
+        settings = idx.get("settings") or {}
+        settings.pop(JOURNAL_KEY, None)
+        idx["settings"] = settings
+        self.store._write_index(self.store._data, self.master, idx)
+        self.store.save(self.store._data)
+
+    # ------------------------------------------------------------ estado
 
     @property
     def fase(self) -> str:
@@ -111,11 +133,11 @@ class Journal:
 
 # ---------------------------------------------------------------- inicio
 
-def begin(vault_path: str | Path, nombre: str, proveedor: str,
+def begin(store, master: bytes, nombre: str, proveedor: str,
           valor_pendiente: str, ref_nueva: dict | None = None,
           destinos: list[str] | None = None,
           old_value_still_valid: bool = True) -> Journal:
-    diario = Journal(vault_path, {
+    diario = Journal(store, master, {
         "nombre": nombre,
         "proveedor": proveedor,
         "iniciada": _ahora(),
@@ -132,9 +154,9 @@ def begin(vault_path: str | Path, nombre: str, proveedor: str,
 
 # ---------------------------------------------------------------- reanudar
 
-def plan_resume(vault_path: str | Path) -> dict | None:
+def plan_resume(store, master: bytes) -> dict | None:
     """Que paso, que opciones hay y cual se recomienda. No ejecuta nada."""
-    diario = Journal.cargar(vault_path)
+    diario = Journal.cargar(store, master)
     if diario is None:
         return None
     fase = diario.fase
@@ -173,42 +195,41 @@ def plan_resume(vault_path: str | Path) -> dict | None:
     }
 
 
-def marcar_destino(vault_path: str | Path, destino: str, estado: str) -> None:
-    diario = Journal.cargar(vault_path)
+def marcar_destino(store, master: bytes, destino: str, estado: str) -> None:
+    diario = Journal.cargar(store, master)
     if diario:
         diario.marcar_destino(destino, estado)
 
 
-def promote(vault_path: str | Path) -> None:
-    diario = Journal.cargar(vault_path)
+def promote(store, master: bytes) -> None:
+    diario = Journal.cargar(store, master)
     if diario:
         diario.set_fase("promovida")
         diario.marcar("promovida", "pendiente pasa a activo; viejo al historial")
 
 
-def mark_revoked(vault_path: str | Path) -> None:
-    diario = Journal.cargar(vault_path)
+def mark_revoked(store, master: bytes) -> None:
+    diario = Journal.cargar(store, master)
     if diario:
         diario.set_fase("revocada")
         diario.marcar("revocada", "viejo revocado en el proveedor")
 
 
-def finish(vault_path: str | Path) -> None:
+def finish(store, master: bytes) -> None:
     """Cerrar el diario cuando ya no queda nada que hacer."""
-    diario = Journal.cargar(vault_path)
+    diario = Journal.cargar(store, master)
     if diario:
         diario.borrar()
 
 
 # ---------------------------------------------------------------- acciones
 
-def deshacer(vault_path: str | Path, opcion_confirmada: bool = False,
-             store=None) -> str:
+def deshacer(store, master: bytes, opcion_confirmada: bool = False) -> str:
     """Volver atras: reponer el valor viejo en los destinos ya cambiados,
     borrar la credencial nueva en el proveedor y descartar la pendiente."""
     if not opcion_confirmada:
         raise RuntimeError("deshacer exige confirmación explicita")
-    diario = Journal.cargar(vault_path)
+    diario = Journal.cargar(store, master)
     if diario is None:
         return "no hay nada que deshacer"
     if diario.fase not in ("comenzada", "pendiente_creada", "desplegando",
@@ -242,12 +263,11 @@ def deshacer(vault_path: str | Path, opcion_confirmada: bool = False,
     return "deshecho"
 
 
-def continuar(vault_path: str | Path, opcion_confirmada: bool = False,
-              store=None) -> str:
+def continuar(store, master: bytes, opcion_confirmada: bool = False) -> str:
     """Terminar lo que falto: promover si no se hizo y revocar el viejo."""
     if not opcion_confirmada:
         raise RuntimeError("continuar exige confirmación explicita")
-    diario = Journal.cargar(vault_path)
+    diario = Journal.cargar(store, master)
     if diario is None:
         return "no hay nada que continuar"
     nombre = str(diario.datos.get("nombre"))
@@ -272,3 +292,55 @@ def continuar(vault_path: str | Path, opcion_confirmada: bool = False,
         diario.set_fase("revocada")
     diario.borrar()
     return "continuado"
+
+
+# ---------------------------------------------------------------- motor
+
+def run_rotation(store, master: bytes, nombre: str, proveedor: str,
+                 valor_nuevo: str, ref_nueva: dict | None,
+                 destinos: list[str], desplegar, revocar=None,
+                 revocar_viejo: bool = False, old_value_still_valid: bool = True):
+    """Ciclo completo: pendiente -> desplegar -> promover -> revocar.
+
+    `desplegar(destinos, valor)` y `revocar(ref)` son callables para poder
+    probar fallos en cada paso. Si algo falla, el diario queda en la fase en la
+    que murio y el valor viejo sigue siendo el activo.
+    """
+    from cofre.v2.vault import Vault2Error      # noqa: F401  (claridad)
+
+    contenido = store._vault.blob(store._data, master, nombre)
+    contenido["pending"] = {"value": valor_nuevo, "ref": ref_nueva or {},
+                            "desde": _ahora()}
+    store._vault.set_blob(store._data, master, nombre, contenido)
+    store.save(store._data)
+
+    diario = begin(store, master, nombre, proveedor, valor_nuevo, ref_nueva,
+                   destinos, old_value_still_valid)
+    try:
+        diario.set_fase("desplegando")
+        for destino in destinos:
+            desplegar([destino], valor_nuevo)
+            diario.marcar_destino(destino, "hecho")
+        diario.set_fase("desplegada")
+
+        contenido = store._vault.blob(store._data, master, nombre)
+        pendiente = contenido.pop("pending", {})
+        contenido.setdefault("history", []).append(
+            {"value": contenido.get("value", ""), "replaced": _ahora()})
+        contenido["value"] = pendiente.get("value", valor_nuevo)
+        store._vault.set_blob(store._data, master, nombre, contenido)
+        store.save(store._data)
+        promote(store, master)
+
+        if revocar_viejo and revocar is not None:
+            revocar()
+            mark_revoked(store, master)
+        finish(store, master)
+        return "completada"
+    except Exception as exc:                      # noqa: BLE001
+        # el objeto `diario` puede estar viejo (promote() escribe desde otro):
+        # se recarga para no sobrescribir la fase con datos antiguos
+        actual = Journal.cargar(store, master)
+        if actual is not None:
+            actual.marcar("fallo", type(exc).__name__)
+        return f"interrumpida: {exc}"

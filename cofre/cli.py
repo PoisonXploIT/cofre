@@ -584,7 +584,20 @@ def main(argv: list[str]) -> int:
 
     if args.command == "resume":
         from cofre import rotation as rot
-        plan = rot.plan_resume(str(vault_path))
+        material = material_for(args.gate, str(vault_path), args.stick,
+                                args.allow_new_stick)
+        vault.bind_material(material)
+        if not vault.is_v2():
+            print("el diario de rotación necesita un cofre v2", file=sys.stderr)
+            return 1
+        store = vault._v2store()
+        try:
+            plan = rot.plan_resume(store, store.master)
+        except rot.JournalError as exc:
+            print(f"no se actua: {exc}", file=sys.stderr)
+            record(str(vault_path), "alert", args.gate, None, name="diario-no-fiable",
+                   ok=False, detail=str(exc)[:150])
+            return 1
         if plan is None:
             print("no hay ninguna rotación interrumpida")
             return 0
@@ -607,14 +620,10 @@ def main(argv: list[str]) -> int:
                 print("cancelado: no se ha tocado nada")
                 return 1
         # el motor no ejecuta solo: aqui se aplica la opcion elegida
-        material = material_for(args.gate, str(vault_path), args.stick,
-                                args.allow_new_stick)
-        vault.bind_material(material)
-        store = vault._v2store() if vault.is_v2() else None
         if opcion == "deshacer":
-            rot.deshacer(str(vault_path), opcion_confirmada=True, store=store)
+            rot.deshacer(store, store.master, opcion_confirmada=True)
         else:
-            rot.continuar(str(vault_path), opcion_confirmada=True, store=store)
+            rot.continuar(store, store.master, opcion_confirmada=True)
         print(f"hecho: {opcion}")
         record(str(vault_path), "rotate", args.gate, None, name=plan["nombre"],
                ok=True, detail=f"reanudada: {opcion}")

@@ -1450,6 +1450,30 @@ class CofreGUI:
             pass
         self.root.after(200, self._pump_confirm)
 
+    def _check_rotation(self) -> None:
+        """Si hay una rotación interrumpida, avisar en la banda (no ejecutar)."""
+        try:
+            from cofre import rotation as rot
+            if not self.vault.is_v2():
+                return
+            store = self.vault._v2store()
+            if store.master is None:
+                return
+            plan = rot.plan_resume(store, store.master)
+        except Exception:
+            return
+        if not plan:
+            return
+        texto = (f"rotación interrumpida de '{plan['nombre']}' "
+                 f"(fase {plan['fase']}); lo recomendado es {plan['recomendada']}")
+        if plan.get("aviso"):
+            texto = plan["aviso"] + ". " + texto
+        if getattr(self, "_rotation_avisada", None) != plan["fase"] + texto:
+            self._rotation_avisada = plan["fase"] + texto
+            self.show_alerts([texto])
+            record(self.vault_path, "alert", self.gate, self.serial,
+                   name="rotación-interrumpida", ok=False, detail=texto[:150])
+
     def _check_alerts(self) -> None:
         """3.2: evaluar solo lo nuevo, registrar cada alerta y avisar."""
         try:
@@ -1489,6 +1513,7 @@ class CofreGUI:
     def _poll(self) -> None:
         self._check_session()
         self._check_alerts()
+        self._check_rotation()
         if getattr(self, "lock_screen", None) and not self.session:
             try:
                 self.lock_screen.refrescar()
