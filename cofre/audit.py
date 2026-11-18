@@ -57,7 +57,7 @@ PRIVILEGED = {
     "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
-    "discard", "health", "panic", "rekey", "recovery",
+    "discard", "health", "panic", "rekey", "recovery", "backup",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -358,6 +358,7 @@ VERBS = {
     "panic": "boton de panico",
     "rekey": "clave maestra cambiada",
     "recovery": "código de recuperación renovado",
+    "backup": "copia del cofre",
 }
 
 

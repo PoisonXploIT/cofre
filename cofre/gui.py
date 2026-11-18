@@ -97,7 +97,12 @@ class CofreGUI:
         self.confirm_grants: dict[tuple[str, str], float] = {}
         self.alert_state = None
         self.browser_on = False
-        self.clipboard_ttl = 30
+        from cofre import settings as _settings
+        self._cfg = _settings.load(self.vault_path)
+        self.clipboard_ttl = int(self._cfg.get("clipboard_seconds", 30))
+        self.reveal_ms = int(self._cfg.get("reveal_seconds", 15)) * 1000
+        self._gen_lang = str(self._cfg.get("gen_lang", "es"))
+        self._bridge_on_start = bool(self._cfg.get("bridge_on_start"))
         self._clip_id = None
         self._key_cache: set[str] = set()
 
@@ -559,28 +564,16 @@ class CofreGUI:
         self.wizard_msg = tk.StringVar(value="")
         tk.Label(self.wizard, textvariable=self.wizard_msg, fg=MUT, font=self.f_sub,
                  bg=PANEL).pack(anchor="w", padx=16, pady=(0, 8))
-        self.dest_var = tk.StringVar(value="F:\\")
-        wrow = tk.Frame(self.wizard, bg=PANEL)
-        wrow.pack(fill="x", padx=16, pady=(4, 4))
-        tk.Label(wrow, text="unidad destino", fg=MUT, font=self.f_small,
-                 bg=PANEL).pack(side="left")
-        dent = self._entry(wrow, self.dest_var, mono=True)
-        dent.configure(width=6)
-        dent.pack(side="left", padx=4)
-        # E4: la columna del detalle es mas estrecha que antes; cada accion en su
-        # fila para que no se recorte
+        # 6.8: el asistente sustituye los botones sueltos de la fase 1
+        tk.Label(self.wizard,
+                 text="Crea la llave del pendrive, el cofre y el código de "
+                      "recuperación en cinco pasos.",
+                 fg=MUT, font=self.f_small, bg=PANEL, anchor="w",
+                 wraplength=300, justify="left").pack(fill="x", padx=16)
         wrow3 = tk.Frame(self.wizard, bg=PANEL)
-        wrow3.pack(fill="x", padx=16, pady=(0, 4))
-        self._btn(wrow3, "Crear llave", lambda e: self.wizard_create_key(event=e)).pack(
-            side="left", padx=4)
-        wrow2 = tk.Frame(self.wizard, bg=PANEL)
-        wrow2.pack(fill="x", padx=16, pady=(0, 4))
-        self._btn(wrow2, "Inicializar cofre", lambda e: self.wizard_init(event=e),
+        wrow3.pack(fill="x", padx=16, pady=(8, 8))
+        self._btn(wrow3, "Abrir el asistente", self.open_first_use,
                   accent=True).pack(side="left", padx=4)
-        wrow4 = tk.Frame(self.wizard, bg=PANEL)
-        wrow4.pack(fill="x", padx=16, pady=(0, 8))
-        self._btn(wrow4, "Copiar la llave (reserva)",
-                  lambda e: self.wizard_backup(event=e)).pack(side="left", padx=4)
 
         self.detail_name = tk.Label(right, text="sin selección", fg=FG,
                                     font=self.f_h2, bg=PANEL2)
@@ -935,6 +928,11 @@ class CofreGUI:
         self.refresh_wizard()
         self.refresh_list()
         self._escribir_calendario()
+        if getattr(self, "_bridge_on_start", False) and not self.bridge:
+            try:
+                self.start_bridge()
+            except Exception:
+                pass
         return True
 
     def _escribir_calendario(self) -> None:
@@ -1370,8 +1368,8 @@ class CofreGUI:
                 self.wizard.pack(fill="x", padx=16, pady=(12, 4))
         elif st == "key-no-vault":
             self.wizard_msg.set(
-                f"La llave esta en {', '.join(drives)} pero el cofre no esta "
-                "inicializado. Pulsa 'Inicializar cofre'.")
+                f"Hay una llave en {', '.join(drives)} pero no hay cofre. "
+                "Abre el asistente para crear el cofre y el código.")
             if self.detail_name.winfo_manager():
                 self.wizard.pack(fill="x", padx=16, pady=(12, 4),
                                  before=self.detail_name)
@@ -1448,7 +1446,12 @@ class CofreGUI:
         try:
             idx = self.vault._v2store()._vault.index(self.vault._v2store()._data,
                                                      self.vault._v2store().master)                 if self.vault.is_v2() and self.vault._v2store().master else {}
-            return dict(idx.get("settings", {}))
+            base = dict(idx.get("settings", {}))
+            from cofre import settings as _settings
+            cfg = _settings.load(self.vault_path)
+            base["idle_minutes"] = int(cfg["idle_minutes"])
+            base["max_hours"] = int(cfg["max_hours"])
+            return base
         except Exception:
             return {}
 
@@ -2075,6 +2078,17 @@ class CofreGUI:
         self._update_detail_visible()
         self.refresh_detail()
 
+    def open_first_use(self, event=None) -> None:
+        """6.8: asistente de primer uso. Solo si no hay cofre."""
+        if self.session:
+            self.set_foot("el cofre ya está abierto")
+            return
+        if self.vault.path.exists() and self.vault.path.stat().st_size > 0:
+            self.set_foot("ya hay un cofre en esa ruta; usa Llaves o la migración")
+            return
+        from cofre.firstuse import Wizard
+        self._wizard = Wizard(self)
+
     def open_keys(self) -> None:
         """6.6: llaves del cofre, estado, último uso y acciones."""
         if not self.session:
@@ -2602,36 +2616,224 @@ class CofreGUI:
             self.set_foot(f"no se pudo copiar: {exc}")
 
     def open_settings(self) -> None:
+        """6.7: seguridad, generador, alertas, navegador, copias y Acerca de."""
+        from cofre import alerts as alerts_mod
+        from cofre import settings as st
+        cfg = st.load(self.vault_path)
+        alertas = alerts_mod.load_settings(self.vault_path)
         win = self._sheet("Ajustes")
-        win.geometry("560x380")
-        texto = tk.Text(win, bg=PANEL, fg=FG, font=self.f_mono, bd=0,
-                        highlightthickness=0, wrap="word")
-        texto.pack(fill="both", expand=True, padx=12, pady=12)
-        ajustes = chr(10).join([
-            f"gate: {self.gate}",
-            f"ruta del cofre: {self.vault_path}",
-            f"bloqueo por inactividad: {SESION_IDLE} min",
-            f"tiempo maximo de sesión: {SESION_MAX} h",
-            "puente: tuberia con nombre (TCP con COFRE_BRIDGE=tcp)",
-        ]) + chr(10)
-        texto.insert("end", ajustes)
-        texto.configure(state="disabled")
+        win.geometry("840x620")
+        cab = tk.Frame(win, bg=PANEL)
+        cab.pack(fill="x", padx=16, pady=(12, 2))
+        tk.Label(cab, text="Ajustes", fg=FG, bg=PANEL, font=self.f_title,
+                 anchor="w").pack(side="left")
+        self._btn(cab, "Cerrar", win.destroy).pack(side="right")
+        tk.Label(win, text="Todo esto se guarda en cofre-settings.json, junto "
+                           "al cofre. No hay secretos ahí.",
+                 fg=MUT, bg=PANEL, font=self.f_small, anchor="w").pack(
+            fill="x", padx=16)
 
-        fila = tk.Frame(win, bg=PANEL)
-        fila.pack(fill="x", padx=12, pady=(0, 8))
+        cuerpo = tk.Frame(win, bg=PANEL)
+        cuerpo.pack(fill="both", expand=True, padx=16, pady=(6, 0))
+        izq = tk.Frame(cuerpo, bg=PANEL)
+        izq.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        der = tk.Frame(cuerpo, bg=PANEL)
+        der.pack(side="left", fill="both", expand=True)
+
+        def seccion(parent, titulo: str) -> None:
+            tk.Label(parent, text=titulo.upper(), fg=FAINT, bg=PANEL,
+                     font=self.f_small, anchor="w").pack(fill="x", pady=(10, 2))
+
+        def campo(parent, etiqueta: str, var, ancho: int = 8):
+            fila = tk.Frame(parent, bg=PANEL)
+            fila.pack(fill="x", pady=2)
+            tk.Label(fila, text=etiqueta, fg=MUT, bg=PANEL,
+                     font=self.f_small, width=34, anchor="w").pack(side="left")
+            entrada = tk.Entry(fila, textvariable=var, width=ancho, bg=CAMPO,
+                               fg=FG, insertbackground=FG, relief="flat",
+                               highlightthickness=1, highlightbackground=LINE,
+                               font=self.f_body)
+            entrada.pack(side="left")
+            return entrada
+
+        def opcion(parent, etiqueta: str, var, valores: list[str]):
+            fila = tk.Frame(parent, bg=PANEL)
+            fila.pack(fill="x", pady=2)
+            tk.Label(fila, text=etiqueta, fg=MUT, bg=PANEL,
+                     font=self.f_small, width=34, anchor="w").pack(side="left")
+            menu = tk.OptionMenu(fila, var, *valores)
+            menu.configure(bg=CAMPO, fg=FG, activebackground=PANEL2,
+                           activeforeground=FG, relief="flat",
+                           highlightthickness=0, font=self.f_body)
+            menu["menu"].configure(bg=CAMPO, fg=FG, font=self.f_body)
+            menu.pack(side="left")
+            return menu
+
+        v_idle = tk.StringVar(value=str(cfg["idle_minutes"]))
+        v_max = tk.StringVar(value=str(cfg["max_hours"]))
+        v_clip = tk.StringVar(value=str(cfg["clipboard_seconds"]))
+        v_reveal = tk.StringVar(value=str(cfg["reveal_seconds"]))
+        v_perfil = tk.StringVar(value=str(cfg["gen_profile"]))
+        v_palabras = tk.StringVar(value=str(cfg["gen_words"]))
+        v_idioma = tk.StringVar(value=str(cfg["gen_lang"]))
+        v_bridge = tk.BooleanVar(value=bool(cfg["bridge_on_start"]))
+        v_carpeta = tk.StringVar(value=str(cfg["backup_folder"]))
+        v_burst = tk.StringVar(value=str(alertas["burst_count"]))
+        v_bmin = tk.StringVar(value=str(alertas["burst_minutes"]))
+        v_desde = tk.StringVar(value=str(alertas["odd_from"]))
+        v_hasta = tk.StringVar(value=str(alertas["odd_to"]))
+        v_pausa = tk.StringVar(value=str(alertas["cooldown_minutes"]))
+        v_fallos = tk.StringVar(value=str(alertas["open_failures"]))
+        v_rot = tk.StringVar(value=str(alertas["rotation_hours"]))
+
+        seccion(izq, "Seguridad")
+        campo(izq, "Bloquear por inactividad (min)", v_idle)
+        campo(izq, "Tiempo máximo de sesión (h)", v_max)
+        campo(izq, "Vaciar el portapapeles (s; 0 = nunca)", v_clip)
+        campo(izq, "Ocultar el valor revelado (s)", v_reveal)
+
+        seccion(izq, "Generador")
+        opcion(izq, "Perfil por defecto", v_perfil, ["machine", "human"])
+        opcion(izq, "Palabras", v_palabras, ["4", "6", "8"])
+        opcion(izq, "Idioma", v_idioma, ["es", "en"])
+
+        seccion(izq, "Umbrales de alertas")
+        campo(izq, "Lecturas para una ráfaga", v_burst)
+        campo(izq, "Minutos de la ráfaga", v_bmin)
+        campo(izq, "Hora rara: desde", v_desde)
+        campo(izq, "Hora rara: hasta", v_hasta)
+        campo(izq, "Pausa entre alertas (min)", v_pausa)
+        campo(izq, "Fallos de apertura seguidos", v_fallos)
+        campo(izq, "Horas para rotación colgada", v_rot)
+
+        seccion(der, "Navegador")
+        tk.Checkbutton(der, text="Conectar el puente al abrir el cofre",
+                       variable=v_bridge, bg=PANEL, fg=FG, selectcolor=CAMPO,
+                       activebackground=PANEL, activeforeground=FG,
+                       font=self.f_body).pack(anchor="w")
         estado_nav = "conectado" if self.browser_on else "desconectado"
-        tk.Label(fila, text=f"navegador: {estado_nav}", fg=MUT, bg=PANEL,
-                 font=self.f_small).pack(side="left")
-        etiqueta = "Desconectar navegador" if self.browser_on else "Conectar navegador"
-        self._btn(fila, etiqueta, lambda e: (self.toggle_browser(), win.destroy())
-                  ).pack(side="right")
-        fila_emergencia = tk.Frame(win, bg=PANEL)
-        fila_emergencia.pack(fill="x", padx=12, pady=(8, 0))
-        tk.Label(fila_emergencia, text="Emergencia", fg=DANGER, bg=PANEL,
-                 font=self.f_sub).pack(side="left")
-        self._btn(fila_emergencia, "Botón de pánico", self.open_panic,
-                  danger=True).pack(side="right")
-        self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
+        self._btn(der, f"Navegador: {estado_nav}",
+                  lambda e: self.toggle_browser()).pack(anchor="w", pady=4)
+        self._btn(der, "Emparejar de nuevo",
+                  lambda e: self._emparejar_host()).pack(anchor="w", pady=2)
+
+        seccion(der, "Copias")
+        fila_copia = tk.Frame(der, bg=PANEL)
+        fila_copia.pack(fill="x", pady=2)
+        tk.Entry(fila_copia, textvariable=v_carpeta, bg=CAMPO, fg=FG,
+                 insertbackground=FG, relief="flat", highlightthickness=1,
+                 highlightbackground=LINE, font=self.f_body).pack(
+            side="left", fill="x", expand=True)
+        self._btn(fila_copia, "Elegir",
+                  lambda e: self._elegir_carpeta(v_carpeta)).pack(
+            side="left", padx=6)
+        self._btn(der, "Copiar el cofre ahora",
+                  lambda e: self._copiar_copia(v_carpeta.get())).pack(
+            anchor="w", pady=4)
+        tk.Label(der, text="La copia es el cofre cifrado. La llave del pendrive "
+                           "NO debe ir en la misma carpeta.",
+                 fg=FAINT, bg=PANEL, font=self.f_small, anchor="w",
+                 wraplength=360, justify="left").pack(fill="x")
+
+        seccion(der, "Acerca de")
+        formato = "v2 (índice y entradas cifrados)" if self.vault.is_v2() else "v1"
+        tk.Label(der, text=f"COFRE {st.VERSION} · formato {formato}",
+                 fg=FG, bg=PANEL, font=self.f_body, anchor="w").pack(fill="x")
+        tk.Label(der, text=str(self.vault_path), fg=MUT, bg=PANEL,
+                 font=self.f_small, anchor="w", wraplength=360,
+                 justify="left").pack(fill="x")
+
+        seccion(der, "Emergencia")
+        self._btn(der, "Botón de pánico", self.open_panic,
+                  danger=True).pack(anchor="w")
+
+        pie = tk.Frame(win, bg=PANEL)
+        pie.pack(fill="x", padx=16, pady=12)
+
+        def guardar() -> None:
+            try:
+                nuevo = st.clamp({
+                    "idle_minutes": int(v_idle.get()),
+                    "max_hours": int(v_max.get()),
+                    "clipboard_seconds": int(v_clip.get()),
+                    "reveal_seconds": int(v_reveal.get()),
+                    "gen_profile": v_perfil.get(),
+                    "gen_words": int(v_palabras.get()),
+                    "gen_lang": v_idioma.get(),
+                    "bridge_on_start": bool(v_bridge.get()),
+                    "backup_folder": v_carpeta.get().strip(),
+                })
+                nuevos_alertas = {
+                    "burst_count": int(v_burst.get()),
+                    "burst_minutes": float(v_bmin.get()),
+                    "odd_from": int(v_desde.get()),
+                    "odd_to": int(v_hasta.get()),
+                    "cooldown_minutes": float(v_pausa.get()),
+                    "open_failures": int(v_fallos.get()),
+                    "rotation_hours": int(v_rot.get()),
+                }
+            except ValueError:
+                self.set_foot("los tiempos y umbrales tienen que ser números")
+                return
+            st.save(self.vault_path, nuevo)
+            alerts_mod.write_settings(self.vault_path, nuevos_alertas)
+            self._aplicar_settings(nuevo)
+            self.set_foot("ajustes guardados")
+            win.destroy()
+
+        self._btn(pie, "Guardar", guardar, accent=True).pack(side="right")
+
+    def _aplicar_settings(self, cfg: dict) -> None:
+        self._cfg = dict(cfg)
+        self.clipboard_ttl = int(cfg["clipboard_seconds"])
+        self.reveal_ms = int(cfg["reveal_seconds"]) * 1000
+        self._gen_lang = str(cfg["gen_lang"])
+        self._bridge_on_start = bool(cfg["bridge_on_start"])
+        if self.session_obj is not None:
+            self.session_obj.settings["idle_minutes"] = int(cfg["idle_minutes"])
+            self.session_obj.settings["max_hours"] = int(cfg["max_hours"])
+
+    def _elegir_carpeta(self, var) -> None:
+        from tkinter import filedialog
+        carpeta = filedialog.askdirectory(parent=self.root)
+        if carpeta:
+            var.set(carpeta)
+
+    def _copiar_copia(self, carpeta: str) -> None:
+        from datetime import datetime
+        import shutil
+        carpeta = str(carpeta or "").strip()
+        if not carpeta:
+            self.set_foot("elige primero la carpeta de copias")
+            return
+        destino_dir = Path(carpeta)
+        if not destino_dir.is_dir():
+            self.set_foot("la carpeta de copias no existe")
+            return
+        destino = destino_dir / ("cofre-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json")
+        try:
+            shutil.copy2(self.vault_path, destino)
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(f"no se pudo copiar: {exc}")
+            return
+        record(self.vault_path, "backup", self.gate, self.serial, name="-",
+               ok=True, detail=str(destino)[:150])
+        self.set_foot(f"copia escrita en {destino}. La llave NO va en esa carpeta.")
+
+    def _emparejar_host(self) -> None:
+        aviso = ("Se va a registrar el host de mensajería nativa para el "
+                 "navegador. Cierra el navegador si el instalador lo pide.")
+        if not self._confirmar_accion("Emparejar el navegador", aviso,
+                                      "Emparejar"):
+            return
+        instalador = Path(__file__).resolve().parent.parent / "tools" / "install_host.py"
+        try:
+            proc = subprocess.run([sys.executable, str(instalador)],
+                                  capture_output=True, text=True, timeout=120)
+            salida = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        except Exception as exc:                   # noqa: BLE001
+            salida = f"no se pudo ejecutar el instalador: {exc}"
+        self._mostrar_salida("Emparejar el navegador", salida)
 
     def open_panic(self) -> None:
         """5.10: la emergencia se ve aquí; la ejecucion va en una terminal."""
@@ -3228,11 +3430,13 @@ class CofreGUI:
             except Exception:
                 pass
         if not self.sticky:
-            self.reveal_id = self.root.after(REVEAL_MS, self.hide)
+            self.reveal_id = self.root.after(
+                getattr(self, "reveal_ms", REVEAL_MS), self.hide)
         record(self.vault_path, "reveal", self.gate, self.serial, name=self.selected)
         self.set_foot("mostrando '%s'%s" % (self.selected,
                                             " (fijo, no se oculta)" if self.sticky
-                                            else ": se oculta sola en 15 segundos"))
+                                            else (": se oculta sola en "
+                                                  f"{getattr(self, 'reveal_ms', REVEAL_MS) // 1000} segundos")))
 
     def toggle_sticky(self, event=None):
         if getattr(event, "num", None) != 1:

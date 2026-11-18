@@ -190,13 +190,14 @@ class EntrySheet:
             self.b_ver.set_text("ver")
 
     def _generar(self, kind: str, palabras: int = 5) -> None:
+        idioma = getattr(self.app, "_gen_lang", "es")
         if kind == "machine":
             valor = machine_password()
         else:
-            valor = human_password(words=palabras, lang="es")
+            valor = human_password(words=palabras, lang=idioma)
         self.campo_valor.set(valor)
         self._fortaleza(valor)
-        info = entropy(words=palabras, lang="es") if kind != "machine" else {}
+        info = entropy(words=palabras, lang=idioma) if kind != "machine" else {}
         self.fuerza.configure(
             text=("384 bits (48 bytes aleatorios)" if kind == "machine"
                   else f"{info.get('bits', '?')} bits con {info.get('lista', '?')} palabras"))
