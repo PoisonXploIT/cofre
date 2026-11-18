@@ -96,6 +96,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="secreto a pasar como variable de entorno al comando")
     sx.add_argument("cmd", nargs="+", help="comando a ejecutar, p. ej: python script.py")
 
+    rn = with_common(sub.add_parser(
+        "run", help="ejecutar con las variables de .cofre-env.json"))
+    rn.add_argument("--check", action="store_true",
+                    help="decir qué falta, sin lanzar nada")
+    rn.add_argument("--si", action="store_true",
+                    help="no pedir confirmación para secretos sensibles")
+    rn.add_argument("--file", default="", help="ruta del .cofre-env.json")
+    rn.add_argument("cmd", nargs=argparse.REMAINDER,
+                    help="comando; usa -- para separar")
+
+    ds = with_common(sub.add_parser(
+        "describe", help="JSON de secretos y salud, nunca valores"))
+    ds.add_argument("--json", action="store_true", help="salida JSON (siempre)")
+
     sv = sub.add_parser("serve", help="puente para el navegador (solo 127.0.0.1)")
     sv.add_argument("--port", type=int, default=47653)
 
@@ -168,6 +182,10 @@ def build_parser() -> argparse.ArgumentParser:
     mta.add_argument("--type", dest="kind", default="")
     mta.add_argument("--admin", action="store_true",
                      help="marcar como token de administracion (pide confirmación)")
+    mta.add_argument("--app-id", default="",
+                     help="id de la GitHub App (para las referencias @app)")
+    mta.add_argument("--installation", default="",
+                     help="id de la instalación de la GitHub App")
 
     rt = with_common(sub.add_parser("rotate", help="rotar un token de un proveedor"))
     rt.add_argument("name")
@@ -529,7 +547,7 @@ def main(argv: list[str]) -> int:
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
                   "host-list", "get", "add", "del", "rename", "exec", "export",
                   "migrate", "stick-add-v2", "check", "list", "resume",
-                  "health", "panic", "rekey"}
+                  "health", "panic", "rekey", "run", "describe"}
     if args.command in _CON_CLAVE:
         vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
 
@@ -694,6 +712,100 @@ def main(argv: list[str]) -> int:
         record(str(vault_path), "check", args.gate, serial,
                name=f"{len(args.name)} nombres", ok=not missing)
         return 0 if not missing else 1
+
+    if args.command == "describe":
+        import json as _json
+        try:
+            _session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        salida = []
+        for nombre in vault.names():
+            meta = dict(vault.meta(nombre) or {})
+            salida.append({
+                "name": nombre,
+                "type": meta.get("type") or "api_key",
+                "provider": meta.get("provider") or "",
+                "health": meta.get("health") or "sin_comprobar",
+                "last_verified": meta.get("last_verified") or "",
+                "urls": list(meta.get("urls") or []),
+                "tags": list(meta.get("tags") or []),
+                "consumers": list(meta.get("consumers") or []),
+            })
+        print(_json.dumps(salida, ensure_ascii=False, indent=2))
+        record(str(vault_path), "describe", args.gate, serial, name="-",
+               ok=True, detail=f"{len(salida)} entradas")
+        return 0
+
+    if args.command == "run":
+        import subprocess
+        from cofre import projectenv
+        try:
+            session, serial = resolve_session_key(
+                args.gate, str(vault_path), stick=args.stick,
+                allow_new=args.allow_new_stick)
+            material = material_for(args.gate, str(vault_path), args.stick,
+                                    args.allow_new_stick)
+            vault.bind_material(material)
+        except (GateUnavailable, EOFError) as exc:
+            print(f"gate no disponible: {exc}", file=sys.stderr)
+            return 1
+        ruta = Path(args.file) if args.file else projectenv.buscar(Path.cwd())
+        if ruta is None or not Path(ruta).is_file():
+            print("no encuentro .cofre-env.json en esta carpeta ni hacia arriba",
+                  file=sys.stderr)
+            return 1
+        try:
+            refs = projectenv.cargar(str(ruta))
+        except projectenv.ProjectEnvError as exc:
+            print(f"proyecto: {exc}", file=sys.stderr)
+            return 1
+        estados = projectenv.revisar(vault, session, refs)
+        if args.check:
+            fallos = 0
+            for estado in estados:
+                ref = estado["ref"]
+                if estado["estado"] == "ok":
+                    print(f"OK    {ref.destino} ({ref.etiqueta})")
+                else:
+                    fallos += 1
+                    print(f"FALTA {ref.destino} ({ref.etiqueta}): "
+                          f"{estado['detalle']}")
+            record(str(vault_path), "run", args.gate, serial, name="-",
+                   ok=not fallos,
+                   detail=f"check {Path(ruta).name}: {len(refs)} referencias"[:150])
+            return 0 if not fallos else 1
+        try:
+            entorno_ref = projectenv.resolver(vault, session, refs)
+        except projectenv.ProjectEnvError as exc:
+            print(f"proyecto: {exc}", file=sys.stderr)
+            return 1
+        sensibles = projectenv.sensibles(vault, refs)
+        if sensibles and not args.si:
+            print("Se van a usar secretos sensibles: " + ", ".join(sensibles))
+            print("Escribe SI para continuar: ", end="", flush=True)
+            if sys.stdin.readline().strip().upper() != "SI":
+                print("cancelado: no se ha ejecutado nada")
+                return 1
+        comando = list(args.cmd)
+        if comando and comando[0] == "--":
+            comando = comando[1:]
+        if not comando:
+            print("falta el comando: run.cmd run -- npm start", file=sys.stderr)
+            return 1
+        entorno = dict(os.environ)
+        entorno.update(entorno_ref)
+        record(str(vault_path), "run", args.gate, serial,
+               name=",".join(r.destino for r in refs), ok=True,
+               detail=str(ruta)[:150])
+        print(f"ejecutando con {len(entorno_ref)} variables (solo para ese proceso)")
+        return subprocess.run(comando, env=entorno).returncode
 
     if args.command == "exec":
         import subprocess
@@ -985,6 +1097,12 @@ def main(argv: list[str]) -> int:
         if args.kind:
             meta["type"] = args.kind
             cambios.append("type=" + args.kind)
+        if args.app_id:
+            meta["app_id"] = args.app_id
+            cambios.append("app_id=" + args.app_id)
+        if args.installation:
+            meta["installation_id"] = args.installation
+            cambios.append("installation=" + args.installation)
         if args.admin:
             etiquetas = [t for t in meta.get("tags", []) if t != "admin"] + ["admin"]
             meta["tags"] = etiquetas

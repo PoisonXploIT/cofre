@@ -2,6 +2,10 @@
 
   python tools/messages_probe.py [--max N]
 
+El tope vive en tools/messages_top.txt. Si el recuento real baja, la sonda
+actualiza el fichero sola: lo ganado no se puede volver a perder. Si sube,
+falla. --max N es una comprobacion manual sin tocar el fichero.
+
 Cuenta, con ast, los literales que ve el usuario y no salen de `msg()`:
 
   - GUI: `text=`, pies (`set_foot`, `set_status`), titulos, hojas, botones,
@@ -99,10 +103,22 @@ class Visitante(ast.NodeVisitor):
         self.generic_visit(nodo)
 
 
+def _leer_tope() -> int | None:
+    ruta = RAIZ / "tools" / "messages_top.txt"
+    try:
+        return int(ruta.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _guardar_tope(valor: int) -> None:
+    (RAIZ / "tools" / "messages_top.txt").write_text(
+        str(valor) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
-    tope = None
-    if "--max" in argv:
-        tope = int(argv[argv.index("--max") + 1])
+    manual = "--max" in argv
+    tope = int(argv[argv.index("--max") + 1]) if manual else _leer_tope()
     gui, cli = [], []
     for nombre in GUI:
         ruta = COFRE / nombre
@@ -130,15 +146,21 @@ def main(argv: list[str]) -> int:
         print("Pendientes (primeros 200):")
         for fichero, linea, texto, contexto in gui[:200]:
             print(f"  {fichero}:{linea} [{contexto}] {texto[:90]}")
-    if tope is not None and len(gui) > tope:
-        print(f"\nFALLO: {len(gui)} pendientes > tope {tope}")
-        return 1
-    print(f"GUI pendientes: {len(gui)}"
-          + (f" (tope {tope})" if tope is not None else "")
-          + f"; CLI tecnicos en lista blanca: {len(cli)}")
-    if tope is not None:
+    if tope is None:
+        _guardar_tope(len(gui))
+        print(f"GUI pendientes: {len(gui)} (tope creado); "
+              f"CLI tecnicos en lista blanca: {len(cli)}")
         return 0
-    return 1 if gui else 0
+    if len(gui) > tope:
+        print(chr(10) + f"FALLO: {len(gui)} pendientes > tope {tope}")
+        return 1
+    if not manual and len(gui) < tope:
+        _guardar_tope(len(gui))
+        print(f"tope bajado de {tope} a {len(gui)}")
+        tope = len(gui)
+    print(f"GUI pendientes: {len(gui)} (tope {tope}); "
+          f"CLI tecnicos en lista blanca: {len(cli)}")
+    return 0
 
 
 if __name__ == "__main__":

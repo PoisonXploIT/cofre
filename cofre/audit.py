@@ -58,6 +58,7 @@ PRIVILEGED = {
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
     "discard", "health", "panic", "rekey", "recovery", "backup",
+    "run", "describe", "git-get",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -359,6 +360,9 @@ VERBS = {
     "rekey": "clave maestra cambiada",
     "recovery": "código de recuperación renovado",
     "backup": "copia del cofre",
+    "run": "comando con variables del proyecto",
+    "describe": "descripcion para agentes (sin valores)",
+    "git-get": "credencial entregada a git",
 }
 
 

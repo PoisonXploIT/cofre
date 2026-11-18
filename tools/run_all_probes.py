@@ -19,7 +19,8 @@ REPO = Path(__file__).resolve().parent.parent
 PROBES = [
     ("accents", [sys.executable, "tools/check_accents.py"], False),
     ("theme", [sys.executable, "tools/theme_check.py"], False),
-    ("messages", [sys.executable, "tools/messages_probe.py", "--max", "269"], False),
+    ("messages", [sys.executable, "tools/messages_probe.py"], False),
+    ("powershell", [sys.executable, "tools/powershell_probe.py"], False),
     ("keyboard", [sys.executable, "tools/keyboard_probe.py"], False),
     ("backup_restore", [sys.executable, "tools/backup_restore_probe.py"], True),
     ("unittest", [sys.executable, "-m", "unittest", "discover", "-s", "tests"], False),
