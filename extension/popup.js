@@ -137,6 +137,42 @@ function render() {
   }
 }
 
+// 4.8: leer el usuario que hay escrito en la pagina (solo se envia a COFRE
+// como pista; el valor del secreto se teclea en la GUI).
+function cofreUsuario() {
+  const campos = [...document.querySelectorAll("input[type=email], input[type=text]")]
+    .filter((el) => el.offsetParent !== null && !el.disabled && !el.readOnly);
+  const elegido = campos.find((el) =>
+    /(usuario|user|login|correo|email|mail|cuenta)/i.test(
+      (el.name || "") + " " + (el.id || "") + " " + (el.placeholder || "")));
+  if (!elegido || elegido.type === "password") return "";
+  const v = String(elegido.value || "").trim();
+  return v.length > 0 && v.length <= 80 ? v : "";
+}
+
+async function saveSite() {
+  const host = hostOf(tab?.url || "");
+  if (!host) {
+    $("foot").textContent = "no hay pestana activa";
+    return;
+  }
+  let usuario = "";
+  try {
+    const r = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, func: cofreUsuario,
+    });
+    usuario = String(r?.[0]?.result || "");
+  } catch (e) {
+    usuario = "";
+  }
+  $("foot").textContent = "abriendo la hoja de COFRE...";
+  const res = await send({ type: "save", domain: host, username: usuario });
+  $("foot").textContent = res.ok
+    ? `${host} anotado. Termina de guardar en la ventana de COFRE.`
+    : (res.error || "no se pudo abrir la hoja");
+  if (res.ok) setTimeout(() => window.close(), 1200);
+}
+
 async function assignSite(name) {
   const host = hostOf(tab?.url || "");
   if (!host) {
@@ -251,6 +287,7 @@ async function fill(name) {
   }
 }
 
+$("guardar_sitio").addEventListener("click", saveSite);
 $("search").addEventListener("input", render);
 $("search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {

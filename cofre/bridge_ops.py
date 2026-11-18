@@ -9,7 +9,9 @@ Las reglas son las mismas que ya aplica serve.py y no se duplican aqui:
   - match:  nombres cuyos dominios encajan con el host de la pestana (4.6), para
             que el aviso del navegador los ponga primero. Sin valores;
   - assign: anadir el host actual a los dominios de un secreto (4.6). Pide
-            confirmacion en la GUI: una pagina no puede autorizarse sola.
+            confirmacion en la GUI: una pagina no puede autorizarse sola;
+  - save:   "guardar este sitio en COFRE" (4.8): abre la hoja de alta con el
+            dominio puesto. El valor se teclea en la GUI, no llega de la pagina.
 
 Se usa desde el hilo de la GUI (BridgeController.poll), asi que aqui si se puede
 leer el cofre con la sesion de la ventana.
@@ -217,5 +219,18 @@ def dispatch(app, message: dict) -> dict:
         from cofre.audit import stamp_vault
         stamp_vault(app.vault)
         return {"ok": True, "name": nombre, "urls": nuevos, "changed": True}
+
+    if tipo == "save":
+        # 4.8: la pagina solo dice "este es mi sitio". El valor se escribe en la
+        # ventana; por la tuberia no viaja nada del secreto.
+        domain = _domain(message)
+        if not domain or any(c in domain for c in "/*:? "):
+            return {"ok": False, "error": "el host de la pagina no vale"}
+        usuario = str(message.get("username", "") or "").strip()[:80]
+        abrir = getattr(app, "open_new_for_site", None)
+        if abrir is None:
+            return {"ok": False, "error": "esta ventana no sabe abrir la hoja"}
+        app.ui_call(abrir, domain, usuario)
+        return {"ok": True, "host": domain, "opened": True}
 
     return {"ok": False, "error": f"tipo desconocido: {tipo or '(vacio)'}"}

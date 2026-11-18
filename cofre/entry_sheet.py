@@ -17,6 +17,7 @@ import tkinter as tk
 from cofre.audit import record
 from cofre.gen import entropy, human_password, machine_password
 from cofre.hosts import HostsError, clean_host
+from cofre.messages import msg
 from cofre.theme import COLORS as C
 from cofre.theme import SPACE
 from cofre import widgets as W
@@ -27,11 +28,16 @@ TIPOS = ("password", "api_key", "api_token", "private_key", "note")
 class EntrySheet:
     """mode: 'new' | 'edit'. En edit se precarga el valor y se mantiene el nombre."""
 
-    def __init__(self, app, mode: str = "new", nombre: str | None = None):
+    def __init__(self, app, mode: str = "new", nombre: str | None = None,
+                 sitio: str = "", usuario: str = ""):
         self.app = app
         self.mode = mode
         self.nombre = nombre
         self.guardado = False
+        # 4.8: la hoja puede llegar desde el navegador con el sitio ya puesto.
+        # El valor se escribe aqui, en la GUI: la extension no lo ve nunca.
+        self.sitio = sitio
+        self.usuario = usuario
 
         self.win = app._sheet("Nuevo secreto" if mode == "new" else f"Editar {nombre}")
         self.win.geometry("560x520")
@@ -142,6 +148,18 @@ class EntrySheet:
         return tipo if tipo in TIPOS else ("password" if self.mode == "edit" else "api_key")
 
     def _precargar(self) -> None:
+        if self.mode == "new" and (self.sitio or self.usuario):
+            if self.sitio:
+                self.campo_sitios.set(self.sitio)
+            if self.sitio and self.usuario:
+                texto = msg("nuevo.pista_usuario", sitio=self.sitio,
+                            usuario=self.usuario)
+            elif self.sitio:
+                texto = msg("nuevo.pista", sitio=self.sitio)
+            else:
+                texto = msg("nuevo.pista", sitio=self.usuario)
+            self.aviso.configure(text=texto)
+            return
         if self.mode != "edit" or not self.nombre:
             return
         meta = self._meta()

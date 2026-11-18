@@ -143,5 +143,44 @@ class TestAssign(unittest.TestCase):
         self.assertEqual(app.llamadas, [])
 
 
+class TestSave(unittest.TestCase):
+    """4.8: guardar el sitio desde el navegador abre la hoja de la GUI."""
+
+    def test_abre_la_hoja_con_el_sitio_y_el_usuario(self):
+        app = FakeApp()
+        app.llamadas_ui = []
+        app.ui_call = lambda fn, *a, **k: app.llamadas_ui.append((fn, a, k))
+        abierto = []
+        app.open_new_for_site = lambda sitio, usuario="": abierto.append((sitio, usuario))
+        r = bridge_ops.dispatch(app, {"type": "save", "domain": "banco.example",
+                                      "username": "sammi"})
+        self.assertTrue(r["ok"] and r["opened"])
+        self.assertEqual(len(app.llamadas_ui), 1)
+        # la GUI lo hara en su hilo; aqui se ejecuta el paso encolado
+        app.llamadas_ui[0][0](*app.llamadas_ui[0][1], **app.llamadas_ui[0][2])
+        self.assertEqual(abierto, [("banco.example", "sammi")])
+
+    def test_sin_ventana_que_abra_la_hoja(self):
+        app = FakeApp()          # FakeApp no tiene open_new_for_site
+        r = bridge_ops.dispatch(app, {"type": "save", "domain": "banco.example"})
+        self.assertFalse(r["ok"])
+
+    def test_host_raro_no_abre_nada(self):
+        app = FakeApp()
+        app.ui_call = lambda *a, **k: self.fail("no deberia abrir la hoja")
+        app.open_new_for_site = lambda *a, **k: None
+        for raro in ("", "a/b", "a?b", "a:b", "*.ejemplo.com"):
+            with self.subTest(dominio=raro):
+                r = bridge_ops.dispatch(app, {"type": "save", "domain": raro})
+                self.assertFalse(r["ok"])
+
+    def test_la_respuesta_no_lleva_valores(self):
+        app = FakeApp()
+        app.ui_call = lambda *a, **k: None
+        app.open_new_for_site = lambda *a, **k: None
+        r = bridge_ops.dispatch(app, {"type": "save", "domain": "banco.example"})
+        self.assertNotIn("value", json.dumps(r))
+
+
 if __name__ == "__main__":
     unittest.main()

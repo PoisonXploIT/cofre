@@ -25,6 +25,14 @@ MSG = {
     "permisos.retirar": "Retirar",
     "permisos.retirado": "permiso retirado: {texto}",
 
+    # alta pedida desde el navegador (4.8)
+    "nuevo.abre": "abre el cofre antes de guardar un secreto",
+    "nuevo.sitio_preparado": "pon el nombre, escribe el valor y pulsa Guardar; "
+                             "el sitio ya queda asignado ({sitio})",
+    "nuevo.hoja_abierta": "ya hay una hoja abierta: ponle el nombre y guarda ({sitio})",
+    "nuevo.pista": "desde el navegador · sitio: {sitio}",
+    "nuevo.pista_usuario": "desde el navegador · sitio: {sitio} · usuario: {usuario}",
+
     # paleta
     "paleta.titulo": "COFRE - comandos",
     "paleta.campo": "Buscar secretos y acciones",

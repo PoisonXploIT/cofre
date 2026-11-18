@@ -60,6 +60,7 @@ PRIVILEGED = {
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
     "discard", "health", "panic", "rekey", "recovery", "backup",
     "run", "describe", "git-get", "grant-revoke", "scan",
+    "browser-save",
 }
 GENESIS = "0" * 64
 _KEY: bytes | None = None
@@ -378,6 +379,7 @@ VERBS = {
     "git-get": "credencial entregada a git",
     "grant-revoke": "permiso temporal retirado",
     "scan": "escaneo de fugas",
+    "browser-save": "alta pedida desde el navegador",
 }
 
 

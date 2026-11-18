@@ -66,6 +66,12 @@
       background: var(--surface); color: var(--faint); font-size: 10px;
     }
     .empty { color: var(--muted); padding: 14px 4px; }
+    .wide {
+      display: block; width: 100%; margin: 10px 0 2px; padding: 7px 8px;
+      background: transparent; color: var(--muted); cursor: pointer;
+      border: 1px solid var(--border); border-radius: 6px; font-size: 11px;
+    }
+    .wide:hover { border-color: var(--accent); color: var(--text); }
   </style>
 </head>
 <body>
@@ -84,6 +90,7 @@
       <label><input type="checkbox" id="focused"> Rellenar el campo enfocado</label>
     </div>
     <div id="list"></div>
+    <button id="guardar_sitio" class="wide">Guardar este sitio en COFRE</button>
   </main>
   <footer id="foot">Solo funciona con el pendrive puesto y el cofre abierto. Ctrl+Shift+L abre este aviso.</footer>
   <script src="popup.js"></script>

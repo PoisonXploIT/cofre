@@ -1,4 +1,4 @@
-gui 265
+gui 264
 cli 302
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.

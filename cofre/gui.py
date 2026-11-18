@@ -1338,10 +1338,34 @@ class CofreGUI:
             return "contraseña"
         return ""
 
+    def open_new_for_site(self, sitio: str, usuario: str = "") -> None:
+        """4.8: el navegador pide guardar este sitio. Se abre la hoja con el
+        dominio puesto y el valor se escribe aqui, no en la extension."""
+        assert_main("open_new_for_site")
+        if not self.session:
+            self.set_foot(msg("nuevo.abre"))
+            return
+        from cofre.entry_sheet import EntrySheet
+        actual = getattr(self, "_sheet_nueva", None)
+        try:
+            if actual is not None and actual.win.winfo_exists() and not actual.guardado:
+                if sitio:
+                    actual.campo_sitios.set(sitio)
+                actual.win.lift()
+                actual.campo_nombre.entry.focus_set()
+                self.set_foot(msg("nuevo.hoja_abierta", sitio=sitio))
+                return
+        except Exception:
+            pass
+        self._sheet_nueva = EntrySheet(self, mode="new", sitio=sitio, usuario=usuario)
+        self.set_foot(msg("nuevo.sitio_preparado", sitio=sitio))
+        record(self.vault_path, "browser-save", self.gate, self.serial,
+               name=f"desde el navegador: {sitio}"[:60], ok=True)
+
     def _focus_new(self, event=None):
         """Abrir la hoja de alta (E6)."""
         if not self.session:
-            self.set_foot("abre el cofre antes de guardar un secreto")
+            self.set_foot(msg("nuevo.abre"))
             return
         from cofre.entry_sheet import EntrySheet
         self._sheet_nueva = EntrySheet(self, mode="new")
