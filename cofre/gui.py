@@ -2229,13 +2229,9 @@ class CofreGUI:
                           fill=ACC if (conectada or actual) else MUT,
                           font=(ICON_FONT, 15))
         W.Chip(caja, estado, tipo, bg=CAMPO).pack(side="right", padx=(8, 6))
-        if actual:
-            self._text_btn(
-                caja, "Es la llave abierta",
-                lambda: self.set_foot("para darla de baja, abre el cofre con "
-                                      "el otro pendrive")).pack(side="right",
-                                                                padx=8)
-        else:
+        if not actual:
+            # la llave abierta solo lleva su chip "Abierta ahora"; el texto
+            # repetia la etiqueta
             self._text_btn(
                 caja, "Dar de baja",
                 lambda s=serial, w=win: self._baja_pendrive(int(s), w),

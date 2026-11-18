@@ -89,6 +89,25 @@ def main() -> int:
     if hoja is not None:
         malos += medir(hoja, "Llaves")
         hoja.destroy()
+
+    from cofre.firstuse import Wizard
+    wizard = Wizard(app)
+    hoja = buscar(app, "COFRE - primera vez")
+    if hoja is not None:
+        malos += medir(hoja, "Asistente: bienvenida")
+        wizard.codigo = " ".join(["palabra"] * 24 + ["control"])
+        wizard.drive = str(Path(vault).drive) + "\\"
+        wizard._paso_pendrive()
+        malos += medir(hoja, "Asistente: pendrive")
+        wizard._paso_codigo()
+        malos += medir(hoja, "Asistente: código")
+        wizard._paso_confirmar()
+        malos += medir(hoja, "Asistente: confirmar")
+        wizard._paso_reserva()
+        malos += medir(hoja, "Asistente: reserva")
+        wizard._paso_extension()
+        malos += medir(hoja, "Asistente: extension")
+        wizard.cerrar()
     app.root.destroy()
     return 1 if malos else 0
 

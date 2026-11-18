@@ -319,9 +319,11 @@ class Segmented(tk.Frame):
     def _pintar(self) -> None:
         for valor, lab in self._labels:
             elegido = str(self.var.get()) == valor
-            lab.configure(bg=ACCENT if elegido else RAISED,
-                          fg=ON_ACCENT if elegido else MUTED,
-                          highlightbackground=ACCENT if elegido else RAISED)
+            # el laton se reserva a la accion primaria (Guardar): el segmento
+            # elegido va en gris claro
+            lab.configure(bg=BORDER_STRONG if elegido else RAISED,
+                          fg=TEXT if elegido else MUTED,
+                          highlightbackground=BORDER_STRONG if elegido else RAISED)
 
 
 class Switch(tk.Canvas):
@@ -349,9 +351,9 @@ class Switch(tk.Canvas):
         self.delete("all")
         encendido = bool(self.var.get())
         round_rect(self, 3, 4, 45, 22, 9,
-                   fill=ACCENT if encendido else BORDER_STRONG, outline="")
+                   fill=OK if encendido else BORDER_STRONG, outline="")
         x = 33 if encendido else 15
-        self.create_oval(x - 8, 5, x + 8, 21, fill=ON_ACCENT, outline="")
+        self.create_oval(x - 8, 5, x + 8, 21, fill=TEXT, outline="")
 
 
 class CodeGrid(tk.Frame):
@@ -373,7 +375,7 @@ class CodeGrid(tk.Frame):
             self.columnconfigure(columna, weight=1)
         for indice, palabra in enumerate(partes[:25]):
             fila, columna = divmod(indice, 5)
-            celda = tk.Frame(self, bg=C["card"], padx=8, pady=6)
+            celda = tk.Frame(self, bg=C["card"], padx=6, pady=3)
             celda.grid(row=fila, column=columna, padx=3, pady=3, sticky="nsew")
             tk.Label(celda, text=str(indice + 1), fg=C["muted"],
                      bg=C["card"], font=self._f_num, anchor="w").pack(fill="x")

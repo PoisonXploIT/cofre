@@ -145,13 +145,16 @@ class Wizard:
         texto = f"Paso {paso} de {self.PASOS}" + (f" · {nota}" if nota else "")
         tk.Label(fila, text=texto, fg=C["muted"], bg=C["surface"],
                  font=self.app.f_small, anchor="w").pack(side="left")
+        puntos = tk.Frame(fila, bg=C["surface"])
+        puntos.pack(side="left", padx=(10, 0))
         for numero in range(1, self.PASOS + 1):
-            punto = tk.Canvas(fila, width=10, height=10, bg=C["surface"],
+            punto = tk.Canvas(puntos, width=10, height=10, bg=C["surface"],
                               highlightthickness=0)
             punto.create_oval(2, 2, 8, 8,
                               fill=C["accent"] if numero <= paso else C["border"],
                               outline="")
-            punto.pack(side="right", padx=(4, 0))
+            # de izquierda a derecha: el paso 1 enciende el primer punto
+            punto.pack(side="left", padx=(0, 4))
 
     def _titulo(self, texto: str) -> None:
         tk.Label(self.cuerpo, text=texto, fg=C["text"], bg=C["surface"],
@@ -237,17 +240,21 @@ class Wizard:
         self._titulo("Código de recuperación")
         self._texto("Estas 25 palabras son la única forma de abrir el cofre si "
                     "pierdes el pendrive. Se muestran UNA vez. Apúntalas en "
-                    "papel, en este orden; no las guardes en el equipo ni en "
-                    "una foto. No hay botón de copiar: el portapapeles guarda "
-                    "historial y puede sincronizarse.")
-        W.CodeGrid(self.cuerpo, self.codigo).pack(fill="x", pady=12)
-        fila = tk.Frame(self.cuerpo, bg=C["surface"])
-        fila.pack(fill="x")
-        self.app._btn(fila, msg("primer_uso.imprimir"),
-                      self._imprimir).pack(side="left")
-        self._botonera(atras=None if self.datos else self._paso_pendrive,
-                       siguiente=self._paso_confirmar,
-                       texto_sig=msg("primer_uso.apuntado"))
+                    "papel, en este orden; no hay botón de copiar porque el "
+                    "portapapeles guarda historial.")
+        # pie fijo abajo: se empaqueta antes que la cuadricula para que nunca
+        # quede fuera (el boton de seguir se perdia en ventanas bajas)
+        pie = tk.Frame(self.cuerpo, bg=C["surface"])
+        pie.pack(side="bottom", fill="x", pady=(10, 0))
+        if self.datos is None:
+            self.app._btn(pie, msg("comun.atras"),
+                          self._paso_pendrive).pack(side="left")
+        self.app._btn(pie, msg("primer_uso.imprimir"),
+                      self._imprimir).pack(side="left", padx=(8, 0))
+        self.app._btn(pie, msg("primer_uso.apuntado"),
+                      self._paso_confirmar,
+                      accent=True).pack(side="right")
+        W.CodeGrid(self.cuerpo, self.codigo).pack(fill="x", pady=8)
 
     def _imprimir(self, event=None) -> None:
         """TXT temporal numerado, dialogo de impresion y borrado posterior."""
