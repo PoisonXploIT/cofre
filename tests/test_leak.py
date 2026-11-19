@@ -105,3 +105,43 @@ class TestEscaneo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCodigoDeRecuperacion(unittest.TestCase):
+    """Regla del incidente 2026-11-19: 24 palabras seguidas de la lista = código.
+
+    La lista es de palabras frecuentes, así que la regla pide además 18 distintas
+    para no bloquear prosa normal.
+    """
+
+    def setUp(self):
+        from cofre.leak import palabras_del_codigo
+        self.lista = sorted(palabras_del_codigo())
+
+    def test_24_seguidas_saltan(self):
+        from cofre.leak import codigos_de_recuperacion
+        texto = " ".join(self.lista[:24])
+        self.assertEqual(codigos_de_recuperacion(texto), [(1, 24)])
+
+    def test_23_no_saltan(self):
+        from cofre.leak import codigos_de_recuperacion
+        self.assertEqual(codigos_de_recuperacion(" ".join(self.lista[:23])), [])
+
+    def test_con_comas_y_mayusculas(self):
+        from cofre.leak import codigos_de_recuperacion
+        texto = ", ".join(p.upper() for p in self.lista[:24])
+        self.assertEqual(len(codigos_de_recuperacion(texto)), 1)
+
+    def test_prosa_normal_no_salta(self):
+        from cofre.leak import codigos_de_recuperacion
+        prosa = ("para que como pero este esta todo cuando sobre todos tiene porque "
+                 "bien entre puede desde hasta hacer ahora esto hace otra vez como "
+                 "siempre y nunca")
+        self.assertEqual(codigos_de_recuperacion(prosa), [])
+
+    def test_el_escaneo_lo_marca_como_fuga(self):
+        from cofre.leak import NOMBRE_CODIGO, escanear_texto, huellas_de, clave_de_huellas
+        clave = clave_de_huellas(b"k" * 32)
+        tabla, cortos = huellas_de(clave, {})
+        hallazgos = escanear_texto(" ".join(self.lista[:24]), clave, tabla, cortos)
+        self.assertEqual(hallazgos, [(1, NOMBRE_CODIGO)])

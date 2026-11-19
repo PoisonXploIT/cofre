@@ -106,9 +106,14 @@ def _versionados() -> list[str]:
 
 
 def paso_escaneo() -> bool:
-    """Solo lo versionado: .venv y las copias locales no cuentan."""
+    """Solo lo versionado: .venv y las copias locales no cuentan.
+
+    Incluye la regla del 2026-11-19: 24 o más palabras seguidas de la lista del
+    código de recuperación se tratan como fuga (un código pegado en el repo).
+    """
     inicio = time.time()
     hallazgos: list[str] = []
+    from cofre.leak import codigos_de_recuperacion
     ficheros = _versionados()
     for rel in ficheros:
         ruta = REPO / rel
@@ -118,6 +123,10 @@ def paso_escaneo() -> bool:
             texto = ruta.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
+        for linea, cuantas in codigos_de_recuperacion(texto):
+            if rel not in EXENTOS:
+                hallazgos.append(f"{rel}:{linea} código de recuperación "
+                                 f"({cuantas} palabras de la lista)")
         for nombre, patron in PATRONES:
             for m in patron.finditer(texto):
                 linea = texto[:m.start()].count("\n") + 1

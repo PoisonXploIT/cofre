@@ -215,6 +215,9 @@ class TestPalabrasPropias(unittest.TestCase):
         # 2026-11-19: la lista es una pista, no un requisito. Exigirla hacia
         # inutil el boton "Mis palabras" (ninguna palabra elegida a mano estaba).
         from cofre.v2.recovery import check_code, code_from_words, revisar_palabras
+        # palabras inventadas: letras y fuera de la lista. La regla del
+        # 2026-11-19 bloquea 24 palabras seguidas de la lista en un fichero,
+        # asi que el fixture no puede ser una lista literal de palabras.
         propias = [f"palabra{letra}" for letra in "abcdefghijklmnopqrstuvwx"]
         limpias, fuera, repes, error = revisar_palabras(propias)
         self.assertEqual(error, "")

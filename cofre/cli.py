@@ -629,7 +629,8 @@ def cmd_scan(args, vault_path) -> int:
                       for r, ln, n in hallazgos],
         }, ensure_ascii=False, indent=2))
     elif not hallazgos:
-        print(f"sin fugas: {len(secretos)} secretos comprobados en "
+        print(f"sin fugas: {len(secretos)} secretos comprobados, y ningún código "
+              f"de recuperación pegado, en "
               f"{'lo escenificado' if args.staged else carpeta}")
     else:
         print(f"{len(hallazgos)} coincidencia(s):")

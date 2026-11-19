@@ -41,6 +41,54 @@ BINARIAS = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".7z", ".ra
             ".ttf", ".mp3", ".mp4", ".mkv", ".webp", ".bmp", ".sqlite", ".db"}
 
 
+_LISTA_CODIGO: set[str] | None = None
+
+
+def palabras_del_codigo() -> set[str]:
+    """Las 2.000 palabras de la lista del código de recuperación (sin tildes)."""
+    global _LISTA_CODIGO
+    if _LISTA_CODIGO is None:
+        ruta = Path(__file__).resolve().parent / "data" / "wordlist_es.txt"
+        try:
+            crudas = ruta.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            crudas = []
+        _LISTA_CODIGO = {str(w).strip().lower() for w in crudas if str(w).strip()}
+    return _LISTA_CODIGO
+
+
+def _sin_tildes(texto: str) -> str:
+    import unicodedata
+    normal = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in normal if not unicodedata.category(c).startswith("Mn"))
+
+
+def codigos_de_recuperacion(texto: str, minimo: int = 24,
+                            distintas: int = 18) -> list[tuple[int, int]]:
+    """[(línea, palabras)] si hay un código de recuperación pegado.
+
+    Regla del incidente del 2026-11-19: un código son 24 palabras de la lista
+    seguidas. Para no confundirlo con prosa (la lista es de palabras frecuentes),
+    se pide además que al menos `distintas` sean diferentes.
+    """
+    lista = palabras_del_codigo()
+    if not lista:
+        return []
+    hallazgos: list[tuple[int, int]] = []
+    for numero, linea in enumerate(texto.splitlines(), start=1):
+        candidatas = [w for w in (_sin_tildes(p).strip(".,;:¡!¿?()[]\"'")
+                                  .lower() for p in linea.split()) if w]
+        racha: list[str] = []
+        for palabra in candidatas + [""]:
+            if palabra and palabra in lista:
+                racha.append(palabra)
+                continue
+            if len(racha) >= minimo and len(set(racha)) >= distintas:
+                hallazgos.append((numero, len(racha)))
+            racha = []
+    return hallazgos
+
+
 def clave_de_huellas(master: bytes) -> bytes:
     """Subclave para las huellas: no se usa la maestra directamente."""
     from cryptography.hazmat.primitives import hashes
@@ -78,10 +126,19 @@ def _es_texto(datos: bytes) -> bool:
     return True
 
 
+NOMBRE_CODIGO = "(código de recuperación)"
+
+
 def escanear_texto(texto: str, clave: bytes, tabla: dict[bytes, str],
                    cortos: list[tuple[str, str]]) -> list[tuple[int, str]]:
-    """[(línea, nombre)] de cada coincidencia. El valor no se devuelve."""
+    """[(línea, nombre)] de cada coincidencia. El valor no se devuelve.
+
+    Incluye la regla del 2026-11-19: un código de recuperación pegado (24 palabras
+    seguidas de la lista) se marca como fuga, aunque no sea un secreto del índice.
+    """
     hallazgos: list[tuple[int, str]] = []
+    for numero, _cuantas in codigos_de_recuperacion(texto):
+        hallazgos.append((numero, NOMBRE_CODIGO))
     for numero, linea in enumerate(texto.splitlines(), start=1):
         nombres: set[str] = set()
         for candidato in TOKEN.findall(linea):
