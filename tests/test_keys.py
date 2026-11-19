@@ -113,7 +113,8 @@ class TestCodigo(Base):
         self.assertTrue(motivo)
         ok, motivo = keys.probar_codigo(self.data, " ".join(["x"] * 25))
         self.assertFalse(ok)
-        self.assertIn("control", motivo)
+        # 2026-11-19: el mensaje dice donde falla (palabras fuera de la lista)
+        self.assertIn("lista", motivo)
 
 
 class TestQuitar(Base):

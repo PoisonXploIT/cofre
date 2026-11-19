@@ -153,3 +153,32 @@ class TestMigracion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMensajesDelCodigo(unittest.TestCase):
+    """2026-11-19: al fallar, decir donde esta el problema sin repetir el código."""
+
+    def setUp(self):
+        from cofre.v2.recovery import new_code
+        self.partes = new_code().split()
+
+    def test_palabra_que_no_esta_en_la_lista(self):
+        from cofre.v2.recovery import check_code
+        roto = list(self.partes)
+        roto[4] = "zzzz"
+        ok, motivo = check_code(" ".join(roto))
+        self.assertFalse(ok)
+        self.assertIn("palabra 5", motivo)
+        self.assertNotIn("zzzz", motivo)
+
+    def test_control_malo(self):
+        from cofre.v2.recovery import check_code
+        roto = list(self.partes)
+        roto[-1] = "para" if self.partes[-1] != "para" else "casa"
+        ok, motivo = check_code(" ".join(roto))
+        self.assertFalse(ok)
+        self.assertIn("control", motivo)
+
+    def test_codigo_correcto(self):
+        from cofre.v2.recovery import check_code
+        self.assertEqual(check_code(" ".join(self.partes)), (True, ""))

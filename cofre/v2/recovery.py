@@ -48,8 +48,17 @@ def check_code(code: str) -> tuple[bool, str]:
     partes = limpio.split(" ")
     if len(partes) != WORDS + 1:
         return False, f"el código tiene {len(partes) - 1} palabras y deberian ser {WORDS} mas la de control"
+    # 2026-11-19: decir DONDE falla sin repetir el codigo. Antes solo decia "hay un
+    # error al copiar" y no habia forma de saber si sobraba una palabra, faltaba
+    # otra o estaba mal la de control.
+    fuera = [i for i, palabra in enumerate(partes, 1) if palabra not in palabras]
+    if fuera:
+        posiciones = ", ".join(str(i) for i in fuera[:4])
+        return False, (f"la palabra {posiciones} no está en la lista: revisa el papel "
+                       "(no es una errata de tildes)")
     texto = " ".join(partes[:-1])
     esperada = control_word(texto, palabras)
     if partes[-1] != normalize(esperada):
-        return False, "la palabra de control no cuadra: hay un error al copiar el código"
+        return False, ("la palabra de control no cuadra: revisa la última palabra o "
+                       "el orden de las 24 primeras")
     return True, ""
