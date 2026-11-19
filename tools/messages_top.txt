@@ -1,4 +1,4 @@
-gui 256
+gui 264
 cli 312
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
@@ -7,3 +7,4 @@ cli 312
 # 2026-11-19 cli de 302 a 303: proveedor generico: 'headers' extra y su validacion
 # 2026-11-19 cli de 303 a 308: add --from-file para el .pem de la GitHub App (M5)
 # 2026-11-19 cli de 308 a 312: comando sesion (D18): ayuda y su copia de seguridad
+# 2026-11-19 gui de 256 a 264: revertir un falso descenso: al partir gui.py, gui_puente.py no estaba en la lista y sus 8 textos no contaban

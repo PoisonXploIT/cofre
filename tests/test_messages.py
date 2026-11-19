@@ -105,6 +105,11 @@ class TestTrinqueteDeTextos(unittest.TestCase):
         self.assertEqual(self.probe.resolver("cli", 12, 10, "nuevo comando"),
                          (12, "subido"))
 
+    def test_ningun_modulo_de_tk_se_queda_fuera(self):
+        # 2026-11-19: al partir gui.py, gui_puente.py no estaba en la lista y sus
+        # textos dejaron de contar: el trinquete bajaba solo. Esto lo impide.
+        self.assertEqual(self.probe._modulos_sin_vigilar(), [])
+
     def test_el_fichero_real_tiene_las_dos_caras(self):
         topes, _notas = self.probe.leer_topes(REPO / "tools" / "messages_top.txt")
         self.assertIn("gui", topes)

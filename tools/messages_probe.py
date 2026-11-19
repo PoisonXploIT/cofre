@@ -25,8 +25,12 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 COFRE = RAIZ / "cofre"
-GUI = ["gui.py", "firstuse.py", "palette.py", "lock_screen.py",
+GUI = ["gui.py", "gui_puente.py", "firstuse.py", "palette.py", "lock_screen.py",
        "entry_sheet.py", "gui_confirm.py", "alerts.py", "health.py"]
+# Ningun modulo de la GUI puede quedarse fuera de la lista: si no, mover codigo a
+# otro fichero escondería sus textos y el trinquete bajaría solo (2026-11-19).
+# Excepciones: son piezas de estilo, no pantallas (colores, fuentes y widgets).
+SIN_TEXTO = {"theme.py", "widgets.py"}
 CLI = ["cli.py"]
 
 # nombres de funcion cuyo argumento de texto es visible
@@ -157,6 +161,22 @@ def resolver(cara: str, valor: int, tope: int | None, motivo: str) -> tuple[int,
 
 
 
+def _modulos_sin_vigilar() -> list[str]:
+    """Modulos de cofre/ que pintan (importan tkinter) y no estan en la lista."""
+    fuera = []
+    vigilados = set(GUI) | set(CLI)
+    for ruta in sorted(COFRE.glob("*.py")):
+        if ruta.name in vigilados or ruta.name in SIN_TEXTO:
+            continue
+        try:
+            texto = ruta.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "import tkinter" in texto or "from tkinter" in texto:
+            fuera.append(ruta.name)
+    return fuera
+
+
 def main(argv: list[str]) -> int:
     manual = "--max" in argv
     motivo = ""
@@ -193,6 +213,14 @@ def main(argv: list[str]) -> int:
         print("Pendientes (primeros 200):")
         for fichero, linea, texto, contexto in gui[:200]:
             print(f"  {fichero}:{linea} [{contexto}] {texto[:90]}")
+
+    fuera = _modulos_sin_vigilar()
+    if fuera:
+        print(chr(10) + "FALLO: modulos de la GUI fuera de la lista: "
+              + ", ".join(fuera))
+        print("       anadelos a GUI en tools/messages_probe.py: si no, sus "
+              "textos no cuentan.")
+        return 1
 
     if manual:                          # comprobacion a mano: no toca el fichero
         tope = int(argv[argv.index("--max") + 1])
