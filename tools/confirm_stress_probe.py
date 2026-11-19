@@ -101,7 +101,8 @@ class FakeApp:
         self.permisos: dict = {}
         self.pedidas = 0
 
-    def request_confirm(self, who: str, what: str, contexto: str | None = None) -> str:
+    def request_confirm(self, who: str, what: str, contexto: str | None = None,
+                        cachear: bool = True) -> str:
         assert not (threading.current_thread() is threading.main_thread()), \
             "la peticion de confirmación llego al hilo de Tk"
         clave = (contexto or what, who.split(" - ")[0])

@@ -90,8 +90,11 @@ def dispatch(app, message: dict) -> dict:
             record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
                    ok=False, detail=f"git:{host} politica")
             return {"ok": False, "error": motivo}
-        otorgado = app.request_confirm(f"git - {host}", nombre,
-                                       contexto=f"git:{host}")
+        de_agente = bool(message.get("agent"))
+        quien = f"un agente (git) - {host}" if de_agente else f"git - {host}"
+        otorgado = app.request_confirm(quien, nombre,
+                                       contexto=f"git:{host}",
+                                       cachear=not de_agente)
         if otorgado == "deny":
             record(app.vault_path, "git-get", app.gate, app.serial, name=nombre,
                    ok=False, detail=f"git:{host} confirmación denegada")
@@ -173,6 +176,22 @@ def dispatch(app, message: dict) -> dict:
         from cofre.audit import stamp_vault
         stamp_vault(app.vault)
         return {"ok": True, "name": nombre, "value": valor}
+
+    if tipo == "exec-confirm":
+        # D20: con un agente, cada exec/run se confirma en la ventana y se enseña
+        # el comando y los secretos que se inyectan. No hay permiso de 5 minutos.
+        comando = str(message.get("command", "") or "").strip()[:300]
+        nombres = [str(n)[:60] for n in (message.get("secrets") or [])][:12]
+        if not comando:
+            return {"ok": False, "error": "falta el comando"}
+        otorgado = app.request_confirm("un agente (exec)",
+                                       f"{comando} · inyecta: {', '.join(nombres)}",
+                                       contexto="agent:exec", cachear=False)
+        record(app.vault_path, "exec", app.gate, app.serial,
+               name=",".join(nombres) or "-", ok=otorgado != "deny",
+               detail="agente: confirmación " +
+                      ("aceptada" if otorgado != "deny" else "denegada"))
+        return {"ok": True, "allowed": otorgado != "deny"}
 
     if tipo == "match":
         # 4.6: que secretos valen para esta pestana, para ponerlos primero.

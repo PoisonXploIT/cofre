@@ -45,6 +45,29 @@ def activo() -> bool:
     return str(os.environ.get("COFRE_AGENT", "")).strip().lower() in VERDADEROS
 
 
+CONFIRMACION = ("Con COFRE_AGENT=1, exec y run piden confirmación en la ventana de "
+                "COFRE cada vez (sin permiso de 5 minutos). Sin la ventana abierta "
+                "no se ejecuta.")
+
+
+def confirmar_por_la_gui(comando, nombres: list[str], timeout_ms: int = 120_000) -> bool:
+    """Preguntar a la ventana de COFRE por la tubería. Sin ventana, no.
+
+    La ventana enseña el comando completo y qué secretos se inyectan. No se cachea
+    nada: cada ejecución se confirma (lo pide D20 para los agentes).
+    """
+    from cofre import nmhost
+    from cofre.redact import comando_visible
+    mensaje = {"type": "exec-confirm", "command": comando_visible(comando),
+               "secrets": list(nombres), "agent": True}
+    try:
+        respuesta = nmhost.forward(mensaje, reply_timeout_ms=timeout_ms)
+    except Exception:                              # noqa: BLE001
+        return False
+    return bool(isinstance(respuesta, dict) and respuesta.get("ok")
+                and respuesta.get("allowed"))
+
+
 def motivo(args) -> str:
     """Devuelve el motivo del bloqueo, o "" si el comando puede pasar."""
     if not activo():

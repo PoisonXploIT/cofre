@@ -584,6 +584,27 @@ def _instalar_gancho(repo: str, vault_path, quitar: bool) -> int:
     return 0
 
 
+def _ejecutar(comando, entorno: dict, inyectados: dict) -> int:
+    """Lanzar el programa. `inyectados` vacio = hereda la terminal (lo normal).
+
+    Si viene de un agente (D20) se captura la salida y se tapan los valores: el
+    agente lee lo que imprima el programa hijo.
+    """
+    import subprocess
+    if not inyectados:
+        return subprocess.run(comando, env=entorno).returncode
+    from cofre.redact import redactar
+    proc = subprocess.run(comando, env=entorno, capture_output=True, text=True,
+                          errors="replace")
+    salida = redactar(proc.stdout or "", inyectados)
+    error = redactar(proc.stderr or "", inyectados)
+    if salida:
+        sys.stdout.write(salida)
+    if error:
+        sys.stderr.write(error)
+    return proc.returncode
+
+
 def cmd_github_app(args, vault_path) -> int:
     """M5: manifest de GitHub, canje del código y clave directa al cofre."""
     from cofre import github_app
@@ -1178,11 +1199,26 @@ def main(argv: list[str]) -> int:
             return 1
         entorno = dict(os.environ)
         entorno.update(entorno_ref)
+        nombres = [r.destino for r in refs]
+        agente = False
+        try:
+            from cofre import agent_guard
+            agente = agent_guard.activo()
+        except Exception:                          # noqa: BLE001
+            agente = False
+        if agente:
+            print(agent_guard.CONFIRMACION)
+            if not agent_guard.confirmar_por_la_gui(comando, nombres):
+                print("denegado en COFRE (o sin ventana abierta): no se ejecuta nada",
+                      file=sys.stderr)
+                record(str(vault_path), "run", args.gate, serial, name="-",
+                       ok=False, detail="agente: confirmación denegada")
+                return 1
         record(str(vault_path), "run", args.gate, serial,
-               name=",".join(r.destino for r in refs), ok=True,
+               name=",".join(nombres), ok=True,
                detail=str(ruta)[:150])
         print(f"ejecutando con {len(entorno_ref)} variables (solo para ese proceso)")
-        return subprocess.run(comando, env=entorno).returncode
+        return _ejecutar(comando, entorno, entorno_ref if agente else {})
 
     if args.command == "exec":
         import subprocess
@@ -1215,9 +1251,25 @@ def main(argv: list[str]) -> int:
             print("no encontrados: " + ", ".join(missing), file=sys.stderr)
             record(str(vault_path), "exec", args.gate, serial, ok=False, detail=";".join(missing))
             return 1
+        inyectados = {n: env[n] for n in args.name if n in env}
+        agente = False
+        try:
+            from cofre import agent_guard
+            agente = agent_guard.activo()
+        except Exception:                          # noqa: BLE001
+            agente = False
+        if agente:
+            print(agent_guard.CONFIRMACION)
+            if not agent_guard.confirmar_por_la_gui(args.cmd, list(args.name)):
+                print("denegado en COFRE (o sin ventana abierta): no se ejecuta nada",
+                      file=sys.stderr)
+                record(str(vault_path), "exec", args.gate, serial,
+                       name=",".join(args.name), ok=False,
+                       detail="agente: confirmación denegada")
+                return 1
         record(str(vault_path), "exec", args.gate, serial, name=",".join(args.name), ok=True)
         print(f"ejecutando con {len(args.name)} variables inyectadas (solo para ese proceso)")
-        return subprocess.run(args.cmd, env=env).returncode
+        return _ejecutar(args.cmd, env, inyectados if agente else {})
 
     if args.command == "resume":
         from cofre import rotation as rot

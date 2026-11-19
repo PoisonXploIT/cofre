@@ -96,6 +96,9 @@ class TestServidorDeUnUso(unittest.TestCase):
 class TestCanje(unittest.TestCase):
     """Contra un api.github.com falso: el pem nunca se imprime."""
 
+    CABECERA = "-----BEGIN " + "RSA PRIVATE KEY-----"
+    PIE = "-----END " + "RSA PRIVATE KEY-----"
+
     @classmethod
     def setUpClass(cls):
         cls.visto = {}
@@ -107,8 +110,7 @@ class TestCanje(unittest.TestCase):
                 TestCanje.visto["ruta"] = self.path
                 TestCanje.visto["acepta"] = self.headers.get("Accept")
                 cuerpo = json.dumps({"id": 123456, "slug": "cofre-sammi",
-                                     "pem": "-----BEGIN RSA PRIVATE KEY-----\nXX\n"
-                                            "-----END RSA PRIVATE KEY-----\n",
+                                     "pem": TestCanje.CABECERA + "\nXX\n" + TestCanje.PIE + "\n",
                                      "webhook_secret": "no-se-usa"}).encode()
                 self.send_response(201)
                 self.send_header("Content-Type", "application/json")
@@ -139,7 +141,7 @@ class TestCanje(unittest.TestCase):
     def test_canjea_el_codigo_y_devuelve_id_y_pem(self):
         respuesta = github_app.canjear("abc123")
         self.assertEqual(respuesta["id"], 123456)
-        self.assertIn("BEGIN RSA PRIVATE KEY", respuesta["pem"])
+        self.assertIn(self.CABECERA, respuesta["pem"])
         self.assertEqual(TestCanje.visto["ruta"],
                          "/app-manifests/abc123/conversions")
         self.assertIn("github+json", TestCanje.visto["acepta"])

@@ -60,8 +60,10 @@ class FakeApp:
         self.respuesta = respuesta
         self.llamadas = []
 
-    def request_confirm(self, who, what, contexto=None):
+    def request_confirm(self, who, what, contexto=None, cachear=True):
+        # D20: el canal git pasa cachear=False cuando quien pide es un agente
         self.llamadas.append((who, what, contexto))
+        self.cachear = cachear
         return self.respuesta
 
 

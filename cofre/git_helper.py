@@ -52,7 +52,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # La tuberia es del proceso de la GUI. Si no esta, no hay nada que hacer:
     # este proceso no abre el cofre.
-    respuesta = forward({"type": "git", "host": host},
+    # D20: si quien pide viene de un agente (heredó COFRE_AGENT), se dice en la
+    # petición para que la ventana pida confirmación **siempre**, sin los 5 minutos
+    de_agente = str(os.environ.get("COFRE_AGENT", "")).strip().lower() in {
+        "1", "si", "sí", "true", "yes", "on"}
+    respuesta = forward({"type": "git", "host": host, "agent": de_agente},
                         reply_timeout_ms=LARGO_CONFIRMACION_MS)
     if not isinstance(respuesta, dict) or not respuesta.get("ok"):
         return 0

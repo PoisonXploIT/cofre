@@ -166,7 +166,8 @@ class PuenteGUI:
         self._refrescar_grants()
         self.set_foot(msg("permisos.retirado", texto=texto))
 
-    def request_confirm(self, who: str, what: str, contexto: str | None = None) -> str:
+    def request_confirm(self, who: str, what: str, contexto: str | None = None,
+                        cachear: bool = True) -> str:
         """Pregunta a la persona (2.4).
 
         Dos caminos, y solo dos:
@@ -177,15 +178,17 @@ class PuenteGUI:
             el sondeo abre el dialogo sin bloquearse y le pasa la respuesta.
 
         `contexto` permite que el permiso de 5 minutos sea por host en git; el
-        navegador sigue usando el secreto seleccionado.
+        navegador sigue usando el secreto seleccionado. `cachear=False` (D20) no
+        consulta ni guarda ese permiso: lo pide un agente y se confirma siempre.
         """
         if not self.confirm_queue:
             return "deny"
         clave = (contexto or self.selected or what, who.split(" - ")[0])
-        self._grants_activos()          # limpia caducados antes de mirar
-        hasta = self.confirm_grants.get(clave)
-        if hasta and hasta > time.time():
-            return "grant"
+        if cachear:
+            self._grants_activos()      # limpia caducados antes de mirar
+            hasta = self.confirm_grants.get(clave)
+            if hasta and hasta > time.time():
+                return "grant"
         if is_main():
             try:
                 from cofre.gui_confirm import ConfirmDialog
@@ -194,7 +197,7 @@ class PuenteGUI:
                 resultado = "deny"
         else:
             resultado = self.confirm_queue.ask(who, what, timeout=30)
-        if resultado == "grant":
+        if resultado == "grant" and cachear:
             self.confirm_grants[clave] = time.time() + 300
         return resultado
 
