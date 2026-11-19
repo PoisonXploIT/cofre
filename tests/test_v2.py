@@ -211,13 +211,34 @@ class TestPalabrasPropias(unittest.TestCase):
             code_from_words(self.palabras[:20])
         self.assertIn("24", str(ctx.exception))
 
-    def test_palabra_fuera_de_la_lista(self):
-        from cofre.v2.recovery import code_from_words
+    def test_palabras_propias_fuera_de_la_lista(self):
+        # 2026-11-19: la lista es una pista, no un requisito. Exigirla hacia
+        # inutil el boton "Mis palabras" (ninguna palabra elegida a mano estaba).
+        from cofre.v2.recovery import check_code, code_from_words, revisar_palabras
+        propias = [f"palabra{letra}" for letra in "abcdefghijklmnopqrstuvwx"]
+        limpias, fuera, repes, error = revisar_palabras(propias)
+        self.assertEqual(error, "")
+        self.assertEqual(len(limpias), 24)
+        self.assertEqual(repes, [])
+        fuera_lista = [i for i in fuera]
+        codigo = code_from_words(propias)
+        self.assertEqual(len(codigo.split()), 25)
+        self.assertEqual(check_code(codigo), (True, ""))
+
+    def test_letras_solo(self):
+        from cofre.v2.recovery import revisar_palabras
         malas = list(self.palabras)
-        malas[7] = "zzzz"
-        with self.assertRaises(ValueError) as ctx:
-            code_from_words(malas)
-        self.assertIn("palabra 8", str(ctx.exception))
+        malas[2] = "abc123"
+        _l, _f, _r, error = revisar_palabras(malas)
+        self.assertIn("palabra 3", error)
+
+    def test_detecta_repetidas(self):
+        from cofre.v2.recovery import revisar_palabras
+        con_repe = list(self.palabras)
+        con_repe[5] = con_repe[0]
+        _l, _f, repes, error = revisar_palabras(con_repe)
+        self.assertEqual(error, "")
+        self.assertEqual(repes, [6])
 
     def test_abre_el_cofre_con_esas_palabras(self):
         import tempfile

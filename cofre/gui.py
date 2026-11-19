@@ -2468,26 +2468,45 @@ class CofreGUI(PuenteGUI):
                          anchor="w", wraplength=680, justify="left")
         aviso.pack(fill="x", padx=18)
 
+        def comprobar(event=None) -> None:
+            from cofre.v2.recovery import revisar_palabras
+            limpias, fuera, repes, error = revisar_palabras(caja.get("1.0", "end").split())
+            if error:
+                aviso.configure(text=error, fg=WARN)
+                return
+            texto = (msg("llaves.mis_ok_fuera", n=len(limpias), fuera=len(fuera))
+                     if fuera else msg("llaves.mis_ok", n=len(limpias)))
+            if repes:
+                texto += " " + msg("llaves.mis_repes",
+                                   posiciones=", ".join(str(i) for i in repes[:4]))
+            aviso.configure(text=texto, fg=WARN if repes else MUT)
+
         def guardar(event=None) -> None:
             palabras = caja.get("1.0", "end").split()
             try:
                 from cofre import keys as keys_mod
-                from cofre.v2.recovery import code_from_words
+                from cofre.v2.recovery import code_from_words, revisar_palabras
+                _limpias, fuera, _repes, error = revisar_palabras(palabras)
+                if error:
+                    aviso.configure(text=error, fg=WARN)
+                    return
                 codigo = code_from_words(palabras)      # valida antes de tocar
                 store = self.vault._v2store()
                 nuevo, datos = keys_mod.generar_codigo(
                     store._vault, store._data, store.master, palabras=palabras)
                 store._data = datos
             except ValueError as exc:
-                aviso.configure(text=str(exc))
+                aviso.configure(text=str(exc), fg=WARN)
                 return
             except Exception as exc:                   # noqa: BLE001
-                aviso.configure(text=msg("llaves.mis_error", error=exc))
+                aviso.configure(text=msg("llaves.mis_error", error=exc), fg=WARN)
                 return
             record(self.vault_path, "recovery", self.gate, self.serial, name="-",
                    ok=True, detail="código de recuperación con palabras propias")
             win.destroy()
             self.set_foot(msg("llaves.mis_hecho"))
+            if fuera:
+                self.set_foot(msg("llaves.mis_ok_fuera", n=24, fuera=len(fuera)))
             self._mostrar_codigo(nuevo or codigo)
 
         fila = tk.Frame(win, bg=PANEL)
@@ -2495,6 +2514,8 @@ class CofreGUI(PuenteGUI):
         self._btn(fila, msg("comun.cancelar"), win.destroy).pack(side="right")
         self._btn(fila, msg("llaves.mis_guardar"), guardar,
                   accent=True).pack(side="right", padx=8)
+        self._btn(fila, msg("llaves.mis_comprobar"), comprobar).pack(
+            side="right", padx=(0, 8))
         caja.focus_set()
 
     def _probar_codigo(self) -> None:

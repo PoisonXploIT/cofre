@@ -94,9 +94,15 @@ MSG = {
     "llaves.probar": "Probar código",
     "llaves.mis_palabras": "Mis palabras",
     "llaves.mis_titulo": "COFRE - mis palabras",
-    "llaves.mis_intro": "Escribe 24 palabras de la lista, separadas por espacios. "
-                        "COFRE añade la palabra de control (la 25) y las guarda como "
-                        "código de recuperación nuevo: el anterior deja de abrir.",
+    "llaves.mis_intro": "Escribe 24 palabras, tuyas o de la lista, separadas por "
+                        "espacios. COFRE añade la 25 (la de control) y las guarda "
+                        "como código de recuperación nuevo: el anterior deja de abrir.",
+    "llaves.mis_comprobar": "Comprobar",
+    "llaves.mis_ok": "{n} palabras, ninguna repetida. Se puede guardar.",
+    "llaves.mis_ok_fuera": "{n} palabras, ninguna repetida. {fuera} no están en la "
+                          "lista de 2.000: si las has elegido tú, es normal.",
+    "llaves.mis_repes": "Ojo: hay palabras repetidas (posiciones {posiciones}); "
+                        "el código pierde fuerza.",
     "llaves.mis_aviso": "Ojo: 24 palabras elegidas por ti son más fáciles de adivinar "
                         "que 24 al azar. Sirve para que no se te olviden, no para "
                         "ganar fuerza.",
