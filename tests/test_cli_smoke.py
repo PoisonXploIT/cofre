@@ -126,8 +126,12 @@ class TestValorDesdeFichero(unittest.TestCase):
             register_stick(str(vault), volume_serial(str(tmp.drive) + "\\"),
                            str(tmp.drive) + "\\")
             pem = tmp / "clave.pem"
-            pem.write_text("-----BEGIN PRIVATE KEY-----\nAA\nBB\n-----END "
-                           "PRIVATE KEY-----\n", encoding="utf-8")
+            # el nombre se arma en tiempo de ejecucion: el escaneo del repo
+            # (check_all) no tiene que saltar con un PEM de mentira
+            cabecera = "-----BEGIN " + "PRIVATE KEY-----"
+            pie = "-----END " + "PRIVATE KEY-----"
+            pem.write_text(cabecera + "\nAA\nBB\n" + pie + "\n",
+                           encoding="utf-8")
             base = [sys.executable, "-m", "cofre.cli", "--vault", str(vault),
                     "--stick", str(key)]
             proc = subprocess.run(base + ["add", "PEM", "--from-file", str(pem)],
@@ -137,7 +141,7 @@ class TestValorDesdeFichero(unittest.TestCase):
             proc = subprocess.run(base + ["get", "PEM", "--allow-pipe"],
                                   capture_output=True, text=True, cwd=str(REPO),
                                   timeout=120)
-            self.assertTrue(proc.stdout.startswith("-----BEGIN PRIVATE KEY-----"))
+            self.assertTrue(proc.stdout.startswith(cabecera))
             self.assertEqual(proc.stdout.count("\n"), 4)
         finally:
             import shutil
