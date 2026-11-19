@@ -32,6 +32,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 
+from cofre.audit import clave_ligada as audit_clave_ligada
 from cofre.audit import clear_key as audit_clear_key
 from cofre.audit import record, set_key as audit_set_key, tail
 from cofre.crypto import Vault
@@ -993,7 +994,11 @@ class CofreGUI(PuenteGUI):
         # el evento se firma ANTES de tirar la clave: un 'lock' sin firma no
         # existe si el cofre estaba abierto. Y si no habia sesión no se escribe
         # nada: bloquear un cofre ya cerrado no es un evento.
-        if self.session and not sin_evento:
+        # solo se anota si hay clave de auditoria: un `lock` sin firma no deberia
+        # existir, y la GUI puede bloquear cuando el cofre no llego a abrirse
+        # (pendrive retirado justo al abrir). Paso el 2026-11-17: 17 locks sin
+        # firma que parecian manipulacion.
+        if self.session and not sin_evento and audit_clave_ligada():
             record(self.vault_path, "lock", self.gate, self.serial, ok=True,
                    detail=detalle or "manual")
         # el calendario se escribe antes de soltar la llave

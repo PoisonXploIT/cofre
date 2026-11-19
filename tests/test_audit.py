@@ -184,7 +184,10 @@ class TestFirmaDeCheck(unittest.TestCase):
     def test_check_no_esta_entre_los_esperados(self):
         from cofre.audit import EXPECTED_UNSIGNED
         self.assertNotIn("check", EXPECTED_UNSIGNED)
-        self.assertEqual(EXPECTED_UNSIGNED, {"gui-gate", "alert", "bridge-reject"})
+        # audit-verify se anadio el 2026-11-19: log verify corre con el cofre
+        # cerrado y no puede firmar. `check` sigue SIN estar: abre con la llave.
+        self.assertEqual(EXPECTED_UNSIGNED,
+                         {"gui-gate", "alert", "bridge-reject", "audit-verify"})
 
     def test_un_check_sin_firma_es_manipulacion(self):
         import tempfile
@@ -284,3 +287,56 @@ class TestCheckpoint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFirmaObligatoria(unittest.TestCase):
+    """2026-11-19: `lock` sin clave parece manipulacion; `audit-verify` no.
+
+    El 2026-11-17 la GUI anoto `lock` cuando el cofre no habia llegado a abrirse
+    (pendrive retirado al abrir): 17 lineas sin firma que `log verify` marcaba como
+    manipulacion. Y `log verify` sin pendrive anotaba `audit-verify` sin firma.
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _P
+        self.tmp = _P(tempfile.mkdtemp(prefix="cofre-firma-"))
+        self.vault = self.tmp / "cofre.json"
+        self.master = b"k" * 32
+
+    def tearDown(self):
+        import shutil
+        from cofre import audit as _audit
+        _audit.clear_key()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_clave_ligada(self):
+        from cofre import audit as _audit
+        _audit.clear_key()
+        self.assertFalse(_audit.clave_ligada())
+        _audit.set_key(self.master)
+        self.assertTrue(_audit.clave_ligada())
+
+    def test_lock_sin_firma_se_detecta(self):
+        from cofre import audit as _audit
+        _audit.clear_key()
+        _audit.record(self.vault, "lock", "usb", 1, detail="sin llave")
+        _audit.set_key(self.master)
+        ok, detalle = _audit.verify(str(self.vault))
+        self.assertFalse(ok)
+        self.assertIn("lock", detalle)
+
+    def test_audit_verify_puede_ir_sin_firma(self):
+        from cofre import audit as _audit
+        _audit.clear_key()
+        _audit.record(self.vault, "audit-verify", "usb", 1, detail="sin llave")
+        _audit.set_key(self.master)
+        ok, detalle = _audit.verify(str(self.vault))
+        self.assertTrue(ok, detalle)
+
+    def test_lock_con_llave_se_firma(self):
+        from cofre import audit as _audit
+        _audit.set_key(self.master)
+        _audit.record(self.vault, "lock", "usb", 1)
+        eventos = [e for e in _audit._events(self.vault) if e.get("ev") == "lock"]
+        self.assertTrue(eventos[0].get("mac"))

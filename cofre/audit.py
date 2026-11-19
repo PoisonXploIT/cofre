@@ -49,12 +49,16 @@ MAX_LINES = 5000
 # normal; no se confunden con manipulacion.
 # 'check' NO esta aqui: abre el cofre con la llave y por tanto puede y debe
 # firmar. Si aparece sin firma es un fallo de orden, como el del lock.
-EXPECTED_UNSIGNED = {"gui-gate", "alert", "bridge-reject"}
+EXPECTED_UNSIGNED = {"gui-gate", "alert", "bridge-reject", "audit-verify"}
+# `audit-verify` puede escribirse con el cofre cerrado (log verify no necesita
+# pendrive), asi que no puede exigir firma. `lock`, `meta` y `rotate` si: solo
+# ocurren con el cofre abierto. (Corregido el 2026-11-19: antes estaba al reves y
+# siete verificaciones echas sin llave se marcaban como manipulacion.)
 
 PRIVILEGED = {
     "get", "reveal", "clipboard", "browser-get", "browser-list", "add", "del",
     "rename", "rotate", "lock", "exec", "export", "host-assign", "migrate",
-    "stick-add-v2", "audit-verify", "fin-de-pruebas", "reanchor", "restore",
+    "stick-add-v2", "fin-de-pruebas", "reanchor", "restore",
     "meta", "seal", "check", "stick-register", "stick-verify", "stick-copy",
     "stick-revoke", "stick-role", "gate-explicit", "edit", "copy-name",
     "copy-exec", "edit-load", "bridge-start", "canary-access", "revoke",
@@ -82,6 +86,11 @@ def _subkey(master: bytes) -> bytes:
 def set_key(master: bytes | None) -> None:
     global _KEY
     _KEY = _subkey(master) if master else None
+
+
+def clave_ligada() -> bool:
+    """True si hay clave de auditoria: sin ella, un evento no se puede firmar."""
+    return _KEY is not None
 
 
 def bind_store(store) -> None:
