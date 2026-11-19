@@ -1253,10 +1253,19 @@ class CofreGUI(PuenteGUI):
     # ---------- errores ----------
 
     def _on_tk_error(self, exc_type, exc_value, tb) -> None:
-        """Un fallo en un callback no puede quedarse mudo."""
+        """Un fallo en un callback no puede quedarse mudo ni tumbar la ventana.
+
+        Con pythonw, `sys.stderr` es None: escribir ahi lanzaba otra excepcion
+        dentro del propio manejador, se escapaba del `mainloop` y la ventana se
+        cerraba "sola" (paso el 2026-11-19 con el boton Probar).
+        """
         import traceback
         text = traceback.format_exception(exc_type, exc_value, tb)
-        sys.stderr.write("".join(text))
+        try:
+            if sys.stderr is not None:
+                sys.stderr.write("".join(text))
+        except Exception:
+            pass
         try:
             self.set_foot(f"error interno: {exc_type.__name__}: {exc_value}. "
                           "Usa el acceso COFRE (diagnostico) para ver el detalle.")
@@ -1474,7 +1483,7 @@ class CofreGUI(PuenteGUI):
             record(self.vault_path, "alert", self.gate, self.serial,
                    name="rotación-interrumpida", ok=False, detail=texto[:150])
 
-    def _comprobar_salud(self) -> None:
+    def _comprobar_salud(self, event=None) -> None:
         """5.9: preguntar a los proveedores en un hilo, sin bloquear Tkinter."""
         if not self.session:
             self.set_foot("el cofre esta bloqueado")
@@ -1706,7 +1715,7 @@ class CofreGUI(PuenteGUI):
         except Exception:
             self.alert_band.pack(fill="x")
 
-    def dismiss_alerts(self) -> None:
+    def dismiss_alerts(self, event=None) -> None:
         self._alerts_visibles = []
         self.alert_band.pack_forget()
 
@@ -1776,7 +1785,7 @@ class CofreGUI(PuenteGUI):
         return (self._rotacion_pendiente(meta) or self._caduca_pronto(meta)
                 or (sin_sitio and str(meta.get("type")) != "note"))
 
-    def open_health(self) -> None:
+    def open_health(self, event=None) -> None:
         """Vista de salud dentro de la ventana: tarjetas que filtran la lista."""
         self._mostrar_vista("salud")
 
@@ -1929,7 +1938,7 @@ class CofreGUI(PuenteGUI):
             tk.Label(panel, text=linea, fg=MUT if datos.get("present") else FAINT,
                      bg=PANEL2, font=self.f_small, anchor="w").pack(fill="x")
 
-    def _sellar_registro(self) -> None:
+    def _sellar_registro(self, event=None) -> None:
         """Sellar el registro desde la vista de salud."""
         try:
             from cofre.audit import auto_seal
@@ -1949,7 +1958,7 @@ class CofreGUI(PuenteGUI):
             fill="x", padx=18, pady=(18, 12))
         salida = {"ok": False}
 
-        def aceptar():
+        def aceptar(event=None):
             salida["ok"] = True
             win.destroy()
 
@@ -2060,7 +2069,7 @@ class CofreGUI(PuenteGUI):
         from cofre.firstuse import Wizard
         self._wizard = Wizard(self)
 
-    def open_keys(self) -> None:
+    def open_keys(self, event=None) -> None:
         """6.6: llaves del cofre, estado, último uso y acciones."""
         if not self.session:
             self.set_foot("abre el cofre para ver las llaves")
@@ -2206,13 +2215,13 @@ class CofreGUI(PuenteGUI):
         fila = tk.Frame(win, bg=PANEL)
         fila.pack(fill="x", padx=18, pady=16)
 
-        def solo() -> None:
+        def solo(event=None) -> None:
             win.destroy()
             if self._quitar_slot(serial):
                 win_keys.destroy()
                 self.open_keys()
 
-        def con_rekey() -> None:
+        def con_rekey(event=None) -> None:
             win.destroy()
             if not self._quitar_slot(serial):
                 return
@@ -2333,7 +2342,7 @@ class CofreGUI(PuenteGUI):
         fila = tk.Frame(win, bg=PANEL)
         fila.pack(fill="x", padx=18, pady=(0, 14))
 
-        def crear() -> None:
+        def crear(event=None) -> None:
             seleccion = lista.curselection()
             if not seleccion:
                 return
@@ -2427,7 +2436,7 @@ class CofreGUI(PuenteGUI):
                              justify="left")
         resultado.pack(fill="x", padx=18)
 
-        def probar() -> None:
+        def probar(event=None) -> None:
             from cofre import keys as keys_mod
             ok, motivo = keys_mod.probar_codigo(
                 self.vault.load(), caja.get("1.0", "end").strip())
@@ -2597,7 +2606,7 @@ class CofreGUI(PuenteGUI):
         except Exception as exc:                   # noqa: BLE001
             self.set_foot(f"no se pudo copiar: {exc}")
 
-    def open_settings(self) -> None:
+    def open_settings(self, event=None) -> None:
         """6.7: seguridad, generador, alertas, navegador, copias y Acerca de."""
         from cofre import alerts as alerts_mod
         from cofre import settings as st
@@ -2750,7 +2759,7 @@ class CofreGUI(PuenteGUI):
         self._btn(der, msg("ajustes.panico"), self.open_panic,
                   danger=True).pack(anchor="w")
 
-        def guardar() -> None:
+        def guardar(event=None) -> None:
             try:
                 nuevo = st.clamp({
                     "idle_minutes": int(v_idle.get()),
@@ -2837,7 +2846,7 @@ class CofreGUI(PuenteGUI):
             salida = f"no se pudo ejecutar el instalador: {exc}"
         self._mostrar_salida("Emparejar el navegador", salida)
 
-    def open_panic(self) -> None:
+    def open_panic(self, event=None) -> None:
         """5.10: la emergencia se ve aquí; la ejecucion va en una terminal."""
         win = self._sheet("COFRE - emergencia")
         win.geometry("660x500")
@@ -2876,7 +2885,7 @@ class CofreGUI(PuenteGUI):
         self._btn(fila, "Ver el plan", lambda: self._plan_panico(texto)).pack(
             side="right", padx=8)
 
-    def _copiar_panico(self) -> None:
+    def _copiar_panico(self, event=None) -> None:
         try:
             from cofre.clipboard import copy_text
             copy_text("run.cmd panic --dry-run")
@@ -3320,7 +3329,7 @@ class CofreGUI(PuenteGUI):
         texto.configure(state="disabled")
         self._btn(win, "Cerrar", win.destroy).pack(pady=(0, 12))
 
-    def assign_site(self) -> None:
+    def assign_site(self, event=None) -> None:
         """Asignar un dominio a ESTE secreto. Pasa por confirmación."""
         if not self.selected or not self.session:
             self.set_foot("selecciona un secreto con el cofre abierto")
@@ -3380,7 +3389,7 @@ class CofreGUI(PuenteGUI):
             campo.set("")
         salida = {"valor": ""}
 
-        def aceptar():
+        def aceptar(event=None):
             salida["valor"] = campo.get().strip()
             win.destroy()
 
