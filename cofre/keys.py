@@ -97,17 +97,26 @@ def generar_codigo(v2, data: dict, master: bytes,
 
 
 def probar_codigo(data: dict, codigo: str) -> tuple[bool, str]:
-    """Comprobar las 25 palabras contra este cofre. No cambia nada."""
-    ok, motivo = check_code(codigo or "")
-    if not ok:
-        return False, motivo
+    """Comprobar las 25 palabras contra este cofre. No cambia nada.
+
+    Orden a proposito (2026-11-19): **primero se intenta abrir** y la palabra de
+    control queda como pista. La verdad es si la ranura se abre; si algun dia el
+    algoritmo de la palabra de control cambia, un codigo valido no se rechaza por
+    una comprobacion previa. Si no abre, el mensaje dice por que.
+    """
+    codigo = (codigo or "").strip()
+    if not codigo:
+        return False, "escribe las 25 palabras"
+    ok, motivo = check_code(codigo)
     try:
         open_with_recovery(data, codigo)
+        return True, "el código abre este cofre"
     except SlotError as exc:
+        if not ok:
+            return False, f"{exc}. Además: {motivo}"
         return False, str(exc)
     except Exception as exc:                       # noqa: BLE001
         return False, f"no se pudo comprobar: {exc}"
-    return True, "el código abre este cofre"
 
 
 def quitar_pendrive(v2, data: dict, serial: int) -> tuple[dict, bool]:

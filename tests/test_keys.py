@@ -136,3 +136,46 @@ class TestQuitar(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProbarCodigoOrden(unittest.TestCase):
+    """2026-11-19: manda la ranura, no la palabra de control.
+
+    Si el codigo abre la ranura, se dice que abre aunque la comprobacion previa de
+    la palabra de control diga otra cosa. La palabra de control es una pista para
+    detectar erratas, no la verdad.
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _P
+        from cofre.firstuse import crear_cofre
+        self.tmp = _P(tempfile.mkdtemp(prefix="cofre-probar-"))
+        self.estado = crear_cofre(self.tmp / "cofre.json",
+                                  str(self.tmp.drive) + "\\",
+                                  clave=self.tmp / "COFRE.KEY")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_abre_aunque_la_pista_falle(self):
+        from unittest import mock
+        from cofre import keys
+        with mock.patch.object(keys, "check_code", return_value=(False, "pista rota")):
+            ok, motivo = keys.probar_codigo(self.estado["data"], self.estado["código"])
+        self.assertTrue(ok, motivo)
+        self.assertIn("abre", motivo)
+
+    def test_vacio_lo_dice(self):
+        from cofre import keys
+        ok, motivo = keys.probar_codigo(self.estado["data"], "   ")
+        self.assertFalse(ok)
+        self.assertIn("25 palabras", motivo)
+
+    def test_codigo_de_otro_cofre_no_abre(self):
+        from cofre import keys
+        from cofre.v2.recovery import new_code
+        ok, motivo = keys.probar_codigo(self.estado["data"], new_code())
+        self.assertFalse(ok)
+        self.assertIn("no abre", motivo)
