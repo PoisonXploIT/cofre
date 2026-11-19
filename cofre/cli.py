@@ -271,10 +271,19 @@ def build_parser() -> argparse.ArgumentParser:
         "due", help="recordatorios del calendario (sin abrir el cofre)"))
     du.add_argument("--notify", action="store_true",
                     help="mostrar el aviso si la fecha ya llego")
+    du.add_argument("--json", action="store_true",
+                    help="salida para un programa, sin abrir el cofre")
 
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
+    se = with_common(sub.add_parser(
+        "sesion", help="comprobar lo que se puede sin el usuario (D18)"))  # no-tildes
+    se.add_argument("--carpeta", default="D:\\Cofre",
+                    help="carpeta de la copia de seguridad")
+    se.add_argument("--comprobar", action="store_true",
+                    help="no copia nada, solo comprueba")
+
     with_common(sub.add_parser("version",   # no-tildes: el nombre del comando
                                help="versión de COFRE y del entorno"))
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
@@ -771,6 +780,15 @@ def main(argv: list[str]) -> int:
         # va en su propio hilo, como el resto de alertas.
         from cofre import schedule
         datos = schedule.leer(vault_path)
+        if getattr(args, "json", False):
+            import json as _json
+            print(_json.dumps({
+                "toca": bool(schedule.toca(datos)),
+                "hay_calendario": datos is not None,
+                "describe": schedule.describe(datos),
+                "mensaje": schedule.mensaje(datos) if schedule.toca(datos) else "",
+            }, ensure_ascii=False))
+            return 0
         if not args.notify:
             print(schedule.describe(datos))
             return 0
@@ -887,6 +905,13 @@ def main(argv: list[str]) -> int:
     if args.command == "serve":
         from cofre.serve import main as serve_main
         return serve_main(["--port", str(args.port)])
+
+    if args.command == "sesion":                     # no-tildes
+        from cofre.sesion_fisica import main as sesion_main
+        extra = ["--carpeta", args.carpeta] if args.carpeta else []
+        if args.comprobar:
+            extra.append("--comprobar")
+        return sesion_main(extra)
 
     if args.command == "scan":
         return cmd_scan(args, vault_path)
