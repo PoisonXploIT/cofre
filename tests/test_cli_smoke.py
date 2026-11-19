@@ -107,6 +107,43 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestValorDesdeFichero(unittest.TestCase):
+    """2026-11-19: un .pem tiene saltos de línea; `add --from-file` los conserva."""
+
+    def test_pem_de_varias_lineas(self):
+        tmp = Path(tempfile.mkdtemp(prefix="cofre-from-file-"))
+        try:
+            vault = tmp / "cofre.json"
+            key = tmp / "COFRE.KEY"
+            key.write_bytes(secrets.token_bytes(32))
+            from cofre.salt import get_salt
+            from cofre.usb import usb_session_key
+            salt = get_salt(str(vault), create=True)
+            session = usb_session_key(str(key), salt)
+            v = Vault(vault)
+            v.init(session, salt=salt)
+            from cofre.usb import register_stick, volume_serial
+            register_stick(str(vault), volume_serial(str(tmp.drive) + "\\"),
+                           str(tmp.drive) + "\\")
+            pem = tmp / "clave.pem"
+            pem.write_text("-----BEGIN PRIVATE KEY-----\nAA\nBB\n-----END "
+                           "PRIVATE KEY-----\n", encoding="utf-8")
+            base = [sys.executable, "-m", "cofre.cli", "--vault", str(vault),
+                    "--stick", str(key)]
+            proc = subprocess.run(base + ["add", "PEM", "--from-file", str(pem)],
+                                  capture_output=True, text=True, cwd=str(REPO),
+                                  timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            proc = subprocess.run(base + ["get", "PEM", "--allow-pipe"],
+                                  capture_output=True, text=True, cwd=str(REPO),
+                                  timeout=120)
+            self.assertTrue(proc.stdout.startswith("-----BEGIN PRIVATE KEY-----"))
+            self.assertEqual(proc.stdout.count("\n"), 4)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class TestCheckV2YRecuperacion(unittest.TestCase):
     """2026-11-18: `check` no entendia v2 y el codigo de recuperacion no existia
     en el CLI (la pantalla de bloqueo lo mandaba a un flag que no estaba)."""

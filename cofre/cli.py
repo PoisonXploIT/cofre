@@ -90,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("value", nargs="?",
                     help="si se omite, se pide a ciegas (no queda en el historial)")
     sp.add_argument("--tag", action="append", default=[])
+    sp.add_argument("--from-file", metavar="RUTA", default="",
+                    help="leer el valor de un fichero (multilinea, p. ej. un .pem)")
     sg = with_common(sub.add_parser("get"))
     sg.add_argument("name")
     with_common(sub.add_parser("list"))
@@ -2083,6 +2085,23 @@ def main(argv: list[str]) -> int:
             name = None
         elif args.command == "add":
             value = args.value
+            if args.from_file:
+                # un .pem o una clave con saltos de linea: se lee del fichero
+                ruta = Path(args.from_file)
+                if not ruta.is_file():
+                    print(f"no existe el fichero {ruta}", file=sys.stderr)
+                    return 1
+                try:
+                    value = (ruta.read_text(encoding="utf-8")
+                             .replace("\r\n", "\n").strip("\n"))
+                except OSError as exc:
+                    print(f"no se pudo leer {ruta}: {exc}", file=sys.stderr)
+                    return 1
+                if not value:
+                    print("el fichero esta vacio", file=sys.stderr)
+                    return 1
+                print("leido de un fichero. Borralo cuando ya no haga falta:",
+                      file=sys.stderr)
             if value is None:
                 value = read_secret("valor del secreto: ")
             vault.add(session, args.name, value, args.tag)
