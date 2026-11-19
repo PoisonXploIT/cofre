@@ -277,6 +277,22 @@ def build_parser() -> argparse.ArgumentParser:
     al = with_common(sub.add_parser("alerts", help="evaluar las reglas de alerta"))
     al.add_argument("--reset", action="store_true",
                     help="volver a evaluar desde el principio del log")
+    ga = with_common(sub.add_parser(
+        "github-app", help="crear la GitHub App desde un manifest (M5)"))
+    ga.add_argument("--nombre", default="cofre-sammi",
+                    help="nombre de la App en GitHub")
+    ga.add_argument("--pagina", default="https://github.com",
+                    help="URL de la pagina de inicio de la App (obligatoria en GitHub)")
+    ga.add_argument("--permiso", action="append", default=[],
+                    metavar="CLAVE=NIVEL",
+                    help="permiso por defecto, p.ej. contents=read (repetible)")
+    ga.add_argument("--guardar", default="GITHUB_APP_PEM",
+                    help="nombre del secreto donde se guarda la clave")
+    ga.add_argument("--sin-navegador", action="store_true",
+                    help="no abrir el navegador: solo dar la direccion")
+    ga.add_argument("--minutos", type=int, default=10,
+                    help="tiempo maximo de espera del código de GitHub")
+
     se = with_common(sub.add_parser(
         "sesion", help="comprobar lo que se puede sin el usuario (D18)"))  # no-tildes
     se.add_argument("--carpeta", default="D:\\Cofre",
@@ -565,6 +581,90 @@ def _instalar_gancho(repo: str, vault_path, quitar: bool) -> int:
     print(f"gancho instalado en {destino}")
     print("En cada commit se comprobara si un secreto del cofre va pegado.")
     print("Sin el pendrive puesto avisa y deja pasar; con una fuga, para el commit.")
+    return 0
+
+
+def cmd_github_app(args, vault_path) -> int:
+    """M5: manifest de GitHub, canje del código y clave directa al cofre."""
+    from cofre import github_app
+    vault = prepare_audit(vault_path, args.gate, args.stick, args.allow_new_stick)
+    store = vault._v2store() if vault.is_v2() else None
+    if store is None or store.master is None:
+        print("hace falta el pendrive (y el cofre abierto) para guardar la clave",
+              file=sys.stderr)
+        return 2
+
+    permisos = {}
+    for trozo in args.permiso:
+        if "=" not in trozo:
+            print(f"--permiso espera CLAVE=NIVEL, no {trozo!r}", file=sys.stderr)
+            return 2
+        clave, nivel = trozo.split("=", 1)
+        permisos[clave.strip()] = nivel.strip()
+
+    try:
+        manifiesto = github_app.manifest(args.nombre, "http://127.0.0.1/callback",
+                                         args.pagina, permisos)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    # el manifest necesita la direccion real de vuelta, que se conoce al arrancar
+    servidor = github_app.Servidor(manifiesto)
+    direccion = servidor.arrancar()
+    manifiesto["redirect_url"] = f"http://127.0.0.1:{servidor.puerto}/callback"
+    servidor.manifiesto = manifiesto
+    print("Abre esta direccion en el navegador si no se abre sola:")
+    print("   ", direccion)
+    print("Pulsa Create en GitHub. Esperando el código (maximo",
+          args.minutos, "minutos)...")
+    if not args.sin_navegador:
+        import webbrowser
+        webbrowser.open(direccion)
+    try:
+        codigo = servidor.esperar(args.minutos)
+        if not codigo:
+            print("no llego el código:", servidor.error or "tiempo agotado",
+                  file=sys.stderr)
+            return 1
+    finally:
+        servidor.parar()
+
+    try:
+        respuesta = github_app.canjear(codigo)
+    except Exception as exc:                       # noqa: BLE001
+        print(f"no se pudo canjear el código: {exc}", file=sys.stderr)
+        return 1
+
+    app_id = str(respuesta.get("id") or "")
+    pem = str(respuesta.get("pem") or "")
+    slug = str(respuesta.get("slug") or args.nombre)
+    if not app_id or not pem:
+        print("la respuesta de GitHub no trae id o clave", file=sys.stderr)
+        return 1
+    try:
+        vault.add(None, args.guardar, pem, ["admin"])
+    except Exception as exc:                       # noqa: BLE001
+        print(f"no se pudo guardar la clave en el cofre: {exc}", file=sys.stderr)
+        return 1
+    try:
+        idx = store.index(store._data, store.master)
+        entrada = (idx.get("entries") or {}).get(args.guardar)
+        if entrada is not None:
+            entrada["type"] = "private_key"
+            entrada["provider"] = "github"
+            entrada["app_id"] = app_id
+            store._write_index(store._data, store.master, idx)
+            store.save(store._data)
+    except Exception:                              # noqa: BLE001
+        pass
+    record(str(vault_path), "add", args.gate, None, name=args.guardar, ok=True,
+           detail=f"github app {app_id}")
+    print("")
+    print(f"App creada: id {app_id}. La clave privada esta en COFRE como "
+          f"'{args.guardar}' (etiqueta admin). No se ha escrito en disco.")
+    print(f"Instalala aquí: https://github.com/apps/{slug}/installations/new")
+    print("Despues, el id de instalacion se ve en la URL de esa pagina.")
     return 0
 
 
@@ -920,6 +1020,9 @@ def main(argv: list[str]) -> int:
         if args.comprobar:
             extra.append("--comprobar")
         return sesion_main(extra)
+
+    if args.command == "github-app":
+        return cmd_github_app(args, vault_path)
 
     if args.command == "scan":
         return cmd_scan(args, vault_path)
