@@ -1,0 +1,71 @@
+"""COFRE - candado para agentes (D20, 2026-11-19).
+
+Contexto: la sesion del LLM que trabaja en este proyecto **no es local**, va a una
+API en la nube. Todo lo que el agente lee o imprime sale del equipo: la salida de
+los comandos, los ficheros que abre, los errores. Asi salio el codigo de
+recuperacion del incidente del 19.
+
+Esta regla tiene que ser un candado tecnico, no una promesa del prompt:
+
+  COFRE_AGENT=1 en el entorno del agente
+
+Con la variable puesta, COFRE **rechaza** lo que muestra valores:
+
+  - `get` y `export`, con o sin `--allow-pipe`;
+  - `--recovery` en cualquier comando (el codigo de papel no lo maneja el agente);
+  - `describe` sin `--minimal` (la version completa lleva urls y referencias);
+  - `add` con el valor como argumento (quedaria en el historial de la terminal);
+  - `log --reanchor` (mover el punto de firma es cosa del usuario).
+
+Sigue permitido: `exec` y `run` (el valor va al programa, no a la pantalla),
+`check`, `health`, `describe --minimal`, `log verify`, `scan`, `list`, `version`,
+`alerts`, `due`, `token-info`, `stick-*`, `host-list`, `meta` (sin valores).
+
+Los simulacros con el codigo de recuperacion los hace el usuario en su terminal.
+"""
+
+from __future__ import annotations
+
+import os
+
+VERDADEROS = {"1", "si", "sí", "true", "yes", "on"}
+
+# comandos que muestran el valor de un secreto
+PROHIBIDOS = {"get", "export"}
+
+# comandos que existen pero cambian de comportamiento con el candado
+CONDICIONADOS = {"describe": "describe --minimal"}
+
+MENSAJE = ("COFRE_AGENT=1: '{comando}' muestra valores y un agente no debe usarlo. "
+           "Ejecutalo tú en tu terminal{extra}.")
+
+
+def activo() -> bool:
+    """True si el entorno dice que quien llama es un agente."""
+    return str(os.environ.get("COFRE_AGENT", "")).strip().lower() in VERDADEROS
+
+
+def motivo(args) -> str:
+    """Devuelve el motivo del bloqueo, o "" si el comando puede pasar."""
+    if not activo():
+        return ""
+    comando = str(getattr(args, "command", "") or "")
+
+    if getattr(args, "recovery", False):
+        return MENSAJE.format(comando=f"{comando} --recovery",
+                              extra=" (el código de papel no lo maneja el agente)")
+    if comando in PROHIBIDOS:
+        return MENSAJE.format(comando=comando, extra="")
+    if comando == "describe" and not getattr(args, "minimal", False):
+        return MENSAJE.format(comando="describe",
+                              extra="; usa `describe --minimal`, que no lleva urls")
+    if comando == "add" and getattr(args, "value", None):
+        # el valor en la linea de comandos queda en el historial y en el registro
+        # del agente: se escribe a ciegas (sin argumento) o con --from-file
+        return ("COFRE_AGENT=1: no pases el valor como argumento (queda en el "
+                "historial). Escribe `add NOMBRE` y pégalo cuando lo pida, o usa "
+                "--from-file.")
+    if comando == "log" and getattr(args, "reanchor", False):
+        return ("COFRE_AGENT=1: re-anclar el registro es cosa del usuario, a mano y "
+                "con motivo.")
+    return ""

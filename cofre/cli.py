@@ -746,6 +746,13 @@ def _print_rekey(codigo: str, perdidos: list[dict], vault_path) -> None:
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
+    # D20 (2026-11-19): candado para agentes. No depende de que el modelo se
+    # acuerde: con COFRE_AGENT=1, COFRE se niega a mostrar valores.
+    from cofre import agent_guard
+    bloqueo = agent_guard.motivo(args)
+    if bloqueo:
+        print(bloqueo, file=sys.stderr)
+        return 3
     vault_path = Path(args.vault)
     vault = Vault(vault_path)
     _CON_CLAVE = {"meta", "rotate", "token-info", "alerts", "log", "host-assign",
