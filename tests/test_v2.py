@@ -182,3 +182,62 @@ class TestMensajesDelCodigo(unittest.TestCase):
     def test_codigo_correcto(self):
         from cofre.v2.recovery import check_code
         self.assertEqual(check_code(" ".join(self.partes)), (True, ""))
+
+
+class TestPalabrasPropias(unittest.TestCase):
+    """2026-11-19: el usuario puede elegir las 24 palabras; COFRE pone la 25."""
+
+    def setUp(self):
+        from cofre.v2.recovery import _words
+        self.lista = list(_words())
+        self.palabras = self.lista[:24]
+
+    def test_anade_la_palabra_de_control(self):
+        from cofre.v2.recovery import check_code, code_from_words
+        codigo = code_from_words(self.palabras)
+        self.assertEqual(len(codigo.split()), 25)
+        self.assertTrue(codigo.startswith(" ".join(self.palabras)))
+        self.assertEqual(check_code(codigo)[0], True)
+
+    def test_normaliza_mayusculas_y_tildes(self):
+        from cofre.v2.recovery import code_from_words, normalize
+        grito = [p.upper() for p in self.palabras]
+        self.assertEqual(code_from_words(grito), code_from_words(self.palabras))
+        self.assertEqual(normalize("PÁRA"), "para")
+
+    def test_pocas_palabras(self):
+        from cofre.v2.recovery import code_from_words
+        with self.assertRaises(ValueError) as ctx:
+            code_from_words(self.palabras[:20])
+        self.assertIn("24", str(ctx.exception))
+
+    def test_palabra_fuera_de_la_lista(self):
+        from cofre.v2.recovery import code_from_words
+        malas = list(self.palabras)
+        malas[7] = "zzzz"
+        with self.assertRaises(ValueError) as ctx:
+            code_from_words(malas)
+        self.assertIn("palabra 8", str(ctx.exception))
+
+    def test_abre_el_cofre_con_esas_palabras(self):
+        import tempfile
+        from pathlib import Path
+        from cofre import keys
+        from cofre.firstuse import crear_cofre
+        from cofre.v2 import VaultV2
+        from cofre.v2.recovery import code_from_words
+        tmp = Path(tempfile.mkdtemp(prefix="cofre-propias-"))
+        try:
+            estado = crear_cofre(tmp / "cofre.json", str(tmp.drive) + "\\",
+                                 clave=tmp / "COFRE.KEY")
+            v2 = VaultV2(tmp / "cofre.json")
+            datos = v2.load()
+            codigo, nuevos = keys.generar_codigo(v2, datos, estado["master"],
+                                                 palabras=self.palabras)
+            self.assertEqual(codigo, code_from_words(self.palabras))
+            self.assertTrue(keys.probar_codigo(nuevos, codigo)[0])
+            # el codigo viejo (aleatorio) ya no abre
+            self.assertFalse(keys.probar_codigo(nuevos, estado["código"])[0])
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)

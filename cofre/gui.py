@@ -2084,6 +2084,8 @@ class CofreGUI(PuenteGUI):
                   lambda e: self._add_pendrive(win)).pack(side="right")
         self._btn(cab, msg("llaves.nuevo_codigo"),
                   lambda e: self._nuevo_codigo()).pack(side="right", padx=6)
+        self._btn(cab, msg("llaves.mis_palabras"),
+                  lambda e: self._codigo_propio()).pack(side="right")
         self._btn(cab, msg("llaves.probar"),
                   lambda e: self._probar_codigo()).pack(side="right", padx=6)
         tk.Label(win, text=msg("llaves.intro"),
@@ -2420,7 +2422,80 @@ class CofreGUI(PuenteGUI):
         W.CodeGrid(win, codigo, bg=PANEL).pack(fill="x", padx=18, pady=10)
         fila = tk.Frame(win, bg=PANEL)
         fila.pack(fill="x", padx=18, pady=(0, 14))
+        self._btn(fila, msg("llaves.imprimir"),
+                  lambda e: self._imprimir_codigo(win, codigo)).pack(side="left")
         self._btn(fila, "Cerrar", win.destroy).pack(side="right")
+
+    def _imprimir_codigo(self, win, codigo: str) -> None:
+        """TXT temporal numerado, dialogo de impresion y borrado posterior."""
+        import os as _os
+        import tempfile
+        try:
+            ruta = Path(tempfile.gettempdir()) / "cofre-codigo-recuperacion.txt"  # no-tildes
+            partes = codigo.split()
+            lineas = []
+            for inicio in range(0, len(partes), 5):
+                trozo = partes[inicio:inicio + 5]
+                lineas.append("   ".join(f"{inicio + i + 1}. {palabra}"
+                                         for i, palabra in enumerate(trozo)))
+            ruta.write_text("\n".join(lineas) + "\n",
+                                 encoding="utf-8")
+            _os.startfile(str(ruta), "print")       # noqa: S606
+            win.after(60000, lambda: ruta.unlink(missing_ok=True))
+            self.set_foot(msg("primer_uso.impreso"))
+        except Exception as exc:                   # noqa: BLE001
+            self.set_foot(msg("primer_uso.error_imprimir", error=exc))
+
+    def _codigo_propio(self) -> None:
+        """Elegir las 24 palabras a mano; COFRE anade la de control."""
+        if not self.session or not self.vault.is_v2():
+            self.set_foot(msg("comun.abre_cofre", accion="cambiar el código"))
+            return
+        win = self._sheet(msg("llaves.mis_titulo"))
+        win.geometry("720x460")
+        tk.Label(win, text=msg("llaves.mis_palabras"), fg=FG, bg=PANEL,
+                 font=self.f_title, anchor="w").pack(fill="x", padx=18, pady=(16, 2))
+        tk.Label(win, text=msg("llaves.mis_intro"), fg=MUT, bg=PANEL,
+                 font=self.f_small, anchor="w", wraplength=680,
+                 justify="left").pack(fill="x", padx=18)
+        tk.Label(win, text=msg("llaves.mis_aviso"), fg=WARN, bg=PANEL,
+                 font=self.f_small, anchor="w", wraplength=680,
+                 justify="left").pack(fill="x", padx=18, pady=(4, 8))
+        caja = tk.Text(win, height=6, bg=CAMPO, fg=FG, font=self.f_mono, bd=0,
+                       highlightthickness=0, wrap="word")
+        caja.pack(fill="both", expand=True, padx=18, pady=6)
+        aviso = tk.Label(win, text="", fg=WARN, bg=PANEL, font=self.f_small,
+                         anchor="w", wraplength=680, justify="left")
+        aviso.pack(fill="x", padx=18)
+
+        def guardar(event=None) -> None:
+            palabras = caja.get("1.0", "end").split()
+            try:
+                from cofre import keys as keys_mod
+                from cofre.v2.recovery import code_from_words
+                codigo = code_from_words(palabras)      # valida antes de tocar
+                store = self.vault._v2store()
+                nuevo, datos = keys_mod.generar_codigo(
+                    store._vault, store._data, store.master, palabras=palabras)
+                store._data = datos
+            except ValueError as exc:
+                aviso.configure(text=str(exc))
+                return
+            except Exception as exc:                   # noqa: BLE001
+                aviso.configure(text=msg("llaves.mis_error", error=exc))
+                return
+            record(self.vault_path, "recovery", self.gate, self.serial, name="-",
+                   ok=True, detail="código de recuperación con palabras propias")
+            win.destroy()
+            self.set_foot(msg("llaves.mis_hecho"))
+            self._mostrar_codigo(nuevo or codigo)
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=14)
+        self._btn(fila, msg("comun.cancelar"), win.destroy).pack(side="right")
+        self._btn(fila, msg("llaves.mis_guardar"), guardar,
+                  accent=True).pack(side="right", padx=8)
+        caja.focus_set()
 
     def _probar_codigo(self) -> None:
         win = self._sheet("Probar el código de recuperación")

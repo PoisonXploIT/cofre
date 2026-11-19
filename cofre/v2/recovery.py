@@ -41,6 +41,25 @@ def new_code() -> str:
     return f"{texto} {control_word(texto, palabras)}"
 
 
+def code_from_words(palabras: list[str]) -> str:
+    """Código a partir de 24 palabras elegidas por la persona + la de control.
+
+    No cambia nada del formato: solo sustituye el azar por la elección. Aviso que
+    la interfaz repite: 24 palabras elegidas por una persona tienen mucha menos
+    entropía que 24 al azar; el cofre no lo impide, pero no es lo mismo.
+    """
+    lista = _words()
+    limpias = [normalize(p) for p in (palabras or []) if str(p).strip()]
+    if len(limpias) != WORDS:
+        raise ValueError(f"hacen falta {WORDS} palabras y hay {len(limpias)}")
+    fuera = [i for i, palabra in enumerate(limpias, 1) if palabra not in lista]
+    if fuera:
+        posiciones = ", ".join(str(i) for i in fuera[:4])
+        raise ValueError(f"la palabra {posiciones} no está en la lista")
+    texto = " ".join(limpias)
+    return f"{texto} {control_word(texto, lista)}"
+
+
 def check_code(code: str) -> tuple[bool, str]:
     """Comprueba la palabra de control antes de intentar abrir nada."""
     palabras = _words()
