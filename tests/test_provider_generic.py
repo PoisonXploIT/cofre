@@ -42,6 +42,22 @@ class TestCatalogo(unittest.TestCase):
         self.assertTrue(GENERICO.manual_url({"provider": "tavily"}) is not None)
         self.assertTrue(get("tavily").manual_url({}).startswith("https://"))
 
+    def test_todas_las_entradas_tienen_url_y_cabecera(self):
+        # 2026-11-19: nada inventado; cada entrada del catalogo tiene su sitio
+        for nombre, cfg in CATALOGO.items():
+            with self.subTest(proveedor=nombre):
+                self.assertTrue(str(cfg.get("url", "")).startswith("https://"))
+                self.assertIn("header", cfg)
+                self.assertIn("manual_url", cfg)
+
+    def test_anthropic_usa_x_api_key_y_version(self):
+        # 2026-11-19: con Bearer la API responde "Invalid bearer token"
+        cfg = CATALOGO["anthropic"]
+        self.assertEqual(cfg["header"], "x-api-key")
+        self.assertEqual(cfg["prefix"], "")
+        self.assertEqual(cfg["headers"].get("anthropic-version"),  # no-tildes
+                         "2023-06-01")
+
     def test_no_rota_solo(self):
         from cofre.providers import ProviderError
         with self.assertRaises(ProviderError):
@@ -97,6 +113,24 @@ class TestVerify(unittest.TestCase):
         cfg = dict(self.cfg, ok=[200, 204])
         self.assertTrue(self._con(204, {}, cfg).ok)
         self.assertFalse(self._con(202, {}, cfg).ok)
+
+    def test_anthropic_manda_x_api_key_y_version_sin_authorization(self):
+        with mock.patch("cofre.providers.generic.request",
+                        return_value=(200, {}, {"data": []})) as falso:
+            get("anthropic").verify("sk-ant-de-prueba", {})
+        cabeceras = falso.call_args[1]["headers"]
+        self.assertEqual(cabeceras["x-api-key"], "sk-ant-de-prueba")
+        self.assertEqual(cabeceras["anthropic-version"], "2023-06-01")  # no-tildes
+        self.assertNotIn("Authorization", cabeceras)
+
+    def test_las_cabeceras_extra_se_pueden_configurar(self):
+        cfg = {"url": "https://sitio-falso/quien", "header": "X-Token",
+               "prefix": "", "headers": {"X-Version": "2"}}
+        with mock.patch("cofre.providers.generic.request",
+                        return_value=(200, {}, {})) as falso:
+            GENERICO.verify("valor", {"verify": cfg})
+        cabeceras = falso.call_args[1]["headers"]
+        self.assertEqual(cabeceras, {"X-Token": "valor", "X-Version": "2"})
 
     def test_el_catalogo_no_necesita_configuracion(self):
         with mock.patch("cofre.providers.generic.request",

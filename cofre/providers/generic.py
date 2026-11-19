@@ -15,6 +15,8 @@ Dos maneras de usarlo:
          url       a donde se pregunta (obligatoria)
          header    cabecera que lleva el valor (por defecto Authorization)
          prefix    lo que va delante del valor ("Bearer " por defecto)
+         headers   otras cabeceras que exige la API, p. ej. anthropic-version
+                   con el valor 2023-06-01
          ok        codigos HTTP que cuentan como valido (por defecto [200])
          json_ok   ruta en la respuesta que tiene que ser verdadera, con puntos
          expires   ruta en la respuesta con la fecha de caducidad
@@ -83,9 +85,13 @@ CATALOGO: dict[str, dict] = {
         "manual_url": "https://huggingface.co/settings/tokens",
     },
     "anthropic": {
+        # 2026-11-19: x-api-key, NO Authorization: Bearer (con Bearer la API
+        # responde "Invalid bearer token"), y la cabecera anthropic-version
+        # obligatoria. Los nombres de cabecera no llevan tildes nunca.
         "url": "https://api.anthropic.com/v1/models",
         "header": "x-api-key",
         "prefix": "",
+        "headers": {"anthropic-version": "2023-06-01"},   # no-tildes
         "ok": [200],
         "manual_url": "https://console.anthropic.com/settings/keys",
     },
@@ -121,7 +127,10 @@ def _config(meta: dict, defecto: dict | None = None) -> dict:
     cfg = dict(defecto or {})
     extra = meta.get("verify")
     if isinstance(extra, dict):
-        cfg.update({k: v for k, v in extra.items() if v not in ("", None)})
+        # ojo: "" es un valor (prefijo vacio, p. ej. x-api-key). Solo se ignoran
+        # los None. Antes se caia el "" y una clave de Anthropic se mandaba como
+        # "Bearer sk-ant-...", que la API rechaza.
+        cfg.update({k: v for k, v in extra.items() if v is not None})
     return cfg
 
 
@@ -149,6 +158,10 @@ class Generic(Provider):
         cabecera = str(cfg.get("header") or "Authorization")
         prefijo = str(cfg.get("prefix", "Bearer "))
         cabeceras = {cabecera: f"{prefijo}{value}"}
+        extra = cfg.get("headers")
+        if isinstance(extra, dict):
+            # cabeceras fijas que exige la API (anthropic-version y similares)
+            cabeceras.update({str(k): str(v) for k, v in extra.items()})
         metodo = str(cfg.get("method") or "GET").upper()
         cuerpo = cfg.get("body") if isinstance(cfg.get("body"), dict) else None
         url = url_final(url)

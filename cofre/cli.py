@@ -1387,8 +1387,8 @@ def main(argv: list[str]) -> int:
             if not isinstance(cfg, dict):
                 print("--verify espera un objeto JSON", file=sys.stderr)
                 return 1
-            permitidas = {"method", "url", "header", "prefix", "ok", "json_ok",
-                          "expires", "manual_url", "body"}
+            permitidas = {"method", "url", "header", "prefix", "headers", "ok",
+                          "json_ok", "expires", "manual_url", "body"}
             raras = sorted(set(cfg) - permitidas)
             if raras:
                 print("claves no válidas en --verify: " + ", ".join(raras),
@@ -1396,6 +1396,10 @@ def main(argv: list[str]) -> int:
                 return 1
             if not str(cfg.get("url") or "").startswith("http"):
                 print("--verify necesita una url http(s) en 'url'", file=sys.stderr)
+                return 1
+            if "headers" in cfg and not isinstance(cfg["headers"], dict):
+                print("'headers' tiene que ser un objeto JSON con nombres y valores",
+                      file=sys.stderr)
                 return 1
             meta["verify"] = cfg
             cambios.append("verify=" + str(cfg.get("url")))

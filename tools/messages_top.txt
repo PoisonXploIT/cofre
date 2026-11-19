@@ -1,6 +1,7 @@
 gui 264
-cli 302
+cli 303
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
 # 2026-11-18 cli de 279 a 298: comando scan nuevo (3.4): ayuda, salida, JSON, gancho y avisos
 # 2026-11-18 cli de 298 a 302: proveedor generico (5.5): --verify y sus avisos
+# 2026-11-19 cli de 302 a 303: proveedor generico: 'headers' extra y su validacion
