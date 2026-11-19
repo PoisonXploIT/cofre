@@ -26,6 +26,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 COFRE = RAIZ / "cofre"
 GUI = ["gui.py", "gui_puente.py", "gui_hojas.py", "gui_llaves.py",
+       "gui_lista.py", "gui_detalle.py", "gui_ajustes.py", "gui_paleta.py",
        "firstuse.py", "palette.py", "lock_screen.py",
        "entry_sheet.py", "gui_confirm.py", "alerts.py", "health.py"]
 # Ningun modulo de la GUI puede quedarse fuera de la lista: si no, mover codigo a

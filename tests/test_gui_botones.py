@@ -116,10 +116,8 @@ class TestBotones(unittest.TestCase):
     def test_los_botones_clave_siguen_aceptando_evento(self):
         # los metodos pueden vivir en gui.py o en un mixin: se miran todos
         texto = ""
-        for nombre in ("gui.py", "gui_puente.py", "gui_hojas.py", "gui_llaves.py"):
-            ruta = REPO / "cofre" / nombre
-            if ruta.exists():
-                texto += ruta.read_text(encoding="utf-8")
+        for ruta in sorted((REPO / "cofre").glob("gui*.py")):
+            texto += ruta.read_text(encoding="utf-8")
         for metodo in ("probar(event=None)", "open_panic(self, event=None)",
                        "_comprobar_salud(self, event=None)",
                        "_sellar_registro(self, event=None)",
