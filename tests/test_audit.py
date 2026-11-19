@@ -317,14 +317,19 @@ class TestFirmaObligatoria(unittest.TestCase):
         _audit.set_key(self.master)
         self.assertTrue(_audit.clave_ligada())
 
-    def test_lock_sin_firma_se_detecta(self):
+    def test_lock_sin_llave_ya_no_puede_ir_sin_firma(self):
+        # D21 (2026-11-19): sin clave, un privilegiado se degrada a gui-gate. Antes
+        # se escribia el `lock` sin firma y el verificador lo marcaba como
+        # manipulacion; ahora esa situacion no existe.
         from cofre import audit as _audit
         _audit.clear_key()
         _audit.record(self.vault, "lock", "usb", 1, detail="sin llave")
+        eventos = _audit._events(self.vault)
+        self.assertEqual(eventos[0]["ev"], "gui-gate")
+        self.assertIn("sin clave: lock", eventos[0]["detail"])
         _audit.set_key(self.master)
         ok, detalle = _audit.verify(str(self.vault))
-        self.assertFalse(ok)
-        self.assertIn("lock", detalle)
+        self.assertTrue(ok, detalle)
 
     def test_audit_verify_puede_ir_sin_firma(self):
         from cofre import audit as _audit
@@ -339,4 +344,47 @@ class TestFirmaObligatoria(unittest.TestCase):
         _audit.set_key(self.master)
         _audit.record(self.vault, "lock", "usb", 1)
         eventos = [e for e in _audit._events(self.vault) if e.get("ev") == "lock"]
+        self.assertTrue(eventos[0].get("mac"))
+
+
+class TestSinClaveNoHayPrivilegiado(unittest.TestCase):
+    """D21 (2026-11-19): sin clave, un evento privilegiado se anota como gui-gate.
+
+    Una ventana con la sesion puesta pero sin llave escribia `get`, `bridge-start` y
+    `browser-list` sin firma; el verificador lo llamaba manipulacion. Ahora no puede
+    existir: si no hay clave, se degrada a gui-gate con el nombre original.
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _P
+        self.tmp = _P(tempfile.mkdtemp(prefix="cofre-sinclave-"))
+        self.vault = self.tmp / "cofre.json"
+        from cofre import audit as _audit
+        _audit.clear_key()
+
+    def tearDown(self):
+        import shutil
+        from cofre import audit as _audit
+        _audit.clear_key()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_se_degrada(self):
+        from cofre import audit as _audit
+        _audit.record(self.vault, "get", "usb", 1, name="X")
+        _audit.record(self.vault, "bridge-start", "usb", 1)
+        _audit.record(self.vault, "browser-list", "usb", 1)
+        eventos = _audit._events(self.vault)
+        self.assertEqual([e["ev"] for e in eventos], ["gui-gate"] * 3)
+        self.assertIn("sin clave: get", eventos[0]["detail"])
+        _audit.set_key(b"k" * 32)
+        ok, detalle = _audit.verify(str(self.vault))
+        self.assertTrue(ok, detalle)
+
+    def test_con_clave_se_firma_normal(self):
+        from cofre import audit as _audit
+        _audit.set_key(b"k" * 32)
+        _audit.record(self.vault, "get", "usb", 1, name="X")
+        eventos = _audit._events(self.vault)
+        self.assertEqual(eventos[0]["ev"], "get")
         self.assertTrue(eventos[0].get("mac"))

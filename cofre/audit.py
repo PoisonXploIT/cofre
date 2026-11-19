@@ -272,6 +272,16 @@ def _record(vault_path: str | Path, command: str, gate: str,
             serial: int | None = None, name: str | None = None,
             ok: bool = True, detail: str = "", actor: str | None = None,
             entry: str | None = None) -> Path:
+    # D21 (2026-11-19): un evento privilegiado NUNCA se escribe sin clave. Si no
+    # hay clave es que el cofre no esta abierto de verdad: se anota como gui-gate
+    # (que puede ir sin firma y es lo que es) y se guarda el nombre original en el
+    # detalle. Antes, una ventana con la sesion puesta pero sin llave (el fallo de
+    # `material_for`) escribia `get`, `bridge-start` y `browser-list` sin firma, y
+    # el verificador lo marcaba como manipulacion.
+    if _KEY is None and command in PRIVILEGED and command not in EXPECTED_UNSIGNED:
+        detail = f"sin clave: {command}" + (f" ({detail})" if detail else "")
+        command = "gui-gate"
+        ok = False
     p = audit_path(vault_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     # el ancla va antes de calcular seq/prev, o la cadena se rompe

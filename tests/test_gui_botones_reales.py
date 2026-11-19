@@ -82,9 +82,16 @@ class TestBotonesDeVerdad(unittest.TestCase):
         except Exception:
             pass
         try:
+            self.root.quit()        # salir del bucle antes de destruir
+            self.root.update()
+        except Exception:
+            pass
+        try:
             self.root.destroy()
         except Exception:
             pass
+        import gc
+        gc.collect()                # sin Tk colgando en el recolector
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 

@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO))
 from cofre import audit, bridge_ops
 
 
+
 class FakeVault:
     def __init__(self):
         self.datos = {
@@ -56,6 +57,10 @@ class FakeVault:
 
 class FakeApp:
     def __init__(self, respuesta="grant"):
+        # D21: sin clave ligada, un evento privilegiado se degrada a gui-gate. La
+        # GUI real la tiene ligada cuando atiende; se liga por prueba (no al
+        # importar, que otros tests la borran).
+        audit.set_key(b"k" * 32)
         self.vault = FakeVault()
         self.vault_path = Path(tempfile.mkdtemp(prefix="cofre-popup-")) / "cofre.json"
         self.gate = "usb"

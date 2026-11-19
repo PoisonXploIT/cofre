@@ -25,6 +25,7 @@ from cofre.v2 import VaultV2, new_usb_slot
 
 class Base(unittest.TestCase):
     def setUp(self):
+        audit.set_key(b"k" * 32)      # D21: la GUI tiene la clave ligada
         self.tmp = Path(tempfile.mkdtemp(prefix="cofre-git-"))
         self.vault_path = self.tmp / "cofre.json"
         self.llave = self.tmp / "COFRE.KEY"
