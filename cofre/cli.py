@@ -972,8 +972,17 @@ def main(argv: list[str]) -> int:
             except ValueError:
                 print("--explicar espera números de línea: 411,421,422", file=sys.stderr)
                 return 1
+            # si la ultima nota firmada ya explica exactamente esas lineas, no se
+            # repite (paso el 19-11: la misma nota dos veces)
+            from cofre.audit import _events
+            previa = [e for e in _events(vault_path)
+                      if e.get("ev") == "audit-note" and e.get("mac")]
+            quiero = "explicadas: " + ",".join(str(n) for n in lineas)
+            if previa and str(previa[-1].get("name")) == quiero:
+                print("ya hay una nota firmada que explica esas líneas. No se repite.")
+                return 0
             record(str(vault_path), "audit-note", args.gate, None,
-                   name="explicadas: " + ",".join(str(n) for n in lineas),
+                   name=quiero,
                    ok=True,
                    detail=(f"explica las líneas {','.join(str(n) for n in lineas)}: "
                            f"{args.motivo}")[:300])
