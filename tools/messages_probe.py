@@ -25,7 +25,8 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 COFRE = RAIZ / "cofre"
-GUI = ["gui.py", "gui_puente.py", "firstuse.py", "palette.py", "lock_screen.py",
+GUI = ["gui.py", "gui_puente.py", "gui_hojas.py", "gui_llaves.py",
+       "firstuse.py", "palette.py", "lock_screen.py",
        "entry_sheet.py", "gui_confirm.py", "alerts.py", "health.py"]
 # Ningun modulo de la GUI puede quedarse fuera de la lista: si no, mover codigo a
 # otro fichero escondería sus textos y el trinquete bajaría solo (2026-11-19).
