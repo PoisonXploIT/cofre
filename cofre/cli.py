@@ -140,6 +140,9 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--lines", type=int, default=20)
     sl.add_argument("verify", nargs="?", choices=["verify"],
                     help="comprobar la cadena y la firma del log")
+    sl.add_argument("--explicar", default="",
+                    help="líneas sin firma que una nota firmada da por explicadas: "
+                         "\"411,421,422\" (necesita --motivo)")
     sl.add_argument("--reanchor", action="store_true",
                     help="mover el punto de exigencia de firma (solo el usuario)")
     sl.add_argument("--reseal", action="store_true",
@@ -956,6 +959,29 @@ def main(argv: list[str]) -> int:
                           "con un evento 'restore' firmado")
         except Exception:
             pass
+        if getattr(args, "explicar", ""):
+            # D21: nota firmada que explica lineas sin firma. No mueve el punto
+            # desde el que se exige firma (eso es re-anclar, y es otra cosa).
+            if not args.motivo.strip():
+                print("hace falta --motivo: por que se explican esas líneas",
+                      file=sys.stderr)
+                return 1
+            try:
+                lineas = [int(x) for x in str(args.explicar).replace(";", ",").split(",")
+                          if x.strip()]
+            except ValueError:
+                print("--explicar espera números de línea: 411,421,422", file=sys.stderr)
+                return 1
+            record(str(vault_path), "audit-note", args.gate, None,
+                   name="explicadas: " + ",".join(str(n) for n in lineas),
+                   ok=True,
+                   detail=(f"explica las líneas {','.join(str(n) for n in lineas)}: "
+                           f"{args.motivo}")[:300])
+            from cofre.audit import stamp_vault
+            stamp_vault(vault)
+            print("nota firmada. Ejecuta 'log verify' para verlo como explicado.")
+            return 0
+
         if args.reanchor:
             # Re-anclar tapa lineas anteriores: solo lo hace el usuario, a mano y
             # con confirmación. Nunca como parte de un arreglo de código.

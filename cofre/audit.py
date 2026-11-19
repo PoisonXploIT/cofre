@@ -272,15 +272,13 @@ def _record(vault_path: str | Path, command: str, gate: str,
             serial: int | None = None, name: str | None = None,
             ok: bool = True, detail: str = "", actor: str | None = None,
             entry: str | None = None) -> Path:
-    # D21 (2026-11-19): un evento privilegiado NUNCA se escribe sin clave. Si no
-    # hay clave es que el cofre no esta abierto de verdad: se anota como gui-gate
-    # (que puede ir sin firma y es lo que es) y se guarda el nombre original en el
-    # detalle. Antes, una ventana con la sesion puesta pero sin llave (el fallo de
-    # `material_for`) escribia `get`, `bridge-start` y `browser-list` sin firma, y
-    # el verificador lo marcaba como manipulacion.
+    # D21 (2026-11-19, corregido): si un evento privilegiado llega sin clave es un
+    # FALLO DE PROGRAMA, no manipulacion ni un evento normal. Se anota con su propio
+    # tipo `sin-clave`, con el comando original en el detalle, para que verify lo
+    # cuente aparte y avise. No se disfraza de `gui-gate` (eso lo escondia).
     if _KEY is None and command in PRIVILEGED and command not in EXPECTED_UNSIGNED:
         detail = f"sin clave: {command}" + (f" ({detail})" if detail else "")
-        command = "gui-gate"
+        command = "sin-clave"
         ok = False
     p = audit_path(vault_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -399,6 +397,8 @@ VERBS = {
     "grant-revoke": "permiso temporal retirado",
     "scan": "escaneo de fugas",
     "browser-save": "alta pedida desde el navegador",
+    "sin-clave": "FALLO: evento sin la clave ligada",
+    "audit-note": "nota firmada en el registro",
 }
 
 
@@ -435,6 +435,7 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
     prev = GENESIS
     seq_esperado = 1
     sin_firma = 0
+    errores_programa: list[int] = []
     culpables: list[str] = []
     antes_de_uso: int | None = None
     # Desde la ULTIMA marca firmada ("fin-de-pruebas" o "reanchor") se exige
@@ -459,6 +460,12 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         mac = ev.pop("mac", None)
         if mac is None:
             sin_firma += 1
+            if str(ev.get("ev")) == "sin-clave":
+                # fallo de programa: el cofre escribio un privilegiado sin llave
+                errores_programa.append(numero)
+                prev = _line_hash(texto)
+                seq_esperado += 1
+                continue
             privilegiado = str(ev.get("ev")) in PRIVILEGED
             en_uso_real = antes_de_uso is None or int(ev.get("seq", 0)) >= antes_de_uso
             if _KEY is not None and privilegiado and en_uso_real                     and str(ev.get("ev")) not in EXPECTED_UNSIGNED:
@@ -469,6 +476,11 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
                 return False, f"línea {numero}: firma incorrecta (manipulada)"
         prev = _line_hash(texto)
         seq_esperado += 1
+    aviso_programa = ""
+    if errores_programa:
+        muestra = ", ".join(str(n) for n in errores_programa[:6])
+        aviso_programa = (f"; {len(errores_programa)} errores de programa "
+                          f"(eventos sin clave en las líneas {muestra})")
     if culpables:
         # si hay una nota firmada posterior que las explica, se dan por
         # explicadas: siguen en el log, pero no gritan para siempre
@@ -483,12 +495,12 @@ def verify(vault_path: str | Path) -> tuple[bool, str]:
         if nota and all(int(c.split(":")[0]) < nota for c in culpables):
             detalle = (f"{len(lineas)} líneas, cadena intacta; {len(culpables)} "
                        f"sin firma explicadas por la nota firmada de la línea {nota}")
-            return True, detalle
+            return True, detalle + aviso_programa
         muestra = ", ".join(culpables[:6])
         extra = "" if len(culpables) <= 6 else f" y {len(culpables) - 6} mas"
         return False, (f"eventos que exigen cofre abierto y van sin firma: "
                        f"{muestra}{extra}. Se anadieron a mano")
-    detalle = f"{len(lineas)} líneas, cadena intacta"
+    detalle = f"{len(lineas)} líneas, cadena intacta" + aviso_programa
     anclas = []
     for texto in lineas:
         try:

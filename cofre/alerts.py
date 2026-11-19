@@ -130,6 +130,16 @@ def evaluate(events: list[dict], settings: dict, state: AlertState,
 
     encontradas: list[Alert] = []
 
+    # error de programa: un evento privilegiado se escribio sin la clave ligada
+    # (D21). Aviso medio: no es un ataque, es un fallo que hay que arreglar.
+    for ev in nuevos:
+        if ev.get("ev") == "sin-clave":
+            from cofre.messages import msg
+            encontradas.append(Alert(
+                "sin-clave", "media",
+                msg("alerta.sin_clave", detalle=str(ev.get("detail", ""))),
+                int(ev.get("seq", 0))))
+
     # senuelo: cualquier acceso es critico
     for ev in nuevos:
         if ev.get("ev") == "canary-access":

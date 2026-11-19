@@ -20,6 +20,7 @@ MSG = {
     "comun.no_coincide": "no coincide; revisa las palabras y vuelve a probar",
     "comun.abre_cofre": "abre el cofre para {accion}",
     "comun.cerrado": "Cerrado",
+    "alerta.sin_clave": "un evento privilegiado se escribió sin la clave ligada ({detalle}); el cofre no estaba abierto de verdad",
 
     # permisos temporales a la vista (2026-11-18)
     "permisos.titulo": "permisos temporales:",

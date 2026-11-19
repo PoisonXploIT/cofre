@@ -1,5 +1,5 @@
 gui 264
-cli 333
+cli 337
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
 # 2026-11-18 cli de 279 a 298: comando scan nuevo (3.4): ayuda, salida, JSON, gancho y avisos
@@ -10,3 +10,5 @@ cli 333
 # 2026-11-19 gui de 256 a 264: revertir un falso descenso: al partir gui.py, gui_puente.py no estaba en la lista y sus 8 textos no contaban
 # 2026-11-19 cli de 312 a 331: comando github-app (M5): manifest, ayuda y avisos del canje
 # 2026-11-19 cli de 331 a 333: D20: avisos de confirmacion de exec/run para agentes
+# 2026-11-19 gui de 264 a 265: log --explicar: nota firmada que explica lineas sin firma (D21 corregido)
+# 2026-11-19 cli de 333 a 337: log --explicar: nota firmada que explica lineas sin firma (D21 corregido)

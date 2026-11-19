@@ -317,19 +317,19 @@ class TestFirmaObligatoria(unittest.TestCase):
         _audit.set_key(self.master)
         self.assertTrue(_audit.clave_ligada())
 
-    def test_lock_sin_llave_ya_no_puede_ir_sin_firma(self):
-        # D21 (2026-11-19): sin clave, un privilegiado se degrada a gui-gate. Antes
-        # se escribia el `lock` sin firma y el verificador lo marcaba como
-        # manipulacion; ahora esa situacion no existe.
+    def test_lock_sin_llave_es_error_de_programa(self):
+        # D21 corregido (2026-11-19): un privilegiado sin clave se anota como
+        # `sin-clave` (no se disfraza de gui-gate) y verify lo cuenta aparte.
         from cofre import audit as _audit
         _audit.clear_key()
         _audit.record(self.vault, "lock", "usb", 1, detail="sin llave")
         eventos = _audit._events(self.vault)
-        self.assertEqual(eventos[0]["ev"], "gui-gate")
+        self.assertEqual(eventos[0]["ev"], "sin-clave")
         self.assertIn("sin clave: lock", eventos[0]["detail"])
         _audit.set_key(self.master)
         ok, detalle = _audit.verify(str(self.vault))
         self.assertTrue(ok, detalle)
+        self.assertIn("errores de programa", detalle)
 
     def test_audit_verify_puede_ir_sin_firma(self):
         from cofre import audit as _audit
@@ -369,17 +369,19 @@ class TestSinClaveNoHayPrivilegiado(unittest.TestCase):
         _audit.clear_key()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_se_degrada(self):
+    def test_se_anota_como_error_de_programa(self):
         from cofre import audit as _audit
         _audit.record(self.vault, "get", "usb", 1, name="X")
         _audit.record(self.vault, "bridge-start", "usb", 1)
         _audit.record(self.vault, "browser-list", "usb", 1)
         eventos = _audit._events(self.vault)
-        self.assertEqual([e["ev"] for e in eventos], ["gui-gate"] * 3)
+        self.assertEqual([e["ev"] for e in eventos], ["sin-clave"] * 3)
         self.assertIn("sin clave: get", eventos[0]["detail"])
+        self.assertIn("sin clave: bridge-start", eventos[1]["detail"])
         _audit.set_key(b"k" * 32)
         ok, detalle = _audit.verify(str(self.vault))
         self.assertTrue(ok, detalle)
+        self.assertIn("3 errores de programa", detalle)
 
     def test_con_clave_se_firma_normal(self):
         from cofre import audit as _audit
@@ -388,3 +390,62 @@ class TestSinClaveNoHayPrivilegiado(unittest.TestCase):
         eventos = _audit._events(self.vault)
         self.assertEqual(eventos[0]["ev"], "get")
         self.assertTrue(eventos[0].get("mac"))
+
+
+class TestNotaQueExplica(unittest.TestCase):
+    """La nota firmada explica líneas sin firma sin mover el ancla (D21).
+
+    Las tres líneas reales del 19-11 (`411 get`, `421 bridge-start`, `422
+    browser-list`) son eventos privilegiados escritos por la ventana rota, antes de
+    que existiera el tipo `sin-clave`. La nota firmada las da por explicadas y el
+    punto de exigencia de firma no se mueve.
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _P
+        from cofre import audit as _audit
+        self.tmp = _P(tempfile.mkdtemp(prefix="cofre-nota-"))
+        self.vault = self.tmp / "cofre.json"
+        self.master = b"k" * 32
+        self.ruta = _audit.audit_path(self.vault)
+        self.ruta.parent.mkdir(parents=True, exist_ok=True)
+        _audit.set_key(self.master)
+        # línea 1: privilegiada sin firma, escrita "a mano" como las de la ventana rota
+        base = {"seq": 1, "ts": "2026-11-19T21:36:26", "ev": "get", "entry": "-",
+                "name": "X", "actor": "gui", "ok": True, "stick": "1",
+                "gate": "usb", "detail": "", "prev": _audit.GENESIS}
+        linea1 = _audit._canonical(base).decode("utf-8")
+        # línea 2: nota firmada
+        nota = {"seq": 2, "ts": "2026-11-19T22:30:00", "ev": "audit-note",
+                "entry": "-", "name": "explicadas: 1", "actor": "gui", "ok": True,
+                "stick": "-", "gate": "usb",
+                "detail": "explica las líneas 1: prueba",
+                "prev": _audit._line_hash(linea1)}
+        clave = _audit._subkey(self.master)
+        import hashlib, hmac
+        mac = hmac.new(clave, _audit._canonical(nota), hashlib.sha256).hexdigest()
+        nota["mac"] = mac
+        self.ruta.write_text(linea1 + "\n" + json.dumps(nota, sort_keys=True,
+                                                         separators=(",", ":")) + "\n",
+                             encoding="utf-8")
+
+    def tearDown(self):
+        import shutil
+        from cofre import audit as _audit
+        _audit.clear_key()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_la_nota_explica_la_linea(self):
+        from cofre import audit as _audit
+        ok, detalle = _audit.verify(str(self.vault))
+        self.assertTrue(ok, detalle)
+        self.assertIn("explicadas por la nota firmada", detalle)
+
+    def test_sin_la_nota_saltaria(self):
+        from cofre import audit as _audit
+        lineas = self.ruta.read_text(encoding="utf-8").splitlines()
+        self.ruta.write_text(lineas[0] + "\n", encoding="utf-8")
+        ok, detalle = _audit.verify(str(self.vault))
+        self.assertFalse(ok, detalle)
+        self.assertIn("sin firma", detalle)
