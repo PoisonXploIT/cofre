@@ -184,84 +184,54 @@ class TestMensajesDelCodigo(unittest.TestCase):
         self.assertEqual(check_code(" ".join(self.partes)), (True, ""))
 
 
-class TestPalabrasPropias(unittest.TestCase):
-    """2026-11-19: el usuario puede elegir las 24 palabras; COFRE pone la 25."""
+class TestMensajesDelCodigo(unittest.TestCase):
+    """2026-11-19: al fallar, decir donde esta el problema sin repetir el código."""
 
     def setUp(self):
-        from cofre.v2.recovery import _words
-        self.lista = list(_words())
-        self.palabras = self.lista[:24]
+        from cofre.v2.recovery import new_code
+        self.partes = new_code().split()
 
-    def test_anade_la_palabra_de_control(self):
-        from cofre.v2.recovery import check_code, code_from_words
-        codigo = code_from_words(self.palabras)
-        self.assertEqual(len(codigo.split()), 25)
-        self.assertTrue(codigo.startswith(" ".join(self.palabras)))
-        self.assertEqual(check_code(codigo)[0], True)
+    def test_palabra_que_no_esta_en_la_lista(self):
+        from cofre.v2.recovery import check_code
+        roto = list(self.partes)
+        roto[4] = "zzzz"
+        ok, motivo = check_code(" ".join(roto))
+        self.assertFalse(ok)
+        self.assertIn("palabra 5", motivo)
+        self.assertNotIn("zzzz", motivo)
 
-    def test_normaliza_mayusculas_y_tildes(self):
-        from cofre.v2.recovery import code_from_words, normalize
-        grito = [p.upper() for p in self.palabras]
-        self.assertEqual(code_from_words(grito), code_from_words(self.palabras))
+    def test_control_malo(self):
+        from cofre.v2.recovery import check_code
+        roto = list(self.partes)
+        roto[-1] = "para" if self.partes[-1] != "para" else "casa"
+        ok, motivo = check_code(" ".join(roto))
+        self.assertFalse(ok)
+        self.assertIn("control", motivo)
+
+    def test_codigo_correcto(self):
+        from cofre.v2.recovery import check_code
+        self.assertEqual(check_code(" ".join(self.partes)), (True, ""))
+
+
+class TestCodigoSiempreAlAzar(unittest.TestCase):
+    """A3 de la revision (2026-11-19): el codigo se genera al azar.
+
+    Las 24 palabras elegidas a mano tienen mucha menos entropia y la ranura se ataca
+    sin conexion sobre cualquier copia; la opcion "Mis palabras" se quito.
+    """
+
+    def test_new_code_es_de_la_lista_y_valida(self):
+        from cofre.v2.recovery import check_code, new_code
+        for _ in range(5):
+            codigo = new_code()
+            self.assertEqual(len(codigo.split()), 25)
+            self.assertEqual(check_code(codigo), (True, ""))
+
+    def test_no_hay_forma_de_elegir_las_palabras(self):
+        from cofre.v2 import recovery
+        self.assertFalse(hasattr(recovery, "code_from_words"))
+        self.assertFalse(hasattr(recovery, "revisar_palabras"))
+
+    def test_normalize(self):
+        from cofre.v2.recovery import normalize
         self.assertEqual(normalize("PÁRA"), "para")
-
-    def test_pocas_palabras(self):
-        from cofre.v2.recovery import code_from_words
-        with self.assertRaises(ValueError) as ctx:
-            code_from_words(self.palabras[:20])
-        self.assertIn("24", str(ctx.exception))
-
-    def test_palabras_propias_fuera_de_la_lista(self):
-        # 2026-11-19: la lista es una pista, no un requisito. Exigirla hacia
-        # inutil el boton "Mis palabras" (ninguna palabra elegida a mano estaba).
-        from cofre.v2.recovery import check_code, code_from_words, revisar_palabras
-        # palabras inventadas: letras y fuera de la lista. La regla del
-        # 2026-11-19 bloquea 24 palabras seguidas de la lista en un fichero,
-        # asi que el fixture no puede ser una lista literal de palabras.
-        propias = [f"palabra{letra}" for letra in "abcdefghijklmnopqrstuvwx"]
-        limpias, fuera, repes, error = revisar_palabras(propias)
-        self.assertEqual(error, "")
-        self.assertEqual(len(limpias), 24)
-        self.assertEqual(repes, [])
-        fuera_lista = [i for i in fuera]
-        codigo = code_from_words(propias)
-        self.assertEqual(len(codigo.split()), 25)
-        self.assertEqual(check_code(codigo), (True, ""))
-
-    def test_letras_solo(self):
-        from cofre.v2.recovery import revisar_palabras
-        malas = list(self.palabras)
-        malas[2] = "abc123"
-        _l, _f, _r, error = revisar_palabras(malas)
-        self.assertIn("palabra 3", error)
-
-    def test_detecta_repetidas(self):
-        from cofre.v2.recovery import revisar_palabras
-        con_repe = list(self.palabras)
-        con_repe[5] = con_repe[0]
-        _l, _f, repes, error = revisar_palabras(con_repe)
-        self.assertEqual(error, "")
-        self.assertEqual(repes, [6])
-
-    def test_abre_el_cofre_con_esas_palabras(self):
-        import tempfile
-        from pathlib import Path
-        from cofre import keys
-        from cofre.firstuse import crear_cofre
-        from cofre.v2 import VaultV2
-        from cofre.v2.recovery import code_from_words
-        tmp = Path(tempfile.mkdtemp(prefix="cofre-propias-"))
-        try:
-            estado = crear_cofre(tmp / "cofre.json", str(tmp.drive) + "\\",
-                                 clave=tmp / "COFRE.KEY")
-            v2 = VaultV2(tmp / "cofre.json")
-            datos = v2.load()
-            codigo, nuevos = keys.generar_codigo(v2, datos, estado["master"],
-                                                 palabras=self.palabras)
-            self.assertEqual(codigo, code_from_words(self.palabras))
-            self.assertTrue(keys.probar_codigo(nuevos, codigo)[0])
-            # el codigo viejo (aleatorio) ya no abre
-            self.assertFalse(keys.probar_codigo(nuevos, estado["código"])[0])
-        finally:
-            import shutil
-            shutil.rmtree(tmp, ignore_errors=True)

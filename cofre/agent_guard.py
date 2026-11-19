@@ -30,8 +30,12 @@ import os
 
 VERDADEROS = {"1", "si", "sí", "true", "yes", "on"}
 
-# comandos que muestran el valor de un secreto
-PROHIBIDOS = {"get", "export"}
+# comandos que muestran el valor de un secreto (o lo dejan a mano)
+PROHIBIDOS = {"get", "export",
+              # A2 de la revision (2026-11-19): `shell` lleva get/export dentro;
+              # `serve` es el puente por puerto (origen falsificable); `gui` no la
+              # maneja un agente y su --selftest no pinta nada util.
+              "shell", "serve", "gui"}
 
 # comandos que existen pero cambian de comportamiento con el candado
 CONDICIONADOS = {"describe": "describe --minimal"}

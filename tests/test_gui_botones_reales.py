@@ -119,7 +119,7 @@ class TestBotonesDeVerdad(unittest.TestCase):
     def test_las_hojas_no_revientan_al_activar_y_desactivar(self):
         for nombre in ("open_keys", "open_health", "open_audit", "open_guide",
                        "open_shortcuts", "open_panic", "open_settings",
-                       "_codigo_propio", "_probar_codigo"):
+                       "_probar_codigo"):
             with self.subTest(hoja=nombre):
                 getattr(self.app, nombre)()
                 self.root.update()

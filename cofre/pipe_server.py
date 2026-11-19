@@ -33,6 +33,11 @@ from pathlib import Path
 
 MAX_MESSAGE = 1 << 20
 BUFFER = 64 * 1024
+# M2: un cliente que se conecta y no envia nada no puede quedarse con un hilo.
+LECTURA_MS = 5_000         # plazo para recibir la peticion completa
+# 32: la sonda de estres abre 20 a la vez (12 de git y 8 del navegador) y hace
+# falta sitio para `status` y para el ayudante. Sigue siendo un tope duro.
+MAX_CONEXIONES = 32
 
 PIPE_ACCESS_DUPLEX = 0x00000003
 PIPE_TYPE_BYTE = 0x00000004
@@ -66,6 +71,8 @@ kernel32.WriteFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
                                wintypes.LPDWORD, wintypes.LPVOID]
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+kernel32.PeekNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.LPDWORD, wintypes.LPDWORD]
 kernel32.GetNamedPipeClientProcessId.argtypes = [wintypes.HANDLE, wintypes.LPDWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -149,13 +156,40 @@ def security_descriptor(sid: str):
     return sd if ok else None
 
 
-def read_frame(handle) -> dict | None:
+def _esperar_datos(handle, plazo_ms: int | None = None) -> int:
+    """Espera a que haya bytes en la tubería. Devuelve los disponibles o -1.
+
+    M2 de la revision (2026-11-19): `ReadFile` bloqueante sin plazo dejaba un hilo
+    colgado por cada cliente que abria y no enviaba nada. Ahora se mira con
+    `PeekNamedPipe` (que no bloquea) y, si no llega nada en el plazo, se cierra.
+    """
+    import time
+    plazo_ms = LECTURA_MS if plazo_ms is None else plazo_ms
+    fin = time.monotonic() + plazo_ms / 1000
+    while True:
+        disponible = wintypes.DWORD(0)
+        ok = kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(disponible),
+                                    None)
+        if not ok:
+            return -1                      # tuberia rota o cerrada
+        if disponible.value:
+            return int(disponible.value)
+        if time.monotonic() >= fin:
+            return -1                      # plazo agotado
+        time.sleep(0.02)
+
+
+def read_frame(handle, plazo_ms: int | None = None) -> dict | None:
+    if _esperar_datos(handle, plazo_ms) < 0:
+        return None
     head = ctypes.create_string_buffer(4)
     read = wintypes.DWORD(0)
     if not kernel32.ReadFile(handle, head, 4, ctypes.byref(read), None) or read.value != 4:
         return None
     (length,) = __import__("struct").unpack("<I", head.raw)
     if length > MAX_MESSAGE:
+        return None
+    if _esperar_datos(handle, plazo_ms) < 0:
         return None
     body = ctypes.create_string_buffer(length)
     if not kernel32.ReadFile(handle, body, length, ctypes.byref(read), None) \
@@ -198,6 +232,8 @@ class PipeServer:
         self._first_instance_used = False
         self._sid = ""
         self._last_client: dict = {}
+        self._vivas = 0
+        self._cuenta_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     # ---------------------------------------------------------------- ciclo
@@ -299,6 +335,21 @@ class PipeServer:
                 # mientras el dialogo esta abierto, el cofre sigue contestando
                 # a `status` y a las peticiones de un host ya permitido.
                 cliente = dict(self._last_client)
+                # M2: tope de conexiones vivas. Si se llega, se cierra sin
+                # atender: mejor eso que un hilo por cada cliente curioso.
+                with self._cuenta_lock:
+                    vivas = self._vivas
+                if vivas >= MAX_CONEXIONES:
+                    self.log(f"demasiadas conexiones ({vivas}); se cierra esta")
+                    # se contesta para que el cliente no se quede esperando
+                    write_frame(handle, {"ok": False,
+                                         "error": "demasiadas conexiones al cofre"})
+                    kernel32.FlushFileBuffers(handle)
+                    kernel32.DisconnectNamedPipe(handle)
+                    kernel32.CloseHandle(handle)
+                    continue
+                with self._cuenta_lock:
+                    self._vivas += 1
                 obrero = threading.Thread(target=self._serve, args=(handle, cliente),
                                           daemon=True, name="cofre-pipe-conn")
                 obrero.start()
@@ -338,6 +389,8 @@ class PipeServer:
         finally:
             kernel32.DisconnectNamedPipe(handle)
             kernel32.CloseHandle(handle)
+            with self._cuenta_lock:
+                self._vivas = max(0, self._vivas - 1)
 
     def write_pipe_info(self, extra: dict | None = None) -> Path:
         """Nombre y PID. Solo eso: nada que sirva para abrir el cofre."""

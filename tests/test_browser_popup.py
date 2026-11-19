@@ -45,8 +45,11 @@ class FakeVault:
     def set_urls(self, nombre, urls):
         self.datos[nombre]["urls"] = list(urls)
 
-    def add(self, session, nombre, valor, tags=None, urls=None):
-        self.datos[nombre] = {"type": "api_key", "tags": list(tags or []),
+    def add(self, session, nombre, valor, tags=None, urls=None, kind=None):
+        # A1: el tipo viaja en la misma escritura; si no, se conserva el que hubiera
+        previo = str((self.datos.get(nombre) or {}).get("type") or "")
+        self.datos[nombre] = {"type": kind or previo or "api_key",
+                              "tags": list(tags or []),
                               "urls": list(urls or [])}
 
     def is_v2(self):
@@ -203,9 +206,9 @@ class TestGenerate(unittest.TestCase):
         app.anadidos = []
         original = app.vault.add
 
-        def add(session, nombre, valor, tags=None, urls=None):
+        def add(session, nombre, valor, tags=None, urls=None, kind=None):
             app.anadidos.append((nombre, valor, list(tags or []), list(urls or [])))
-            return original(session, nombre, valor, tags, urls)
+            return original(session, nombre, valor, tags, urls, kind)
 
         app.vault.add = add
         return app

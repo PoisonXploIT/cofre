@@ -398,8 +398,7 @@ class LlavesGUI:
                   lambda e: self._add_pendrive(win)).pack(side="right")
         self._btn(cab, msg("llaves.nuevo_codigo"),
                   lambda e: self._nuevo_codigo()).pack(side="right", padx=6)
-        self._btn(cab, msg("llaves.mis_palabras"),
-                  lambda e: self._codigo_propio()).pack(side="right")
+
         self._btn(cab, msg("llaves.probar"),
                   lambda e: self._probar_codigo()).pack(side="right", padx=6)
         tk.Label(win, text=msg("llaves.intro"),

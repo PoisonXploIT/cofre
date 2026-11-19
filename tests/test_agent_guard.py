@@ -52,6 +52,14 @@ class TestUnidad(unittest.TestCase):
             self.assertTrue(agent_guard.motivo(self._args(command="log",
                                                           reanchor=True)))
 
+    def test_bloquea_las_puertas_de_atras(self):
+        # A2 de la revision (2026-11-19): shell lleva get dentro, serve es el
+        # puente por puerto y gui no la maneja un agente.
+        with unittest.mock.patch.dict(os.environ, {"COFRE_AGENT": "1"}):
+            for comando in ("shell", "serve", "gui"):
+                self.assertTrue(agent_guard.motivo(self._args(command=comando)),
+                                comando)
+
     def test_deja_pasar_lo_permitido(self):
         with unittest.mock.patch.dict(os.environ, {"COFRE_AGENT": "1"}):
             for args in (self._args(command="exec"),
@@ -132,6 +140,21 @@ class TestDeVerdad(unittest.TestCase):
                 proc = self.correr(*args)
                 self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
                 self.assertIn("COFRE_AGENT=1", proc.stderr)
+
+    def test_shell_serve_y_gui_bloqueados(self):
+        # A2: las tres puertas de atras, de verdad y no solo en la unidad
+        for args in (["shell"], ["serve"], ["gui"]):
+            with self.subTest(args=args):
+                proc = self.correr(*args)
+                self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+                self.assertIn("COFRE_AGENT=1", proc.stderr)
+
+    def test_serve_por_modulo_tambien(self):
+        # `python -m cofre.serve` no pasa por cli.main: se comprueba aparte
+        proc = subprocess.run([sys.executable, "-m", "cofre.serve", "--port", "0"],
+                              capture_output=True, text=True, env=self.entorno,
+                              cwd=str(REPO), timeout=60)
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
 
 
 import unittest.mock  # noqa: E402

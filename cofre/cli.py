@@ -667,7 +667,7 @@ def cmd_github_app(args, vault_path) -> int:
         print("la respuesta de GitHub no trae id o clave", file=sys.stderr)
         return 1
     try:
-        vault.add(None, args.guardar, pem, ["admin"])
+        vault.add(None, args.guardar, pem, ["admin"], kind="private_key")
     except Exception as exc:                       # noqa: BLE001
         print(f"no se pudo guardar la clave en el cofre: {exc}", file=sys.stderr)
         return 1
@@ -769,9 +769,41 @@ def cmd_scan(args, vault_path) -> int:
     return 1 if hallazgos else 0
 
 
+def _confirmar_codigo(codigo: str) -> bool:
+    """M1 de la revision (2026-11-19): el código nuevo, apuntado ANTES de guardar.
+
+    Se enseña el código y se piden dos palabras al azar por su posición. Si no
+    coinciden, no se escribe nada. Solo se usa cuando el cofre se abrió sin
+    pendrive (solo con el código): ahí, guardar sin haberlo apuntado deja el cofre
+    imposible de abrir si algo falla justo después.
+    """
+    partes = str(codigo or "").split()
+    if len(partes) != 25:
+        return False
+    import random
+    print("")
+    print("CÓDIGO DE RECUPERACIÓN NUEVO (apúntalo ahora, no se vuelve a mostrar):")
+    print("")
+    for inicio in range(0, 25, 5):
+        trozo = partes[inicio:inicio + 5]
+        print("   " + "   ".join(f"{inicio + i + 1}. {w}" for i, w in enumerate(trozo)))
+    print("")
+    posiciones = sorted(random.SystemRandom().sample(range(1, 26), 2))
+    for posicion in posiciones:
+        try:
+            respuesta = input(f"palabra {posicion}: ").strip().lower()
+        except EOFError:
+            return False
+        if respuesta != partes[posicion - 1]:
+            print("no coincide: no se ha guardado nada; el cofre sigue como estaba")
+            return False
+    print("apuntado. Se guarda el cofre con la clave nueva.")
+    return True
+
+
 def rekey_vivo(vault, vault_path, material, motivo: str = "manual",
                gate: str = "-", serial: int | None = None,
-               actor: str = "cli"):
+               actor: str = "cli", confirmar=None):
     """Rekey completo: cierra el tramo, re-cifra, archiva y cambia la clave.
 
     Deja el objeto `vault` y su store con la clave nueva. Devuelve
@@ -792,6 +824,18 @@ def rekey_vivo(vault, vault_path, material, motivo: str = "manual",
             label=etiqueta, pin=material.get("pin", ""))
     except Exception as exc:                       # noqa: BLE001
         return "", [], str(exc)
+    # M1: si el cofre solo tiene ranura de recuperación (se abrió con el papel), el
+    # código nuevo es la ÚNICA forma de abrirlo. Se enseña y se confirma antes de
+    # escribir; si no, no se toca nada.
+    solo_codigo = not any(str(s.get("kind")) == "usb"
+                          for s in (prep.data.get("slots") or []))
+    # Solo cuando el código es la ÚNICA llave: con un pendrive dentro, si algo falla
+    # el cofre se abre igual con el pendrive. Si no hay terminal para confirmar, se
+    # niega: re-cifrar dejando el código como única llave y sin apuntarlo es como
+    # cerrarse fuera.
+    if solo_codigo and confirmar is not None:
+        if not confirmar(prep.codigo):
+            return "", [], "no se ha confirmado el código nuevo; el cofre no se ha tocado"
     log = audit_mod.audit_path(vault_path)
     log_antes = log.read_text(encoding="utf-8") if log.exists() else ""
     segmento = None
@@ -1405,12 +1449,28 @@ def main(argv: list[str]) -> int:
             return 1
         env = dict(os.environ)
         env[args.var] = valor
+        # A2 de la revision (2026-11-19): el agente no puede usar app-exec sin
+        # confirmacion ni ver la salida sin filtrar (el hijo podria imprimir el
+        # token de instalacion, que vale una hora).
+        de_agente = False
+        try:
+            from cofre import agent_guard
+            de_agente = agent_guard.activo()
+        except Exception:                          # noqa: BLE001
+            de_agente = False
+        if de_agente:
+            print(agent_guard.CONFIRMACION)
+            if not agent_guard.confirmar_por_la_gui(args.cmd, [args.var]):
+                print("denegado en COFRE (o sin ventana abierta): no se ejecuta nada",
+                      file=sys.stderr)
+                return 1
         record(str(vault_path), "app-exec", args.gate, serial,
                name=args.var, ok=True, detail=f"caduca {caduca[:19]}")
+        inyectado = {args.var: valor}
         del valor, jwt, pem
         print(f"ejecutando con {args.var} inyectado (caduca {caduca[:19]}, "
               "solo para ese proceso)")
-        return subprocess.run(args.cmd, env=env).returncode
+        return _ejecutar(args.cmd, env, inyectado if de_agente else {})
 
     if args.command == "alerts":
         # las alertas se firman: hay que tener el cofre abierto y la clave
@@ -1743,7 +1803,8 @@ def main(argv: list[str]) -> int:
             try:
                 nuevo = proveedor.roll_value(token_id, admin_valor, meta)
                 vault.add(session, args.name, nuevo, meta.get("tags", []),
-                          meta.get("urls", []))
+                          meta.get("urls", []),
+                          kind=meta.get("type") or None)
                 record(str(vault_path), "rotate", args.gate, serial, name=args.name,
                        ok=True, detail="roll")
                 from cofre.audit import stamp_vault
@@ -1921,7 +1982,7 @@ def main(argv: list[str]) -> int:
                 fallos += 1
         codigo, perdidos, error = rekey_vivo(
             vault, vault_path, material, motivo="panico", gate=args.gate,
-            serial=serial, actor="cli")
+            serial=serial, actor="cli", confirmar=_confirmar_codigo)
         if error:
             fallos += 1
             print(f"no se pudo hacer el rekey: {error}", file=sys.stderr)
@@ -1970,7 +2031,8 @@ def main(argv: list[str]) -> int:
                 return 1
         codigo, perdidos, error = rekey_vivo(
             vault, vault_path, material, motivo=args.motivo or "manual",
-            gate=args.gate, serial=serial, actor="cli")
+            gate=args.gate, serial=serial, actor="cli",
+            confirmar=_confirmar_codigo)
         if error:
             print(f"no se pudo hacer el rekey: {error}", file=sys.stderr)
             record(str(vault_path), "rekey", args.gate, serial, name="-",

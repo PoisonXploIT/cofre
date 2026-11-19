@@ -256,20 +256,14 @@ class EntrySheet:
         tipo = self.tipo_var.get()
         try:
             if app.vault.is_v2():
-                app.vault.add(app.session, nombre, valor, tags, sitios)
-                app.vault._v2store()._data["entries"]  # noqa: B018  (fuerza el refresco)
+                # A1: el tipo va en la MISMA escritura. Antes se guardaba como
+                # api_key y luego se parcheaba el indice: si se cortaba entre
+                # medias, la entrada quedaba como api_key.
+                app.vault.add(app.session, nombre, valor, tags, sitios, kind=tipo)
             else:
                 app.vault.add(app.session, nombre, valor, tags)
                 if sitios:
                     app.vault.set_urls(nombre, sitios)
-            if app.vault.is_v2():
-                store = app.vault._v2store()
-                idx = store.index(store._data, store.master)
-                entrada = (idx.get("entries") or {}).get(nombre)
-                if entrada is not None:
-                    entrada["type"] = tipo
-                    store._write_index(store._data, store.master, idx)
-                    store.save(store._data)
         except Exception as exc:                      # noqa: BLE001
             self.aviso.configure(text=f"no se pudo guardar: {exc}")
             return

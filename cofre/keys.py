@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
-from cofre.v2.recovery import check_code, code_from_words, new_code
+from cofre.v2.recovery import check_code, new_code
 from cofre.v2.slots import SlotError, new_recovery_slot, open_with_recovery
 
 
@@ -81,8 +81,7 @@ def reporte(data: dict, registry: dict, presentes: dict,
 
 
 def generar_codigo(v2, data: dict, master: bytes,
-                   label: str = "recuperacion",
-                   palabras: list[str] | None = None) -> tuple[str, dict]:
+                   label: str = "recuperacion") -> tuple[str, dict]:
     """Cambiar la ranura de recuperacion por una nueva con la misma maestra.
 
     La copia se escribe solo si todo va bien; el cofre en memoria no se toca
@@ -91,7 +90,10 @@ def generar_codigo(v2, data: dict, master: bytes,
     nuevo = json.loads(json.dumps(data))
     nuevo["slots"] = [s for s in (nuevo.get("slots") or [])
                       if s.get("kind") != "recovery"]
-    codigo = code_from_words(palabras) if palabras else new_code()
+    # A3 de la revision (2026-11-19): el codigo SIEMPRE se genera al azar. Las 24
+    # palabras elegidas a mano tienen mucha menos entropia y la ranura se ataca sin
+    # conexion sobre cualquier copia; se quito la opcion "Mis palabras".
+    codigo = new_code()
     nuevo["slots"].append(new_recovery_slot(master, codigo, label))
     v2.save(nuevo)
     return codigo, nuevo

@@ -41,49 +41,6 @@ def new_code() -> str:
     return f"{texto} {control_word(texto, palabras)}"
 
 
-def revisar_palabras(palabras: list[str]) -> tuple[list[str], list[int], list[int], str]:
-    """Valida 24 palabras propias. Devuelve (limpias, fuera_de_lista, repetidas, error).
-
-    Las palabras NO tienen que estar en la lista: la lista es solo de donde sale la
-    palabra de control y una pista de erratas. Ojo (2026-11-19): exigir que
-    estuvieran hizo inutil el boton "Mis palabras", porque la lista es de palabras
-    frecuentes y ninguna de las que uno elige a mano suele estar.
-    """
-    lista = set(_words())
-    crudas = [str(p).strip() for p in (palabras or []) if str(p).strip()]
-    if len(crudas) != WORDS:
-        return [], [], [], f"hacen falta {WORDS} palabras y hay {len(crudas)}"
-    limpias = [normalize(p) for p in crudas]
-    for i, palabra in enumerate(limpias, 1):
-        if not palabra.replace(" ", "").isalpha():
-            return [], [], [], (f"la palabra {i} tiene algo que no es una letra; "
-                                "escribe solo palabras")
-        if len(palabra) < 2:
-            return [], [], [], f"la palabra {i} es demasiado corta"
-    fuera = [i for i, palabra in enumerate(limpias, 1) if palabra not in lista]
-    vistas: set[str] = set()
-    repetidas = []
-    for i, palabra in enumerate(limpias, 1):
-        if palabra in vistas:
-            repetidas.append(i)
-        vistas.add(palabra)
-    return limpias, fuera, repetidas, ""
-
-
-def code_from_words(palabras: list[str]) -> str:
-    """Código a partir de 24 palabras elegidas por la persona + la de control.
-
-    No cambia nada del formato del código: solo sustituye el azar por la elección.
-    Aviso que la interfaz repite: 24 palabras elegidas por una persona tienen mucha
-    menos entropía que 24 al azar; el cofre no lo impide, pero no es lo mismo.
-    """
-    limpias, _fuera, _repes, error = revisar_palabras(palabras)
-    if error:
-        raise ValueError(error)
-    texto = " ".join(limpias)
-    return f"{texto} {control_word(texto, _words())}"
-
-
 def check_code(code: str) -> tuple[bool, str]:
     """Comprueba la palabra de control antes de intentar abrir nada."""
     palabras = _words()

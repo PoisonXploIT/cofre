@@ -325,6 +325,14 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
     argv = list(sys.argv[1:] if argv is None else argv)
+    # A2 de la revision (2026-11-19): el agente no levanta el puente por puerto,
+    # ni con COFRE_BRIDGE=tcp. Se comprueba aqui tambien porque `python -m
+    # cofre.serve` no pasa por cli.main.
+    from cofre import agent_guard
+    if agent_guard.activo():
+        print("COFRE_AGENT=1: un agente no debe abrir el puente por puerto. "
+              "Usa la tuberia (la abre la ventana).", file=sys.stderr)
+        return 3
     ap = argparse.ArgumentParser(description="puente loopback del cofre para el navegador")
     ap.add_argument("--vault", default=str(default_vault()))
     ap.add_argument("--gate", default="usb", choices=["pin", "hid", "usb", "usb-pin"])

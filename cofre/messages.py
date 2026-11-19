@@ -94,23 +94,6 @@ MSG = {
     "llaves.anadir": "Añadir pendrive",
     "llaves.nuevo_codigo": "Nuevo código",
     "llaves.probar": "Probar código",
-    "llaves.mis_palabras": "Mis palabras",
-    "llaves.mis_titulo": "COFRE - mis palabras",
-    "llaves.mis_intro": "Escribe 24 palabras, tuyas o de la lista, separadas por "
-                        "espacios. COFRE añade la 25 (la de control) y las guarda "
-                        "como código de recuperación nuevo: el anterior deja de abrir.",
-    "llaves.mis_comprobar": "Comprobar",
-    "llaves.mis_ok": "{n} palabras, ninguna repetida. Se puede guardar.",
-    "llaves.mis_ok_fuera": "{n} palabras, ninguna repetida. {fuera} no están en la "
-                          "lista de 2.000: si las has elegido tú, es normal.",
-    "llaves.mis_repes": "Ojo: hay palabras repetidas (posiciones {posiciones}); "
-                        "el código pierde fuerza.",
-    "llaves.mis_aviso": "Ojo: 24 palabras elegidas por ti son más fáciles de adivinar "
-                        "que 24 al azar. Sirve para que no se te olviden, no para "
-                        "ganar fuerza.",
-    "llaves.mis_guardar": "Guardar estas palabras",
-    "llaves.mis_hecho": "código nuevo con tus palabras; el anterior ya no abre",
-    "llaves.mis_error": "no se pudo guardar: {error}",
     "llaves.imprimir": "Imprimir",
     "llaves.recovery": "Código de recuperación en papel",
     "llaves.recovery_nota": "25 palabras · no se puede leer desde aquí",

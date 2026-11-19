@@ -137,7 +137,7 @@ class V2Store:
         return self._vault.get(self._data, self._need(), name)
 
     def add(self, name: str, value: str, tags: list[str] | None = None,
-            urls: list[str] | None = None, kind: str = "api_key") -> None:
+            urls: list[str] | None = None, kind: str | None = None) -> None:
         self._vault.put(self._data, self._need(), name, value, tags=tags, urls=urls, kind=kind)
         self._vault.save(self._data)
 

@@ -160,12 +160,19 @@ class VaultV2:
 
     def put(self, data: dict, master: bytes, name: str, value: str,
             tags: list[str] | None = None, urls: list[str] | None = None,
-            kind: str = "api_key") -> dict:
+            kind: str | None = None) -> dict:
         idx = self.index(data, master)
         existente = idx["entries"].get(name)
         entry_id = existente["id"] if existente else str(uuid.uuid4())
         self._put_value(data, master, entry_id, value)
         meta = existente or {"id": entry_id, "name": name, "created": _now()}
+        # A1 de la revision (2026-11-19): reescribir el valor NO cambia el tipo. Con
+        # kind=None se conserva el que tenia; una entrada nueva nace api_key. Antes
+        # se ponia api_key siempre y un senuelo editado dejaba de serlo (se entregaba
+        # sin avisar), una clave privada perdia la confirmacion y una contrasena
+        # dejaba de rellenarse en el navegador.
+        if kind is None:
+            kind = str(meta.get("type") or "api_key")
         meta.update({"tags": tags if tags is not None else meta.get("tags", []),
                      "urls": urls if urls is not None else meta.get("urls", []),
                      "type": kind, "updated": _now()})

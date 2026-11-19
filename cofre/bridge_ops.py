@@ -287,15 +287,10 @@ def dispatch(app, message: dict) -> dict:
         from cofre.gen import machine_password
         valor = machine_password()
         try:
-            app.vault.add(app.session, nombre, valor, ["navegador"], [domain])
-            if app.vault.is_v2():
-                store = app.vault._v2store()
-                idx = store.index(store._data, store.master)
-                entrada = (idx.get("entries") or {}).get(nombre)
-                if entrada is not None:
-                    entrada["type"] = "password"
-                    store._write_index(store._data, store.master, idx)
-                    store.save(store._data)
+            # A1: tipo `password` en la misma escritura (si no, el canal browser no
+            # valdria y el relleno no se permitiria)
+            app.vault.add(app.session, nombre, valor, ["navegador"], [domain],
+                          kind="password")
         except Exception as exc:                     # noqa: BLE001
             record(app.vault_path, "add", app.gate, app.serial, name=nombre,
                    ok=False, detail=f"{domain}: {type(exc).__name__}")

@@ -154,9 +154,10 @@ class Vault:
         return unwrap_key(data["wrapper"], session)
 
     def add(self, session: bytes, name: str, value: str, tags: list[str] | None = None,
-            urls: list[str] | None = None) -> None:
+            urls: list[str] | None = None, kind: str | None = None) -> None:
         if self.is_v2():
-            self._v2store().add(name, value, tags=tags, urls=urls)
+            # kind=None conserva el tipo que tuviera la entrada (A1, 2026-11-19)
+            self._v2store().add(name, value, tags=tags, urls=urls, kind=kind)
             return
         master = self.unlock(session)
         data = self.load()
