@@ -1,5 +1,5 @@
 gui 264
-cli 337
+cli 338
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
 # 2026-11-18 cli de 279 a 298: comando scan nuevo (3.4): ayuda, salida, JSON, gancho y avisos
@@ -12,3 +12,4 @@ cli 337
 # 2026-11-19 cli de 331 a 333: D20: avisos de confirmacion de exec/run para agentes
 # 2026-11-19 gui de 264 a 265: log --explicar: nota firmada que explica lineas sin firma (D21 corregido)
 # 2026-11-19 cli de 333 a 337: log --explicar: nota firmada que explica lineas sin firma (D21 corregido)
+# 2026-11-19 cli de 337 a 338: log verify: aviso de que sin llave no se comprueban las firmas

@@ -1012,7 +1012,13 @@ def main(argv: list[str]) -> int:
             return 0
 
         if getattr(args, "verify", None) == "verify":
-            from cofre.audit import check_checkpoint, legacy_report, verify as verify_log
+            from cofre.audit import check_checkpoint, clave_ligada, legacy_report
+            from cofre.audit import verify as verify_log
+            # Un "OK" sin la llave no ha comprobado ninguna firma: eso enganaria.
+            if vault.is_v2() and not clave_ligada():
+                print("FALLO  v2: sin la llave del cofre no se pueden comprobar las "
+                      "firmas. Conecta el pendrive (o usa --stick).", file=sys.stderr)
+                return 1
             ok_legacy, txt_legacy = legacy_report(str(vault_path))
             print(("OK   " if ok_legacy else "FALLO") + "  historico v1: " + txt_legacy)
             ok, detalle = verify_log(str(vault_path))
