@@ -19,6 +19,7 @@ MSG = {
     "comun.guardar": "Guardar",
     "comun.no_coincide": "no coincide; revisa las palabras y vuelve a probar",
     "comun.abre_cofre": "abre el cofre para {accion}",
+    "comun.cerrado": "Cerrado",
 
     # permisos temporales a la vista (2026-11-18)
     "permisos.titulo": "permisos temporales:",

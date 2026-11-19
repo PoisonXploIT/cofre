@@ -142,3 +142,51 @@ class TestBotonesDeVerdad(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPendriveQueRespondeAMedias(unittest.TestCase):
+    """2026-11-19: el volumen contestaba a resolve_session_key pero no a
+    material_for. La ventana decia "abierto" con el cofre sin clave: 0 secretos y
+    "cofre v2 abierto sin sesión" al guardar. Ahora se cierra y avisa.
+    """
+
+    def setUp(self):
+        import tmpvault
+        from cofre.gui import CofreGUI
+        self.vault, self.llave, self.tmp = tmpvault.cofre_temporal()
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.app = CofreGUI(str(self.vault), "usb", stick=str(self.llave),
+                            root=self.root)
+        self.app.build()
+        self.root.update()
+
+    def tearDown(self):
+        import shutil
+        try:
+            for ident in self.root.tk.call("after", "info"):
+                try:
+                    self.root.after_cancel(ident)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self.root.destroy()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_sin_llave_util_el_cofre_se_cierra_y_avisa(self):
+        from unittest import mock
+        self.app.lock()
+        self.app.vault.reset_store()      # como al arrancar: sin tienda en memoria
+        with mock.patch("cofre.gui.material_for", return_value=None):
+            resultado = self.app.unlock()
+        self.root.update()
+        self.assertFalse(resultado)
+        self.assertIsNone(self.app.session)
+        self.assertEqual(self.app.status_var.get(), "Cerrado")
+        self.assertIn("no se abre con su llave", self.app.foot_var.get())
+
+    def test_con_llave_buena_abre_y_tiene_secretos(self):
+        self.assertTrue(self.app.session)
+        self.assertTrue(self.app.vault.names())
+        self.assertIsNotNone(self.app.vault._v2store().master)

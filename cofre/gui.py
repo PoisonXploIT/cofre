@@ -872,11 +872,35 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
             f"{d['drive']} ({d['role']}){' conectada' if d.get('present') else ''}"
             for d in self.stick_report())
 
-    def _bind_material(self) -> None:
-        """v2 necesita la llave del pendrive, no solo la sesión derivada."""
-        if self.vault.is_v2():
-            self.vault.bind_material(
-                material_for(self.gate, str(self.vault_path), self.stick, self.allow_new))
+    def _bind_material(self) -> bool:
+        """v2 necesita la llave del pendrive, no solo la sesión derivada.
+
+        Devuelve False si el cofre no se pudo abrir de verdad con esa llave. Paso el
+        2026-11-19: el volumen contestaba a `resolve_session_key` pero no a
+        `material_for`, asi que la ventana decia "abierto" con la sesion puesta y el
+        cofre sin clave: 0 secretos y "cofre v2 abierto sin sesión" al guardar.
+        """
+        if not self.vault.is_v2():
+            return True
+        material = material_for(self.gate, str(self.vault_path), self.stick,
+                                self.allow_new)
+        self.vault.bind_material(material)
+        try:
+            if self.vault._v2store().master is not None:
+                return True
+        except Exception:
+            return False
+        # segundo intento: un volumen lento puede fallar una vez
+        try:
+            import time as _time
+            _time.sleep(0.4)
+            self.vault.reset_store()
+            material = material_for(self.gate, str(self.vault_path), self.stick,
+                                    self.allow_new)
+            self.vault.bind_material(material)
+            return self.vault._v2store().master is not None
+        except Exception:
+            return False
 
     def unlock(self, event=None):
         # En usb-pin la GUI siempre pasa su propio PIN (aunque este vacio),
@@ -899,7 +923,22 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
                 self.lock_screen.mostrar(str(exc) or "no se encuentra la llave")
             return False
 
-        self._bind_material()
+        if not self._bind_material():
+            # la llave no abre el indice: mejor cerrar que quedarse a medias
+            self.session = None
+            self.serial = None
+            self.vault.reset_store()
+            self._pill_texto = msg("comun.cerrado")
+            self.set_status(msg("comun.cerrado"), warn=True)
+            message = ("el pendrive responde, pero el cofre no se abre con su llave. "
+                       "Quita y vuelve a conectar el pendrive y pulsa Reconectar.")
+            self.set_foot(message, ttl=0)
+            record(self.vault_path, "gui-gate", self.gate, None, ok=False,
+                   detail="material sin llave util")
+            self.refresh_list()
+            if getattr(self, "lock_screen", None):
+                self.lock_screen.mostrar(message)
+            return False
 
         if not self.vault.is_v2() and not self.vault.load().get("wrapper"):
             self.needs_init = True
