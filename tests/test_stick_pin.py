@@ -236,7 +236,7 @@ class TestMaterialForTomaLaFrase(unittest.TestCase):
                 mock.patch.object(gate, "read_pin",
                                   return_value="frase del entorno") as lector, \
                 mock.patch("cofre.usb.find_stick",
-                           return_value=("X:\COFRE.KEY", 4242)), \
+                           return_value=("X:/COFRE.KEY", 4242)), \
                 mock.patch("cofre.usb.read_key", return_value=b"k" * 32):
             material = gate.material_for(modo, "c:/tmp/cofre.json", **kw)
         return material, lector
