@@ -97,3 +97,74 @@ class TestPonerPin(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLaVentanaConPin(unittest.TestCase):
+    """2026-11-20: con `--gate usb-pin`, la ventana no abría aunque el PIN fuese
+    bueno: `_bind_material` no le pasaba el PIN a `material_for`. Y si se abría sin
+    `--gate usb-pin`, el aviso no decía que hacía falta el PIN.
+    """
+
+    def setUp(self):
+        import secrets
+        import shutil
+        import tempfile
+        import tkinter as tk
+        from cofre.gui import CofreGUI
+        from cofre.v2 import VaultV2, new_usb_slot
+        from cofre.usb import register_stick, volume_serial
+        self.tmp = Path(tempfile.mkdtemp(prefix="cofre-pin-gui-"))
+        self.vault = self.tmp / "cofre.json"
+        self.llave = self.tmp / "COFRE.KEY"
+        self.llave.write_bytes(secrets.token_bytes(32))
+        self.pin = "frase de seis palabras"
+        master = secrets.token_bytes(32)
+        serial = volume_serial(str(self.tmp.drive) + "\\")
+        v2 = VaultV2(self.vault)
+        v2.save(v2.create(master, new_usb_slot(master, self.llave.read_bytes(),
+                                               serial, "t", self.pin)))
+        register_stick(str(self.vault), serial, str(self.tmp.drive) + "\\")
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        import shutil
+        try:
+            for ident in self.root.tk.call("after", "info"):
+                try:
+                    self.root.after_cancel(ident)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self.root.destroy()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _app(self, gate="usb-pin"):
+        from cofre.gui import CofreGUI
+        app = CofreGUI(str(self.vault), gate, stick=str(self.llave), root=self.root)
+        app.build()
+        self.root.update()
+        return app
+
+    def test_con_el_pin_bueno_abre(self):
+        app = self._app()
+        self.assertIsNone(app.session)
+        app.pin_var.set(self.pin)
+        app.unlock()
+        self.root.update()
+        self.assertTrue(app.session, app.foot_var.get())
+
+    def test_con_el_pin_malo_no_abre(self):
+        app = self._app()
+        app.pin_var.set("otra cosa")
+        app.unlock()
+        self.root.update()
+        self.assertIsNone(app.session)
+
+    def test_sin_gate_usb_pin_el_aviso_lo_dice(self):
+        app = self._app(gate="usb")
+        app.unlock()
+        self.root.update()
+        self.assertIsNone(app.session)
+        self.assertIn("pide PIN", app.foot_var.get())

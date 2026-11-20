@@ -882,8 +882,11 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
         """
         if not self.vault.is_v2():
             return True
+        # el PIN de la ventana: sin pasarlo, la ranura con PIN no abre y el cofre
+        # se quedaba cerrado aunque el PIN fuese correcto (2026-11-20)
+        pin = self.pin_var.get() if self.gate == "usb-pin" else ""
         material = material_for(self.gate, str(self.vault_path), self.stick,
-                                self.allow_new)
+                                self.allow_new, pin=pin)
         self.vault.bind_material(material)
         try:
             if self.vault._v2store().master is not None:
@@ -896,7 +899,9 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
             _time.sleep(0.4)
             self.vault.reset_store()
             material = material_for(self.gate, str(self.vault_path), self.stick,
-                                    self.allow_new)
+                                    self.allow_new,
+                                    pin=(self.pin_var.get()
+                                         if self.gate == "usb-pin" else ""))
             self.vault.bind_material(material)
             return self.vault._v2store().master is not None
         except Exception:
@@ -932,6 +937,21 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
             self.set_status(msg("comun.cerrado"), warn=True)
             message = ("el pendrive responde, pero el cofre no se abre con su llave. "
                        "Quita y vuelve a conectar el pendrive y pulsa Reconectar.")
+            if self.gate != "usb-pin":
+                # el caso más probable: la ranura ya pide PIN y la ventana se abrió
+                # sin --gate usb-pin (pasó el 2026-11-20)
+                try:
+                    ranuras = (self.vault.load().get("slots") or [])
+                    # si alguna ranura de pendrive pide PIN y la ventana no se abrió
+                    # con usb-pin, eso es lo que pasa (no hace falta afinar el serial:
+                    # con el pendrive puesto, es la que se está usando)
+                    if any(s.get("kind") == "usb" and s.get("pin")
+                           for s in ranuras):
+                        message = ("ese pendrive ya pide PIN. Cierra COFRE y ábrelo "
+                                   "con --gate usb-pin, o cambia el acceso directo "
+                                   "para que lo haga siempre.")
+                except Exception:
+                    pass
             self.set_foot(message, ttl=0)
             record(self.vault_path, "gui-gate", self.gate, None, ok=False,
                    detail="material sin llave util")
