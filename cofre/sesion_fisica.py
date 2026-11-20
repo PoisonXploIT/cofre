@@ -119,8 +119,8 @@ def paso_registro() -> bool:
     return ok
 
 
-def paso_log_verify() -> bool:
-    codigo, salida = cli("log", "verify", timeout=240)
+def paso_log_verify(gate: str = "usb") -> bool:
+    codigo, salida = cli("log", "verify", "--gate", gate, timeout=240)
     lineas = [ln for ln in salida.splitlines() if ln.strip()]
     fallos = [ln for ln in lineas if ln.strip().startswith("FALLO")]
     avisos = [ln for ln in lineas if "reancl" in ln.lower() or "aviso" in ln.lower()]
@@ -132,8 +132,8 @@ def paso_log_verify() -> bool:
     return codigo == 0 and not fallos
 
 
-def paso_reserva() -> bool:
-    codigo, salida = cli("stick-verify", timeout=180)
+def paso_reserva(gate: str = "usb") -> bool:
+    codigo, salida = cli("stick-verify", "--gate", gate, timeout=180)
     ok = codigo == 0 and "NO abre" not in salida and "no abre" not in salida.lower()
     apuntar("OK" if ok else "FALLO", "M1b stick-verify",
             "cada pendrive conectado abre" if ok else salida.splitlines()[-1][:90])
@@ -176,7 +176,7 @@ def paso_panico() -> bool:
     return codigo == 0
 
 
-def paso_copia(carpeta: str) -> bool:
+def paso_copia(carpeta: str, gate: str = "usb") -> bool:
     destino = Path(carpeta)
     if not destino.exists():
         apuntar("FALTA", "M3 copia", f"no existe {destino}")
@@ -201,8 +201,14 @@ def paso_copia(carpeta: str) -> bool:
             f"{copiadas} fichero(s) a {destino}")
     proc = subprocess.run(
         [PY, str(REPO / "tools" / "backup_restore_probe.py"),
-         "--backup", str(destino)],
+         "--backup", str(destino), "--gate", gate],
         cwd=str(REPO), capture_output=True, text=True, timeout=300)
+    if proc.returncode == 2:
+        # el codigo 2 del simulacro es "no se puede comprobar sin el PIN":
+        # la copia no esta mal, falta la frase (D22)
+        apuntar("FALTA", "M3 simulacro de copia",
+                "la copia pide PIN: repite con --gate usb-pin y COFRE_PIN")
+        return True
     apuntar("OK" if proc.returncode == 0 else "FALLO", "M3 simulacro de copia",
             "la copia abre con el pendrive" if proc.returncode == 0
             else "la copia NO abre: no la des por buena")
@@ -214,6 +220,9 @@ def main(argv: list[str] | None = None) -> int:
     carpeta = "D:\\Cofre"
     if "--carpeta" in argv:
         carpeta = argv[argv.index("--carpeta") + 1]
+    gate = "usb"
+    if "--gate" in argv:
+        gate = argv[argv.index("--gate") + 1]
     sin_copia = "--comprobar" in argv
 
     print(f"COFRE - sesión fisica  ({datetime.now():%Y-%m-%d %H:%M})")
@@ -226,9 +235,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Falta E: (o su COFRE.KEY): sin el pendrive no se puede seguir.")
         return 1
     ok = paso_registro()
-    ok = paso_log_verify() and ok
+    ok = paso_log_verify(gate) and ok
     if estado_discos["F:"]["key"]:
-        ok = paso_reserva() and ok
+        ok = paso_reserva(gate) and ok
     else:
         apuntar("FALTA", "M1b stick-verify", "conecta F: para comprobarlo")
     paso_recordatorio()
@@ -236,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     if sin_copia:
         apuntar("SALTA", "M3 copia", "--comprobar: no se copia nada")
     else:
-        ok = paso_copia(carpeta) and ok
+        ok = paso_copia(carpeta, gate) and ok
 
     print("")
     fallos = [r for r in RESULTADOS if r[0] == "FALLO"]

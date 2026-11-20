@@ -1131,6 +1131,10 @@ def main(argv: list[str]) -> int:
     if args.command == "sesion":                     # no-tildes
         from cofre.sesion_fisica import main as sesion_main
         extra = ["--carpeta", args.carpeta] if args.carpeta else []
+        # D22: sin esto, `--gate usb-pin sesion` abria igualmente por la via
+        # `usb` y los pasos que abren el cofre salian en rojo sin motivo
+        # (2026-11-20)
+        extra += ["--gate", args.gate]
         if args.comprobar:
             extra.append("--comprobar")
         return sesion_main(extra)

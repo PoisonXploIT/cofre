@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, resolve_session_key
+from cofre.gate import GateUnavailable, read_pin, resolve_session_key
 from cofre.salt import get_salt
 from cofre.usb import StickNotRegistered, find_stick
 
@@ -45,6 +45,11 @@ def main() -> int:
     ap.add_argument("--backup", default=BACKUP_DEFAULT)
     ap.add_argument("--stick", default=r"E:\COFRE.KEY",
                     help="pendrive real que abre el cofre")
+    # D22: con la ranura del pendrive pidiendo PIN, el simulacro necesita el
+    # mismo gate y la misma frase que el cofre vivo (el PIN lo teclea el usuario
+    # en `COFRE_PIN` o en la pregunta; el agente no lo ve).
+    ap.add_argument("--gate", default="usb", choices=["usb", "usb-pin"],
+                    help="gate con el que se abre la copia (usb-pin si pide PIN)")
     args = ap.parse_args()
 
     backup = Path(args.backup)
@@ -115,9 +120,23 @@ def main() -> int:
               isinstance(mapa, dict) and bool(mapa), f"{sorted(mapa)}")
 
     # 2. el pendrive real abre la copia restaurada
+    pide_pin = any(s.get("kind") == "usb" and s.get("pin")
+                   for s in data.get("slots", []))
+    pin = ""
+    if args.gate == "usb-pin":
+        pin = read_pin()
+    if pide_pin and not pin and args.gate != "usb-pin":
+        # No es que la copia no abra: es que abrirla tiene dos factores y falta
+        # el segundo. Decir "la copia NO abre" mandaba a repetir la copia.
+        print("la copia pide PIN (dos factores). Repite con --gate usb-pin y "
+              "la frase en COFRE_PIN: sin ella el simulacro no se puede hacer.")
+        return 2
+    if args.gate == "usb-pin" and not pin:
+        print("falta el PIN: ponlo en COFRE_PIN (o teclealo) para el simulacro.")
+        return 2
     try:
-        session, serial = resolve_session_key("usb", str(work / "cofre.json"),
-                                             stick=args.stick)
+        session, serial = resolve_session_key(args.gate, str(work / "cofre.json"),
+                                             stick=args.stick, pin=pin)
         check("pendrive real abre la copia restaurada", True, f"serial {serial}")
     except GateUnavailable as exc:
         check("pendrive real abre la copia restaurada", False, str(exc)[:120])
@@ -127,7 +146,8 @@ def main() -> int:
     vault = Vault(work / "cofre.json")
     if es_v2:
         from cofre.gate import material_for
-        vault.bind_material(material_for("usb", str(work / "cofre.json"), stick=args.stick))
+        vault.bind_material(material_for(args.gate, str(work / "cofre.json"),
+                                        stick=args.stick, pin=pin))
     try:
         vault.unlock(session)
         check("envoltorio descifrado con la sal restaurada", True,
