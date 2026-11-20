@@ -8,6 +8,7 @@ pendrive se para con un mensaje claro y que no ejecuta el panico.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -95,6 +96,88 @@ class TestSinPendrive(unittest.TestCase):
         import inspect
         fuente = inspect.getsource(sesion_fisica.paso_panico)
         self.assertIn('"--dry-run"', fuente)
+
+
+class TestLaFrase(unittest.TestCase):
+    """2026-11-20 (cierre 1.0.0): la frase se pide UNA vez, en el padre, y viaja
+    solo en el entorno de cada hijo.
+
+    Antes habia que ponerla a mano (`set` en cmd, `$env:` en PowerShell): quedaba
+    en la ventana, la heredaba todo y cada hijo que la necesitaba se colgaba en
+    `getpass`.
+    """
+
+    DISCOS = {"E:": {"key": True, "mounted": True},
+              "F:": {"key": True, "mounted": True},
+              "D:": {"key": False, "mounted": True}}
+    FRASE = "frase de prueba"
+
+    class _Falso:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _correr(self, argv, stdin=None, entorno=None, discos=None):
+        """Ejecuta `main` con subprocess.run de mentira y la entrada simulada."""
+        import contextlib
+        import io
+        entornos = []
+
+        def falso_run(cmd, **kw):
+            entornos.append(kw.get("env"))
+            return self._Falso()
+
+        with (
+            mock.patch.object(sesion_fisica, "discos",
+                              return_value=discos or self.DISCOS),
+            mock.patch.object(sesion_fisica, "paso_registro", return_value=True),
+            mock.patch.object(sesion_fisica, "paso_recordatorio",
+                              return_value=True),
+            mock.patch.object(sesion_fisica.subprocess, "run",
+                              side_effect=falso_run),
+            mock.patch.dict(os.environ, entorno or {}),
+            mock.patch.object(sys, "stdin",
+                              io.StringIO(self.FRASE + chr(10) if stdin is None
+                                          else stdin)),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            codigo = sesion_fisica.main(argv)
+        return codigo, entornos
+
+    def test_la_frase_va_a_los_hijos_y_no_al_padre(self):
+        codigo, entornos = self._correr(["--gate", "usb-pin", "--comprobar"])
+        self.assertEqual(codigo, 0)
+        con_frase = [e for e in entornos if e and e.get("COFRE_PIN") == self.FRASE]
+        self.assertGreaterEqual(len(con_frase), 2,
+                                "la frase no llego a los pasos hijos")
+        self.assertNotIn("COFRE_PIN", os.environ,
+                         "la frase se quedo en el entorno del padre")
+
+    def test_con_cofre_agent_no_se_pide(self):
+        with mock.patch.object(sesion_fisica, "leer_frase",
+                               side_effect=AssertionError("no debe preguntar")):
+            codigo, entornos = self._correr(["--gate", "usb-pin", "--comprobar"],
+                                            entorno={"COFRE_AGENT": "1"})
+        self.assertEqual(codigo, 3)
+        self.assertEqual(entornos, [])
+
+    def test_sin_frase_no_sigue(self):
+        codigo, entornos = self._correr(["--gate", "usb-pin", "--comprobar"],
+                                        stdin=chr(10))
+        self.assertEqual(codigo, 3)
+        self.assertEqual(entornos, [])
+
+    def test_sin_gate_usb_pin_no_pregunta(self):
+        with mock.patch.object(sesion_fisica, "leer_frase",
+                               side_effect=AssertionError("no debe preguntar")):
+            # sin E: se para en el primer paso, pero antes no debe pedir nada
+            vacio = {"E:": {"key": False, "mounted": False},
+                     "F:": {"key": False, "mounted": False},
+                     "D:": {"key": True, "mounted": True}}
+            codigo, _entornos = self._correr(["--comprobar"], discos=vacio,
+                                             entorno={"COFRE_AGENT": "0"})
+        self.assertEqual(codigo, 1)
 
 
 if __name__ == "__main__":

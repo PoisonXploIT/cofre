@@ -1,5 +1,5 @@
 gui 263
-cli 354
+cli 355
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
 # 2026-11-18 cli de 279 a 298: comando scan nuevo (3.4): ayuda, salida, JSON, gancho y avisos
@@ -17,3 +17,4 @@ cli 354
 # 2026-11-19 cli de 339 a 340: A2: aviso del candado en cofre/serve.py (puente por puerto)
 # 2026-11-19 cli de 340 a 343: A2/M1: avisos del candado en serve y de la confirmacion del codigo antes de guardar
 # 2026-11-20 cli de 343 a 354: comando stick-pin (D22): ayuda, avisos del PIN y comprobaciones
+# 2026-11-20 cli de 354 a 355: sesion pide la frase una vez y los avisos de M1 y M9 tienen que decir que falta la frase, no que conectes el pendrive (cierre 1.0.0, 2026-11-20)

@@ -130,11 +130,12 @@ def main() -> int:
     if pide_pin and not pin and args.gate != "usb-pin":
         # No es que la copia no abra: es que abrirla tiene dos factores y falta
         # el segundo. Decir "la copia NO abre" mandaba a repetir la copia.
-        print("la copia pide PIN (dos factores). Repite con --gate usb-pin y "
-              "la frase en COFRE_PIN: sin ella el simulacro no se puede hacer.")
+        print("esta copia pide la frase del cofre (dos factores): usa "
+              "--gate usb-pin")
         return 2
     if args.gate == "usb-pin" and not pin:
-        print("falta el PIN: pon COFRE_PIN=frase en el entorno y repite.")
+        print("falta la frase del cofre o es incorrecta: la orden `sesión` la "
+              "pide una vez y se la pasa al hijo.")
         return 2
     try:
         session, serial = resolve_session_key(args.gate, str(work / "cofre.json"),
@@ -154,8 +155,13 @@ def main() -> int:
         vault.unlock(session)
         check("envoltorio descifrado con la sal restaurada", True,
               f"{len(vault.names())} entradas")
-    except Exception as exc:
-        check("envoltorio descifrado con la sal restaurada", False, str(exc))
+    except Exception as exc:                             # noqa: BLE001
+        detalle = str(exc)
+        if args.gate == "usb-pin" and "PIN incorrecto" in detalle:
+            # no es que la copia no abra: la frase no es esta
+            detalle = ("la frase del cofre no abre esta copia (o la llave no es "
+                       "la de este cofre)")
+        check("envoltorio descifrado con la sal restaurada", False, detalle)
         return 1
 
     # 3. escribir y leer en la copia

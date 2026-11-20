@@ -45,7 +45,8 @@ from pathlib import Path
 from cofre.audit import clear_key as audit_clear_key
 from cofre.audit import record, set_key as audit_set_key, tail
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, material_for, resolve_session_key, _salt_for
+from cofre.gate import (GateUnavailable, material_for, pide_pin,
+                       resolve_session_key, _salt_for)
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import atomic_write, audit_path, default_vault
 from cofre.usb import (KEY_FILENAME, StickNotFound, StickNotRegistered, key_drives,
@@ -1074,10 +1075,17 @@ def main(argv: list[str]) -> int:
             from cofre.audit import verify as verify_log
             # Un "OK" sin la llave no ha comprobado ninguna firma: eso enganaria.
             if vault.is_v2() and not clave_ligada():
-                pista = ("conecta el pendrive (o usa --stick)"
-                         if args.gate != "usb-pin" else
-                         "conecta el pendrive y comprueba el PIN (COFRE_PIN)")
-                print("FALLO  v2: sin la llave del cofre no se pueden comprobar las "
+                # La causa tiene que ser la de verdad: con E: puesto y la ranura
+                # pidiendo frase, "conecta el pendrive" sobra (2026-11-20).
+                if args.gate == "usb-pin":
+                    pista = ("falta la frase del cofre o no es correcta "
+                             "(COFRE_PIN; la orden `sesión` la pide una vez)")
+                elif pide_pin(str(vault_path)):
+                    pista = ("ese pendrive ya pide la frase del cofre: usa "
+                             "--gate usb-pin")
+                else:
+                    pista = "conecta el pendrive (o usa --stick)"
+                print("FALLO  v2: sin abrir el cofre no se pueden comprobar las "
                       f"firmas: {pista}.", file=sys.stderr)
                 return 1
             ok_legacy, txt_legacy = legacy_report(str(vault_path))
@@ -1948,7 +1956,12 @@ def main(argv: list[str]) -> int:
             return 1
         store = vault._v2store()
         if store.master is None:
-            print("no se pudo abrir el cofre", file=sys.stderr)
+            # con --gate usb-pin, lo que no cuadra es la frase (2026-11-20)
+            if args.gate == "usb-pin":
+                print("no se pudo abrir el cofre: falta la frase del cofre o no "
+                      "es correcta", file=sys.stderr)
+            else:
+                print("no se pudo abrir el cofre", file=sys.stderr)
             return 1
         from cofre import panic
         admin_nombre = args.admin or "CLOUDFLARE_TOKEN_ADMIN"

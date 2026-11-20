@@ -136,6 +136,22 @@ def material_for(mode: str, vault_path: str, stick: str | None = None,
         return {}
 
 
+def pide_pin(vault_path: str) -> bool:
+    """¿Alguna ranura de pendrive de este cofre exige la frase (D22)?
+
+    Sirve para que los avisos digan la causa real: si el pendrive esta puesto y
+    pide frase, "conecta el pendrive" manda a repetir un gesto inutil.
+    """
+    try:
+        import json
+        with open(vault_path, "r", encoding="utf-8") as fh:
+            datos = json.load(fh)
+    except Exception:
+        return False
+    return any(s.get("kind") == "usb" and s.get("pin")
+               for s in (datos.get("slots") or []))
+
+
 def read_pin(prompt: str = "PIN del cofre: ") -> str:
     """COFRE_PIN permite uso no interactivo (scripts, pruebas)."""
     env = os.environ.get("COFRE_PIN")
@@ -165,7 +181,10 @@ def resolve_session_key(mode: str, vault_path: str, nonce: bytes | None = None,
         if pin is None:
             pin = read_pin()
         if not pin:
-            raise GateUnavailable("usb-pin necesita un PIN: escribelo en el campo PIN y pulsa Reconectar")
+            # texto neutral: el mismo mensaje sale en la ventana (motivo de la
+            # capa de bloqueo) y en la consola. Pedir "pulsa Reconectar" en el
+            # CLI o "escribe en el campo" en la consola confundia (2026-11-20).
+            raise GateUnavailable("falta la frase del cofre (el PIN)")
         return usb_session_key(vault_path, pin=pin, stick=stick, allow_new=allow_new)
     if mode == "pin":
         return pin_session_key(read_pin(), _salt_for(vault_path)), None

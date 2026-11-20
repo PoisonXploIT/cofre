@@ -24,6 +24,7 @@ Sale 0 si lo obligatorio esta bien; 1 si algo que deberia funcionar no funciona.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -46,10 +47,35 @@ def apuntar(estado: str, nombre: str, detalle: str = "") -> None:
     print(f"{estado:<6} {nombre:<28} {detalle}")
 
 
-def cli(*args: str, timeout: int = 180) -> tuple[int, str]:
+def cli(*args: str, timeout: int = 180,
+        pin: str = "") -> tuple[int, str]:
+    """Lanza un comando del cofre. La frase va SOLO en el entorno del hijo.
+
+    Asi el hijo no se queda esperando en `getpass` (ya tiene COFRE_PIN) y la
+    frase del usuario no acaba en `os.environ` del padre ni la hereda nada mas
+    (2026-11-20, instruccion de cierre 1).
+    """
+    entorno = dict(os.environ)
+    if pin:
+        entorno["COFRE_PIN"] = pin
     proc = subprocess.run([PY, "-m", "cofre.cli", *args], cwd=str(REPO),
-                          capture_output=True, text=True, timeout=timeout)
+                          capture_output=True, text=True, timeout=timeout,
+                          env=entorno)
     return proc.returncode, ((proc.stdout or "") + (proc.stderr or "")).strip()
+
+
+def leer_frase(prompt: str = "Frase del cofre: ") -> str:
+    """La frase se pide aqui, una sola vez, en el proceso padre.
+
+    En una consola de verdad: `getpass`, no se ve al teclear. Si la entrada no
+    es una consola (tuberia, prueba) se lee la primera linea de stdin, porque
+    `getpass` en Windows se queda bloqueado esperando una consola real.
+    """
+    if sys.stdin.isatty():
+        from getpass import getpass
+        return getpass(prompt)
+    sys.stderr.write(prompt + "(por stdin)\n")
+    return sys.stdin.readline().rstrip("\n")
 
 
 def _letra(drive: str) -> str:
@@ -119,8 +145,8 @@ def paso_registro() -> bool:
     return ok
 
 
-def paso_log_verify(gate: str = "usb") -> bool:
-    codigo, salida = cli("log", "verify", "--gate", gate, timeout=240)
+def paso_log_verify(gate: str = "usb", pin: str = "") -> bool:
+    codigo, salida = cli("log", "verify", "--gate", gate, timeout=240, pin=pin)
     lineas = [ln for ln in salida.splitlines() if ln.strip()]
     fallos = [ln for ln in lineas if ln.strip().startswith("FALLO")]
     avisos = [ln for ln in lineas if "reancl" in ln.lower() or "aviso" in ln.lower()]
@@ -132,8 +158,8 @@ def paso_log_verify(gate: str = "usb") -> bool:
     return codigo == 0 and not fallos
 
 
-def paso_reserva(gate: str = "usb") -> bool:
-    codigo, salida = cli("stick-verify", "--gate", gate, timeout=180)
+def paso_reserva(gate: str = "usb", pin: str = "") -> bool:
+    codigo, salida = cli("stick-verify", "--gate", gate, timeout=180, pin=pin)
     ok = codigo == 0 and "NO abre" not in salida and "no abre" not in salida.lower()
     apuntar("OK" if ok else "FALLO", "M1b stick-verify",
             "cada pendrive conectado abre" if ok else salida.splitlines()[-1][:90])
@@ -167,16 +193,22 @@ def paso_recordatorio() -> bool:
     return lanzada
 
 
-def paso_panico() -> bool:
-    codigo, salida = cli("panic", "--dry-run", timeout=180)
+def paso_panico(gate: str = "usb", pin: str = "") -> bool:
+    codigo, salida = cli("panic", "--dry-run", "--gate", gate, timeout=180,
+                         pin=pin)
     acciones = [ln for ln in salida.splitlines()
                 if ln.strip().startswith("-") or "revocar" in ln.lower()]
-    apuntar("OK" if codigo == 0 else "FALLO", "M9 panic --dry-run",
-            f"plan leido, {len(acciones)} accion(es); no se ejecuto nada")
-    return codigo == 0
+    if codigo == 0:
+        apuntar("OK", "M9 panic --dry-run",
+                f"plan leido, {len(acciones)} accion(es); no se ejecuto nada")
+        return True
+    # si no abrio, no hay plan leido: decir "0 acciones" era mentir
+    motivo = (salida.splitlines() or ["sin salida"])[-1]
+    apuntar("FALLO", "M9 panic --dry-run", motivo[:90])
+    return False
 
 
-def paso_copia(carpeta: str, gate: str = "usb") -> bool:
+def paso_copia(carpeta: str, gate: str = "usb", pin: str = "") -> bool:
     destino = Path(carpeta)
     if not destino.exists():
         apuntar("FALTA", "M3 copia", f"no existe {destino}")
@@ -199,15 +231,18 @@ def paso_copia(carpeta: str, gate: str = "usb") -> bool:
         return False
     apuntar("OK" if copiadas else "FALLO", "M3 copia",
             f"{copiadas} fichero(s) a {destino}")
+    entorno = dict(os.environ)
+    if pin:
+        entorno["COFRE_PIN"] = pin
     proc = subprocess.run(
         [PY, str(REPO / "tools" / "backup_restore_probe.py"),
          "--backup", str(destino), "--gate", gate],
-        cwd=str(REPO), capture_output=True, text=True, timeout=300)
+        cwd=str(REPO), capture_output=True, text=True, timeout=300, env=entorno)
     if proc.returncode == 2:
-        # el codigo 2 del simulacro es "no se puede comprobar sin el PIN":
+        # el codigo 2 del simulacro es "no se puede comprobar sin la frase":
         # la copia no esta mal, falta la frase (D22)
         apuntar("FALTA", "M3 simulacro de copia",
-                "la copia pide PIN: repite con --gate usb-pin y COFRE_PIN")
+                "la copia pide la frase del cofre y no se paso")
         return True
     apuntar("OK" if proc.returncode == 0 else "FALLO", "M3 simulacro de copia",
             "la copia abre con el pendrive" if proc.returncode == 0
@@ -228,6 +263,24 @@ def main(argv: list[str] | None = None) -> int:
     print(f"COFRE - sesión fisica  ({datetime.now():%Y-%m-%d %H:%M})")
     print(f"cofre: {default_vault()}")
     print("")
+
+    # La frase se pide UNA vez, aqui, en el proceso padre. Cada paso hijo la
+    # recibe solo en su propio entorno (ver `cli`). Ni se toca `os.environ` del
+    # usuario ni la hereda nada mas. Con COFRE_AGENT=1 no se pide: un agente no
+    # puede teclearla, y un `getpass` a ciegas seria un cuelgue (2026-11-20).
+    pin = ""
+    if gate == "usb-pin":
+        from cofre.agent_guard import activo as es_agente
+        if es_agente():
+            print("COFRE_AGENT=1: la sesión con PIN la lanza el usuario en su "
+                  "consola; yo no puedo teclear la frase.", file=sys.stderr)
+            return 3
+        pin = leer_frase()
+        if not pin.strip():
+            print("falta la frase del cofre: sin ella no se pueden comprobar las "
+                  "firmas ni el simulacro.", file=sys.stderr)
+            return 3
+
     estado_discos = discos()
     obligatorio = paso_discos(estado_discos)
     if not obligatorio:
@@ -235,17 +288,17 @@ def main(argv: list[str] | None = None) -> int:
         print("Falta E: (o su COFRE.KEY): sin el pendrive no se puede seguir.")
         return 1
     ok = paso_registro()
-    ok = paso_log_verify(gate) and ok
+    ok = paso_log_verify(gate, pin) and ok
     if estado_discos["F:"]["key"]:
-        ok = paso_reserva(gate) and ok
+        ok = paso_reserva(gate, pin) and ok
     else:
         apuntar("FALTA", "M1b stick-verify", "conecta F: para comprobarlo")
     paso_recordatorio()
-    paso_panico()
+    paso_panico(gate, pin)
     if sin_copia:
         apuntar("SALTA", "M3 copia", "--comprobar: no se copia nada")
     else:
-        ok = paso_copia(carpeta, gate) and ok
+        ok = paso_copia(carpeta, gate, pin) and ok
 
     print("")
     fallos = [r for r in RESULTADOS if r[0] == "FALLO"]
