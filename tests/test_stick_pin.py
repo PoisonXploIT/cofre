@@ -19,6 +19,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -219,3 +220,77 @@ class TestLaVentanaConPin(unittest.TestCase):
         aviso = app.foot_var.get()
         self.assertIn("PIN", aviso)
         self.assertNotIn("Quita y vuelve a conectar", aviso)
+
+
+class TestMaterialForTomaLaFrase(unittest.TestCase):
+    """2026-11-21: `log verify`, `stick-verify` y `panic` se quedaban sin la frase.
+
+    La sesion se la pasaba al hijo en COFRE_PIN, pero esos comandos llamaban a
+    `material_for` sin frase y el material salia sin PIN: la ranura no abria y
+    el aviso culpaba a la llave.
+    """
+
+    def _material(self, modo, **kw):
+        from cofre import gate
+        with mock.patch.dict("os.environ", {"COFRE_PIN": "frase del entorno"}), \
+                mock.patch.object(gate, "read_pin",
+                                  return_value="frase del entorno") as lector, \
+                mock.patch("cofre.usb.find_stick",
+                           return_value=("X:\COFRE.KEY", 4242)), \
+                mock.patch("cofre.usb.read_key", return_value=b"k" * 32):
+            material = gate.material_for(modo, "c:/tmp/cofre.json", **kw)
+        return material, lector
+
+    def test_sin_frase_pasa_por_read_pin(self):
+        material, lector = self._material("usb-pin")
+        self.assertEqual(material["pin"], "frase del entorno")
+        lector.assert_called_once()
+
+    def test_si_le_pasan_frase_no_pregunta(self):
+        material, lector = self._material("usb-pin", pin="la que me dan")
+        self.assertEqual(material["pin"], "la que me dan")
+        lector.assert_not_called()
+
+    def test_gate_usb_no_pregunta_nada(self):
+        material, lector = self._material("usb")
+        self.assertEqual(material["pin"], "")
+        lector.assert_not_called()
+
+
+class TestStickVerifyConPin(Base):
+    """`stick-verify --gate usb-pin` prueba llave + frase, no la llave sola."""
+
+    PIN = "frase de seis palabras"
+
+    def setUp(self):
+        super().setUp()
+        from cofre.usb import register_stick
+        keys.poner_pin(self.v2, self.abrir(), self.master, 4242, self.llave,
+                       self.PIN)
+        self.fichero = self.tmp / "COFRE.KEY"
+        self.fichero.write_bytes(self.llave)
+        register_stick(str(self.vault_path), 4242, "X:\\")
+
+    def _verificar(self, frase):
+        import contextlib
+        import io
+        from cofre import cli
+        salida = io.StringIO()
+        with mock.patch.object(cli, "keys_to_try",
+                               return_value=[str(self.fichero)]), \
+                mock.patch.object(cli, "volume_serial", return_value=4242), \
+                mock.patch.object(cli, "_drive_of", return_value="X:\\"), \
+                mock.patch.object(cli, "read_pin", return_value=frase), \
+                contextlib.redirect_stdout(salida):
+            codigo = cli.cmd_stick_verify(str(self.vault_path), "usb-pin")
+        return codigo, salida.getvalue()
+
+    def test_con_la_frase_buena_la_llave_sirve(self):
+        codigo, texto = self._verificar(self.PIN)
+        self.assertEqual(codigo, 0, texto)
+        self.assertIn("abre el cofre", texto)
+
+    def test_con_la_frase_mala_la_llave_no_sirve(self):
+        codigo, texto = self._verificar("otra cosa")
+        self.assertEqual(codigo, 1, texto)
+        self.assertIn("NO abre el cofre", texto)

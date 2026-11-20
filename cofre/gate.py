@@ -125,6 +125,12 @@ def material_for(mode: str, vault_path: str, stick: str | None = None,
 
     if mode not in ("usb", "usb-pin"):
         return {}
+    if mode == "usb-pin" and pin is None:
+        # El CLI no pasa la frase: se toma de COFRE_PIN (o se pregunta una vez).
+        # Sin esto, `log verify`, `panic` y el resto de comandos que abren el
+        # cofre se quedaban sin la frase aunque el usuario la hubiera dado
+        # (2026-11-21: la sesion se la pasaba al hijo y el hijo no la usaba).
+        pin = read_pin()
     try:
         path, serial = find_stick([stick] if stick else None, vault_path, allow_new)
     except Exception:

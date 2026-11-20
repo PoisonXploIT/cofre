@@ -1,5 +1,5 @@
 gui 263
-cli 355
+cli 357
 # 2026-11-18 cli de 266 a 279: --version/version en el CLI, --recovery y el arreglo
 # de check en v2. Son textos de consola (lista blanca), pero el tope ya no sube solo.
 # 2026-11-18 cli de 279 a 298: comando scan nuevo (3.4): ayuda, salida, JSON, gancho y avisos
@@ -18,3 +18,4 @@ cli 355
 # 2026-11-19 cli de 340 a 343: A2/M1: avisos del candado en serve y de la confirmacion del codigo antes de guardar
 # 2026-11-20 cli de 343 a 354: comando stick-pin (D22): ayuda, avisos del PIN y comprobaciones
 # 2026-11-20 cli de 354 a 355: sesion pide la frase una vez y los avisos de M1 y M9 tienen que decir que falta la frase, no que conectes el pendrive (cierre 1.0.0, 2026-11-20)
+# 2026-11-21 cli de 355 a 357: stick-verify y panic con --gate usb-pin: avisos de que falta la frase (o no es correcta) en vez de culpar a la llave o escupir el traceback del SlotError (2026-11-21)

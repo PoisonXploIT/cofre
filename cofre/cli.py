@@ -45,7 +45,7 @@ from pathlib import Path
 from cofre.audit import clear_key as audit_clear_key
 from cofre.audit import record, set_key as audit_set_key, tail
 from cofre.crypto import Vault
-from cofre.gate import (GateUnavailable, material_for, pide_pin,
+from cofre.gate import (GateUnavailable, material_for, pide_pin, read_pin,
                        resolve_session_key, _salt_for)
 from cofre.gen import entropy, human_password, machine_password
 from cofre.paths import atomic_write, audit_path, default_vault
@@ -362,9 +362,15 @@ def cmd_stick_list(vault: str) -> int:
     return 0
 
 
-def cmd_stick_verify(vault_path: str) -> int:
+def cmd_stick_verify(vault_path: str, gate: str = "usb") -> int:
     """Probar todas las llaves conectadas (R2): cada pendrive autorizado que
-    este puesto tiene que abrir de verdad el cofre."""
+    este puesto tiene que abrir de verdad el cofre.
+
+    Con `--gate usb-pin` se prueba llave + frase, que es como se abre desde D22:
+    sin la frase las dos llaves salian "inservibles" aunque fuesen buenas
+    (2026-11-21).
+    """
+    pin = read_pin() if gate == "usb-pin" else ""
 
     vault = Vault(Path(vault_path))
     if not vault.is_v2() and not vault.load().get("wrapper"):
@@ -389,7 +395,7 @@ def cmd_stick_verify(vault_path: str) -> int:
             key = read_key(path)
             if vault.is_v2():
                 from cofre.v2.slots import open_with_stick
-                open_with_stick(vault.load(), key, serial)
+                open_with_stick(vault.load(), key, serial, pin)
             else:
                 vault.unlock(usb_session_key(path, _salt_for(vault_path)))
             print(f"OK     {etiqueta}: abre el cofre")
@@ -1954,7 +1960,16 @@ def main(argv: list[str]) -> int:
         if not vault.is_v2():
             print("el pánico necesita un cofre v2", file=sys.stderr)
             return 1
-        store = vault._v2store()
+        try:
+            store = vault._v2store()
+        except Exception as exc:                         # noqa: BLE001
+            # antes salia un traceback de SlotError (2026-11-21)
+            if args.gate == "usb-pin":
+                print("no se pudo abrir el cofre: falta la frase del cofre o no "
+                      "es correcta", file=sys.stderr)
+            else:
+                print(f"no se pudo abrir el cofre: {exc}", file=sys.stderr)
+            return 1
         if store.master is None:
             # con --gate usb-pin, lo que no cuadra es la frase (2026-11-20)
             if args.gate == "usb-pin":
@@ -2074,7 +2089,7 @@ def main(argv: list[str]) -> int:
         return cmd_stick_list(str(vault_path))
 
     if args.command == "stick-verify":
-        return cmd_stick_verify(str(vault_path))
+        return cmd_stick_verify(str(vault_path), args.gate)
 
     if args.command == "migrate":
         from cofre.hosts import load as load_hosts
