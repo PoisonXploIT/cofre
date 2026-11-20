@@ -246,8 +246,16 @@ def image_path_of(pid: int) -> str:
 
 
 def _same_path(a: str, b: str) -> bool:
+    """Mismo programa: tambien vale un venv respecto de su interprete base.
+
+    `pyvenv.cfg` dice cual es el interprete real, y eso es lo que informa
+    Windows para el proceso; sin esto el host rechazaba a la propia GUI del
+    proyecto (2026-11-20).
+    """
     try:
-        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+        from cofre.paths import rutas_del_ejecutable
+
+        return os.path.normcase(os.path.realpath(a)) in rutas_del_ejecutable(b)
     except Exception:
         return False
 

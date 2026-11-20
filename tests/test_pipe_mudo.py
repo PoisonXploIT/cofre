@@ -92,5 +92,28 @@ class TestClientesMudos(unittest.TestCase):
         kernel32.CloseHandle(handle)
 
 
+class TestReconocerElPropioPython(unittest.TestCase):
+    """2026-11-20: la tuberia rechazaba a su propio python.
+
+    Con un venv de Windows el proceso informa de la ruta del interprete base, no
+    la de `.venv\Scripts\python.exe`; comparar rutas a pelo hacia que el cliente
+    legitimo se quedara sin respuesta (y la prueba de la peticion normal en
+    rojo). Se acepta el propio python y se sigue rechazando lo ajeno.
+    """
+
+    def test_la_imagen_que_informa_windows_es_el_propio_python(self):
+        from cofre.pipe_server import process_image, rutas_del_programa
+        imagen = process_image(os.getpid())
+        self.assertTrue(imagen)
+        self.assertIn(os.path.normcase(os.path.realpath(imagen)),
+                      rutas_del_programa(sys.executable))
+
+    def test_un_programa_ajeno_no_cuela(self):
+        from cofre.pipe_server import rutas_del_programa
+        ajeno = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "notepad.exe"
+        self.assertNotIn(os.path.normcase(os.path.realpath(str(ajeno))),
+                         rutas_del_programa(sys.executable))
+
+
 if __name__ == "__main__":
     unittest.main()

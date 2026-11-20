@@ -919,13 +919,23 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
             self.session = None
             self._pill_texto = "Cerrado"
             self.set_status("Cerrado", warn=True)
-            self.set_foot("conecta un pendrive del cofre y pulsa Reconectar", ttl=0)
+            # El aviso tiene que decir la causa real. Con `usb-pin` y el campo
+            # vacio, el problema no es el pendrive (esta puesto) sino que falta
+            # la frase: mandar a "conectar un pendrive" hacia que el usuario
+            # pulsara Reconectar en bucle sin cambiar nada (2026-11-20).
+            if self.gate == "usb-pin" and not self.pin_var.get().strip():
+                aviso = "falta el PIN: escribelo en el campo PIN y pulsa Abrir"
+            else:
+                aviso = "conecta un pendrive del cofre y pulsa Reconectar"
+            self.set_foot(aviso, ttl=0)
             record(self.vault_path, "gui-gate", self.gate, None, ok=False, detail=str(exc))
             self.refresh_sticks()
             self.refresh_wizard()
             self.refresh_list()
             if getattr(self, "lock_screen", None):
                 self.lock_screen.mostrar(str(exc) or "no se encuentra la llave")
+                if self.gate == "usb-pin" and not self.pin_var.get().strip():
+                    self.lock_screen.focus_pin()
             return False
 
         if not self._bind_material():
@@ -937,7 +947,13 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
             self.set_status(msg("comun.cerrado"), warn=True)
             message = ("el pendrive responde, pero el cofre no se abre con su llave. "
                        "Quita y vuelve a conectar el pendrive y pulsa Reconectar.")
-            if self.gate != "usb-pin":
+            if self.gate == "usb-pin":
+                # con usb-pin el pendrive se ha leido bien: lo que no cuadra es
+                # la frase. Decir "vuelve a conectar el pendrive" mandaba a
+                # repetir el mismo gesto y a sospechar del USB (2026-11-20).
+                message = ("el PIN no abre este pendrive. Repasa la frase (espacios "
+                           "y minusculas tal cual) y pulsa Abrir otra vez.")
+            elif self.gate != "usb-pin":
                 # el caso más probable: la ranura ya pide PIN y la ventana se abrió
                 # sin --gate usb-pin (pasó el 2026-11-20)
                 try:
@@ -1579,7 +1595,19 @@ def main(argv: list[str] | None = None) -> int:
     if "--selftest" in argv:
         app.root.update_idletasks()
         app.root.update()
-        print("gui construida sin error; entradas:", len(app.vault.names()))
+        # Con la ranura del pendrive pidiendo PIN (D22), esta comprobacion no
+        # puede abrir el cofre: antes llamaba a `vault.names()` igual y el
+        # selftest petaba con SlotError aunque la ventana estuviera bien
+        # construida, que es lo unico que mira (2026-11-20).
+        if app.session:
+            try:
+                print("gui construida sin error; entradas:",
+                      len(app.vault.names()))
+            except Exception as exc:                     # noqa: BLE001
+                print("gui construida sin error; no se pudo leer el indice:",
+                      type(exc).__name__)
+        else:
+            print("gui construida sin error; cofre cerrado:", app.foot_var.get())
         print("geometria:", app.root.winfo_geometry())
         print(f"dpi: modo={dpi['mode']} {dpi['dpi']} ppp, tk scaling={dpi['scaling']:.3f}")
         from cofre.gen import entropy as _ent

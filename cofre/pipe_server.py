@@ -143,6 +143,16 @@ def process_image(pid: int) -> str:
         kernel32.CloseHandle(handle)
 
 
+def rutas_del_programa(exe: str) -> set[str]:
+    """Ver `cofre.paths.rutas_del_ejecutable`: venv y interprete base son el
+    mismo programa. Vive alli porque el ayudante de la tuberia (`nmhost`)
+    necesita exactamente la misma cuenta.
+    """
+    from cofre.paths import rutas_del_ejecutable
+
+    return rutas_del_ejecutable(exe)
+
+
 def security_descriptor(sid: str):
     """D:P(A;;GA;;;<sid>) — solo ese usuario, y sin acceso remoto.
 
@@ -295,8 +305,8 @@ class PipeServer:
             return False, "no se pudo identificar al cliente"
         image = process_image(int(pid.value))
         if self.expected_client_exe:
-            if os.path.normcase(os.path.realpath(image)) != os.path.normcase(
-                    os.path.realpath(self.expected_client_exe)):
+            if os.path.normcase(os.path.realpath(image)) not in rutas_del_programa(
+                    self.expected_client_exe):
                 return False, f"cliente inesperado: {image or 'desconocido'}"
         sid = process_sid(int(pid.value))
         if not sid or sid != (self._sid or process_sid(os.getpid())):

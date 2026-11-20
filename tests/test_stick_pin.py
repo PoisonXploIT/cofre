@@ -168,3 +168,54 @@ class TestLaVentanaConPin(unittest.TestCase):
         self.root.update()
         self.assertIsNone(app.session)
         self.assertIn("pide PIN", app.foot_var.get())
+
+    # --- 2026-11-20 (tarde): el PIN se teclea en la pantalla de bloqueo, pero
+    # nadie lo leia de ahi. Se rellenaba `pin_var` solo desde el panel de la
+    # derecha, tapado por la capa de bloqueo, asi que Abrir y Reconectar usaban
+    # un PIN vacio y el cofre contestaba siempre lo mismo: "escribe el PIN".
+
+    def test_reconectar_lee_el_pin_del_campo(self):
+        app = self._app()
+        app.lock_screen.pin_field.set(self.pin)
+        app.lock_screen.b_reconectar.invoke()
+        self.root.update()
+        self.assertTrue(app.session, app.foot_var.get())
+
+    def test_abrir_lee_el_pin_del_campo(self):
+        app = self._app()
+        app.lock_screen.pin_field.set(self.pin)
+        app.lock_screen.b_abrir.invoke()
+        self.root.update()
+        self.assertTrue(app.session, app.foot_var.get())
+
+    def test_enter_en_el_campo_pin_abre(self):
+        # No se puede simular la tecla: en Windows el evento de teclado va a la
+        # ventana con el foco y este proceso no lo tiene (se comprobo: el
+        # `event_generate` de Return acaba en el root, no en el Entry). Se
+        # comprueba el cableado y que el mismo camino abre con el PIN puesto.
+        app = self._app()
+        app.lock_screen.pin_field.set(self.pin)
+        self.assertTrue(app.lock_screen.pin_field.entry.bind("<Return>"),
+                        "Enter en el campo PIN no hace nada")
+        app.lock_screen._abrir()
+        self.root.update()
+        self.assertTrue(app.session, app.foot_var.get())
+
+    def test_sin_pin_el_aviso_habla_del_pin_y_no_del_pendrive(self):
+        app = self._app()
+        app.unlock()
+        self.root.update()
+        self.assertIsNone(app.session)
+        aviso = app.foot_var.get()
+        self.assertIn("PIN", aviso)
+        self.assertNotIn("conecta un pendrive", aviso)
+
+    def test_pin_malo_el_aviso_no_culpa_al_pendrive(self):
+        app = self._app()
+        app.lock_screen.pin_field.set("otra cosa")
+        app.lock_screen.b_abrir.invoke()
+        self.root.update()
+        self.assertIsNone(app.session)
+        aviso = app.foot_var.get()
+        self.assertIn("PIN", aviso)
+        self.assertNotIn("Quita y vuelve a conectar", aviso)

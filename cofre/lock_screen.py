@@ -68,6 +68,11 @@ class LockScreen(tk.Frame):
         self.pin_field = W.Field(self.pin_box, placeholder="PIN del cofre",
                                  show="*", width=320, bg=C["bg"])
         self.pin_field.pack(anchor="w")
+        # Enter en el campo del PIN abre. El <Return> del marco no llega aqui
+        # (un Entry no tiene al marco en sus bindtags) y el Enter de la ventana
+        # se ignora en los campos de texto: sin esto, teclear la frase y pulsar
+        # Enter no hacia nada (2026-11-20).
+        self.pin_field.entry.bind("<Return>", lambda _e: self._abrir())
 
         acciones = tk.Frame(centro, bg=C["bg"])
         acciones.pack(fill="x", pady=(SPACE["xl"], 0))
@@ -102,12 +107,29 @@ class LockScreen(tk.Frame):
     def _icon_family(self) -> str:
         return "Segoe Fluent Icons"
 
-    def _abrir(self):
-        if getattr(self.app, "pin_field", None) is not None:
+    def _volcar_pin(self) -> None:
+        """Pasa el PIN tecleado en esta capa a la app antes de intentar abrir.
+
+        El campo del panel de la derecha queda tapado por la capa de bloqueo, asi
+        que el PIN que el usuario escribe es el de aqui. Sin este paso, `Abrir` y
+        `Reconectar` mandaban un PIN vacio y la respuesta era siempre la misma
+        ("escribe el PIN en el campo PIN"), aunque estuviera escrito: parece que
+        los botones no hacen caso (paso el 2026-11-20).
+        """
+        if getattr(self.app, "gate", None) == "usb-pin":
             self.app.pin_var.set(self.pin_field.get())
+
+    def focus_pin(self) -> None:
+        """Deja el cursor en el PIN: es lo unico que falta para abrir."""
+        if self.pin_box.winfo_manager():
+            self.pin_field.focus()
+
+    def _abrir(self):
+        self._volcar_pin()
         self.app.unlock()
 
     def _reconectar(self):
+        self._volcar_pin()
         self.app.refresh_sticks()
         self.app.refresh_wizard()
         self.app.set_foot("buscando el pendrive otra vez...")

@@ -88,6 +88,39 @@ def old_log_path(log: str | Path) -> Path:
     return p.with_name(p.name + ".old")
 
 
+def rutas_del_ejecutable(exe: str) -> set[str]:
+    """Rutas con las que Windows puede identificar ese ejecutable.
+
+    Un venv de Windows copia el lanzador: al arrancar, el proceso informa de la
+    ruta del **interprete base** (`pyvenv.cfg` la declara en `home` y
+    `executable`), no de `.venv\\Scripts\\python.exe`. Comparando solo la ruta del
+    venv se rechazaba al propio python del proyecto: la tuberia contestaba
+    "cliente inesperado" y el ayudante del navegador, "servidor no fiable"
+    (paso el 2026-11-20 con la sonda `pipe` y las pruebas de la tuberia).
+
+    Se devuelve la ruta pedida y, si hay `pyvenv.cfg`, el interprete que declara.
+    Nada mas: la comprobacion sigue siendo por programa concreto.
+    """
+    rutas = {os.path.normcase(os.path.realpath(exe))}
+    cfg = Path(exe).parent.parent / "pyvenv.cfg"
+    try:
+        texto = cfg.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return rutas
+    for linea in texto.splitlines():
+        clave, _, valor = linea.partition("=")
+        if clave.strip().lower() not in ("executable", "home"):
+            continue
+        valor = valor.strip().strip('"')
+        if not valor:
+            continue
+        candidato = Path(valor)
+        if candidato.is_dir():
+            candidato = candidato / Path(exe).name
+        rutas.add(os.path.normcase(os.path.realpath(str(candidato))))
+    return rutas
+
+
 AUDIT_NAME = ".cofre-audit.jsonl"
 LEGACY_LOG_NAME = ".cofre-access.log"
 
