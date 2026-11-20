@@ -32,10 +32,12 @@ class LockScreen(tk.Frame):
     # ------------------------------------------------------------ dibujo
 
     def _construir(self) -> None:
-        centro = tk.Frame(self, bg=C["bg"], width=420)
-        centro.place(relx=0.5, rely=0.46, anchor="center")
-        centro.pack_propagate(False)
-        centro.configure(height=430)
+        # Sin altura fija: con `usb-pin` el campo PIN y el aviso empujan el
+        # contenido y, con el height=430 de antes, se cortaba por abajo (el campo
+        # PIN y el boton quedaban fuera del marco). Ahora el marco mide lo que
+        # mide su contenido y se centra en la capa.
+        centro = tk.Frame(self, bg=C["bg"], width=460)
+        centro.place(relx=0.5, rely=0.5, anchor="center")
 
         tk.Label(centro, text=GLIFO_CANDADO, fg=C["accent"], bg=C["bg"],
                  font=(self._icon_family(), 46)).pack()
@@ -69,6 +71,10 @@ class LockScreen(tk.Frame):
 
         acciones = tk.Frame(centro, bg=C["bg"])
         acciones.pack(fill="x", pady=(SPACE["xl"], 0))
+        # el PIN va justo debajo de las llaves y ANTES de los botones; antes se
+        # empaquetaba al final (despues del texto de recuperacion) y quedaba
+        # abajo del todo, cortado y sin poder confirmar (2026-11-20)
+        self.acciones = acciones
         self.b_abrir = W.Button(acciones, "Abrir el cofre", kind="primary",
                                 command=self._abrir, bg=C["bg"])
         self.b_abrir.pack(side="left")
@@ -144,7 +150,8 @@ class LockScreen(tk.Frame):
                          font=self._font("label")).pack(side="left")
         if self.app.gate == "usb-pin":
             if not self.pin_box.winfo_ismapped():
-                self.pin_box.pack(fill="x", pady=(SPACE["md"], 0))
+                self.pin_box.pack(fill="x", pady=(SPACE["md"], 0),
+                                  before=self.acciones)
         elif self.pin_box.winfo_ismapped():
             self.pin_box.pack_forget()
         if self.b_abrir._estado != ("normal" if filas else "disabled"):

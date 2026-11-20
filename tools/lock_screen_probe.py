@@ -63,6 +63,32 @@ def main() -> int:
           f"sesión={'si' if app.session else 'no'} mapeada={capa.winfo_ismapped()} "
           f"pie={app.foot_var.get()[:70]!r}")
 
+    # 9-pre. con usb-pin, el campo PIN y el boton tienen que caber (2026-11-20:
+    # el marco tenia altura fija 430 y el PIN se cortaba por abajo)
+    app.lock()
+    app.root.update()
+    anterior = app.gate
+    app.gate = "usb-pin"
+    capa.refrescar()
+    app.root.update()
+    centro = capa.winfo_children()[0]
+    alto = centro.winfo_height()
+    fondo_pin = (capa.pin_box.winfo_rooty() + capa.pin_box.winfo_height()
+                 - centro.winfo_rooty())
+    fondo_boton = (capa.b_abrir.winfo_rooty() + capa.b_abrir.winfo_height()
+                   - centro.winfo_rooty())
+    # el PIN tiene que ir ANTES de los botones y caber en el panel: el 2026-11-20
+    # se empaquetaba al final, despues del texto de recuperacion, y se cortaba
+    y_pin = capa.pin_box.winfo_rooty() - centro.winfo_rooty()
+    y_boton = capa.b_abrir.winfo_rooty() - centro.winfo_rooty()
+    check("9a. con usb-pin el PIN cabe y va antes que los botones",
+          capa.pin_box.winfo_ismapped() and fondo_pin <= alto
+          and fondo_boton <= alto and y_pin < y_boton,
+          f"panel={alto} pin_y={y_pin} boton_y={y_boton} fondo_pin={fondo_pin}")
+    app.gate = anterior
+    capa.refrescar()
+    app.root.update()
+
     # 9. el sondeo no repinta si nada cambia (2026-11-18: titileo al abrir)
     app.lock(motivo="bloqueado para probar el titileo")
     app.root.update()
