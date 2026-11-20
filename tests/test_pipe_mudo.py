@@ -96,7 +96,7 @@ class TestReconocerElPropioPython(unittest.TestCase):
     """2026-11-20: la tuberia rechazaba a su propio python.
 
     Con un venv de Windows el proceso informa de la ruta del interprete base, no
-    la de `.venv\Scripts\python.exe`; comparar rutas a pelo hacia que el cliente
+    la de `.venv/Scripts/python.exe`; comparar rutas a pelo hacia que el cliente
     legitimo se quedara sin respuesta (y la prueba de la peticion normal en
     rojo). Se acepta el propio python y se sigue rechazando lo ajeno.
     """
