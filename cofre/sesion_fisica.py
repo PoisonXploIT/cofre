@@ -169,8 +169,11 @@ def paso_reserva(gate: str = "usb", pin: str = "") -> bool:
 def paso_recordatorio() -> bool:
     """Lanza la tarea programada y comprueba con el calendario, no con la ventana."""
     try:
+        # schtasks contesta en la pagina de codigos de Windows (cp850 en espanol),
+        # no en UTF-8: leerlo con text=True mataba el hilo lector y llenaba la
+        # salida de un UnicodeDecodeError en mitad de la sesion (2026-11-21).
         proc = subprocess.run(["schtasks", "/run", "/tn", "COFRE recordatorio"],
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, timeout=60)
         lanzada = proc.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         lanzada = False
