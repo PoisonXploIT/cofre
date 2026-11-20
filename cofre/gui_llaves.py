@@ -401,6 +401,8 @@ class LlavesGUI:
 
         self._btn(cab, msg("llaves.probar"),
                   lambda e: self._probar_codigo()).pack(side="right", padx=6)
+        self._btn(cab, msg("llaves.pin"),
+                  lambda e: self._poner_pin_gui()).pack(side="right")
         tk.Label(win, text=msg("llaves.intro"),
                  fg=MUT, bg=PANEL, font=self.f_small, anchor="w",
                  wraplength=720, justify="left").pack(fill="x", padx=14)
@@ -418,6 +420,71 @@ class LlavesGUI:
                  fg=FAINT, bg=PANEL, font=self.f_small, anchor="w",
                  wraplength=720, justify="left").pack(fill="x", padx=14)
         self._btn(win, msg("comun.cerrar"), win.destroy).pack(pady=(8, 12))
+
+    def _poner_pin_gui(self) -> None:
+        """D22: pasar el pendrive actual a llave + PIN, desde la ventana."""
+        if not self.session or not self.vault.is_v2():
+            self.set_foot(msg("comun.abre_cofre", accion="cambiar el PIN"))
+            return
+        material = getattr(self.vault, "_material", {}) or {}
+        llave = material.get("stick_key")
+        serial = material.get("serial") or self.serial
+        if not llave or not serial:
+            self.set_foot(msg("llaves.pin_sin_llave"))
+            return
+        win = self._sheet(msg("llaves.pin_titulo"))
+        win.geometry("640x320")
+        tk.Label(win, text=msg("llaves.pin_intro"), fg=FG, bg=PANEL,
+                 font=self.f_body, anchor="w", wraplength=600,
+                 justify="left").pack(fill="x", padx=18, pady=(16, 8))
+        fila1 = tk.Frame(win, bg=PANEL)
+        fila1.pack(fill="x", padx=18, pady=4)
+        tk.Label(fila1, text=msg("llaves.pin_campo"), fg=MUT, bg=PANEL, width=12,
+                 font=self.f_small, anchor="w").pack(side="left")
+        campo = tk.Entry(fila1, show="*", bg=CAMPO, fg=FG, relief="flat",
+                         highlightthickness=1, highlightbackground=LINE,
+                         insertbackground=FG, font=self.f_mono, width=40)
+        campo.pack(side="left")
+        fila2 = tk.Frame(win, bg=PANEL)
+        fila2.pack(fill="x", padx=18, pady=4)
+        tk.Label(fila2, text=msg("llaves.pin_repite"), fg=MUT, bg=PANEL, width=12,
+                 font=self.f_small, anchor="w").pack(side="left")
+        campo2 = tk.Entry(fila2, show="*", bg=CAMPO, fg=FG, relief="flat",
+                          highlightthickness=1, highlightbackground=LINE,
+                          insertbackground=FG, font=self.f_mono, width=40)
+        campo2.pack(side="left")
+        aviso = tk.Label(win, text="", fg=WARN, bg=PANEL, font=self.f_small,
+                         anchor="w", wraplength=600, justify="left")
+        aviso.pack(fill="x", padx=18, pady=(6, 0))
+
+        def guardar(event=None) -> None:
+            pin, repetido = campo.get(), campo2.get()
+            if pin != repetido:
+                aviso.configure(text=msg("llaves.pin_no_coinciden"))
+                return
+            if len(pin) < 12:
+                aviso.configure(text=msg("llaves.pin_corto"))
+                return
+            try:
+                from cofre import keys as keys_mod
+                store = self.vault._v2store()
+                keys_mod.poner_pin(store._vault, store._data, store.master,
+                                   int(serial), llave, pin)
+                store.refresh()
+            except Exception as exc:               # noqa: BLE001
+                aviso.configure(text=str(exc))
+                return
+            record(self.vault_path, "gate-explicit", self.gate, int(serial), ok=True,
+                   detail=f"ranura con PIN (serial {serial})")
+            win.destroy()
+            self.set_foot(msg("llaves.pin_hecho"))
+
+        fila = tk.Frame(win, bg=PANEL)
+        fila.pack(fill="x", padx=18, pady=14)
+        self._btn(fila, msg("comun.cancelar"), win.destroy).pack(side="right")
+        self._btn(fila, msg("comun.guardar"), guardar, accent=True).pack(
+            side="right", padx=8)
+        campo.focus_set()
 
     def _llaves_datos(self) -> list[dict]:
         if not self.vault.is_v2():

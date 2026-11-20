@@ -308,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
     with_common(sub.add_parser("salt", help="mostrar la sal y donde esta guardada (H9)"))
     mg = with_common(sub.add_parser("migrate", help="pasar el cofre v1 al formato v2"))
     mg.add_argument("--dry-run", action="store_true", help="decir que haria, sin escribir")
+    sp2 = with_common(sub.add_parser(
+        "stick-pin", help="pasar el pendrive a llave + PIN (D22)"))
+    sp2.add_argument("--serial", type=int, default=0,
+                     help="serial del pendrive (por defecto, el de la llave conectada)")
+
     sa = with_common(sub.add_parser("stick-add-v2",
                                     help="dar llave nueva a un pendrive y anadir su ranura (D11)"))
     sa.add_argument("path", help=r"ruta del COFRE.KEY nuevo, p. ej. F:\COFRE.KEY.nuevo")
@@ -2086,6 +2091,52 @@ def main(argv: list[str]) -> int:
         print("CODIGO DE RECUPERACION (se muestra UNA sola vez, apuntalo en papel):")
         print("  " + res["código"])
         record(str(path), "migrate", args.gate, serial, name=f"{len(res['entradas'])} secretos", ok=True)
+        return 0
+
+    if args.command == "stick-pin":
+        from cofre import keys as keys_mod
+        from cofre.v2.slots import open_with_stick
+        from cofre.v2.vault import VaultV2
+        path = Path(vault_path)
+        raw = VaultV2(path).load()
+        if not VaultV2.is_v2(raw):
+            print("el cofre no esta en v2", file=sys.stderr)
+            return 1
+        try:
+            src, serial_llave = find_stick([args.stick] if args.stick else None,
+                                           str(path))
+            llave = read_key(src)
+        except Exception as exc:                   # noqa: BLE001
+            print(f"no se encontró la llave del pendrive: {exc}", file=sys.stderr)
+            return 1
+        serial = args.serial or int(serial_llave)
+        try:
+            master, _slot = open_with_stick(raw, llave, serial)
+        except Exception as exc:                   # noqa: BLE001
+            print(f"no se pudo abrir el cofre con esa llave: {exc}", file=sys.stderr)
+            return 1
+        print("PIN nuevo: una frase de 5-6 palabras al azar. No se muestra al "
+              "teclearlo.")
+        pin = read_secret("PIN: ")
+        repetido = read_secret("repite el PIN: ")
+        if pin != repetido:
+            print("los dos PIN no coinciden: no se ha tocado nada", file=sys.stderr)
+            return 1
+        if len(pin) < 12:
+            print("PIN demasiado corto: usa al menos 12 caracteres (lo recomendado "
+                  "son 5-6 palabras al azar)", file=sys.stderr)
+            return 1
+        try:
+            _datos, detalle = keys_mod.poner_pin(VaultV2(path), raw, master, serial,
+                                                 llave, pin)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        record(str(vault_path), "gate-explicit", args.gate, serial, ok=True,
+               detail=f"ranura con PIN (serial {serial})")
+        print(detalle)
+        print("Ahora el pendrive NO abre solo: hace falta el PIN. Para la ventana, "
+              "abre COFRE con --gate usb-pin.")
         return 0
 
     if args.command == "stick-add-v2":

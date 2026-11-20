@@ -135,3 +135,59 @@ def quitar_pendrive(v2, data: dict, serial: int) -> tuple[dict, bool]:
         raise ValueError("no quedaria ninguna llave para abrir el cofre")
     v2.save(nuevo)
     return nuevo, True
+
+
+def poner_pin(v2, data: dict, master: bytes, serial: int, stick_key: bytes,
+              pin: str, label: str = "") -> tuple[dict, str]:
+    """Pasar la ranura de un pendrive a "llave + PIN" (D22, 2026-11-19).
+
+    Qué hace, en orden y sin dejar el cofre a medias:
+
+      1. comprueba que la ranura actual (sin PIN) abre con la llave sola;
+      2. crea una ranura nueva para el mismo serial con `llave + PIN`;
+      3. escribe y **verifica** releyendo el fichero: la llave + PIN abre y la
+         llave sola ya no;
+      4. solo entonces quita la ranura vieja y vuelve a guardar.
+
+    Si el paso 3 falla, restaura el contenido original: el cofre sigue abriendo
+    como antes. Devuelve (datos_nuevos, detalle).
+    """
+    import copy
+    from cofre.v2.slots import (SlotError, new_usb_slot, open_with_stick,
+                                try_open_slot)
+
+    if not pin:
+        raise ValueError("hace falta un PIN")
+    original = copy.deepcopy(data)
+    ranuras = [s for s in (data.get("slots") or [])
+               if s.get("kind") == "usb" and int(s.get("serial", -1)) == int(serial)]
+    sin_pin = [s for s in ranuras if not s.get("pin")]
+    if not sin_pin:
+        raise ValueError("ese pendrive no tiene una ranura sin PIN que cambiar")
+    if try_open_slot(sin_pin[0], stick_key) != master:
+        raise ValueError("la llave de ese pendrive no abre su ranura; no se toca nada")
+
+    etiqueta = label or str(sin_pin[0].get("label") or f"pendrive {serial}")
+    nueva = new_usb_slot(master, stick_key, serial, etiqueta, pin)
+    data["slots"] = [s for s in data["slots"] if s.get("id") != sin_pin[0].get("id")]
+    data["slots"].append(nueva)
+    v2.save(data)
+
+    # verificar releyendo: llave + PIN abre; llave sola, no
+    try:
+        releido = v2.load()
+        maestro, _slot = open_with_stick(releido, stick_key, serial, pin)
+        if maestro != master:
+            raise SlotError("el PIN nuevo no devuelve la misma clave")
+        try:
+            open_with_stick(releido, stick_key, serial, "")
+            raise SlotError("la llave sola sigue abriendo: la ranura vieja no se quito")
+        except SlotError as esperado:
+            if "sigue abriendo" in str(esperado):
+                raise
+    except Exception as exc:                       # noqa: BLE001
+        v2.save(original)                          # se deja como estaba
+        raise ValueError(f"no se pudo poner el PIN ({exc}); el cofre sigue como "
+                         f"estaba") from exc
+    return data, (f"ranura del serial {serial} ahora pide PIN. Siguiente: abrir COFRE "
+                  f"con --gate usb-pin y teclear el PIN")
