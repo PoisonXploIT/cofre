@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -27,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cofre.crypto import Vault
-from cofre.gate import GateUnavailable, read_pin, resolve_session_key
+from cofre.gate import GateUnavailable, resolve_session_key
 from cofre.salt import get_salt
 from cofre.usb import StickNotRegistered, find_stick
 
@@ -122,9 +123,10 @@ def main() -> int:
     # 2. el pendrive real abre la copia restaurada
     pide_pin = any(s.get("kind") == "usb" and s.get("pin")
                    for s in data.get("slots", []))
-    pin = ""
-    if args.gate == "usb-pin":
-        pin = read_pin()
+    # Sin preguntar: este simulacro lo llama tambien `sesion` y no puede quedarse
+    # esperando una frase que nadie va a teclear (se colgo el 2026-11-20). El
+    # PIN se toma de COFRE_PIN, que pone el usuario en su consola.
+    pin = os.environ.get("COFRE_PIN", "") if args.gate == "usb-pin" else ""
     if pide_pin and not pin and args.gate != "usb-pin":
         # No es que la copia no abra: es que abrirla tiene dos factores y falta
         # el segundo. Decir "la copia NO abre" mandaba a repetir la copia.
@@ -132,7 +134,7 @@ def main() -> int:
               "la frase en COFRE_PIN: sin ella el simulacro no se puede hacer.")
         return 2
     if args.gate == "usb-pin" and not pin:
-        print("falta el PIN: ponlo en COFRE_PIN (o teclealo) para el simulacro.")
+        print("falta el PIN: pon COFRE_PIN=frase en el entorno y repite.")
         return 2
     try:
         session, serial = resolve_session_key(args.gate, str(work / "cofre.json"),
