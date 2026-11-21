@@ -13,6 +13,10 @@ extension/.extension-key.pem
 
 # Regla de la casa: la documentacion va al vault, no al repo.
 /*.md
+# ...salvo lo que un repo publico necesita para entenderse.
+!/README.md
+!/CHANGELOG.md
+
 
 # Clave de la sonda de mensajeria nativa (no se versiona)
 tools/nm_probe/.probe-key.pem
@@ -42,3 +46,6 @@ cofre-settings.json
 
 # Los datos del cofre ya no viven en el repo (desde 2026-11-17):
 # %LOCALAPPDATA%\cofre\vault, localizado con COFRE_VAULT.
+
+# compilaciones sueltas de pruebas manuales
+*.tmpc

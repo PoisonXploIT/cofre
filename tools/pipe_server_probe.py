@@ -38,8 +38,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 CLIENT = r'''
-import json, struct, sys, time
-sys.path.insert(0, r"C:\Users\Sammi\AI\cofre")
+import json, os, struct, sys, time
+sys.path.insert(0, os.environ.get("COFRE_REPO", "."))
 import ctypes
 from ctypes import wintypes
 from cofre.pipe_server import kernel32, GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING, INVALID_HANDLE
@@ -89,8 +89,10 @@ print(buf.raw[:length].decode())
 
 
 def call(name: str, message: dict) -> dict:
+    entorno = dict(os.environ)
+    entorno["COFRE_REPO"] = str(Path(__file__).resolve().parent.parent)
     proc = subprocess.run([sys.executable, "-c", CLIENT, name, json.dumps(message)],
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, env=entorno)
     try:
         return json.loads(proc.stdout.strip().splitlines()[-1])
     except Exception:

@@ -7,7 +7,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import puppeteer from "file:///C:/Users/Sammi/.pi/agent/skills/browser-tools/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js";
+// Requiere puppeteer-core. Se busca en el proyecto (npm i puppeteer-core) o en la
+// ruta que diga la variable COFRE_PUPPETEER, para no clavar rutas de una maquina.
+import { createRequire } from "node:module";
+const puppeteer = createRequire(import.meta.url)(
+  process.env.COFRE_PUPPETEER || "puppeteer-core");
 
 const REPO = path.dirname(path.dirname(process.argv[2] || "tools/extension_fill_test.mjs"));
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(REPO, "extension/manifest.json"), "utf-8"));

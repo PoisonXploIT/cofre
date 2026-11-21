@@ -11,7 +11,10 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import puppeteer from "file:///C:/Users/Sammi/.pi/agent/skills/browser-tools/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js";
+// puppeteer-core del proyecto, o la ruta de COFRE_PUPPETEER
+import { createRequire } from "node:module";
+const puppeteer = createRequire(import.meta.url)(
+  process.env.COFRE_PUPPETEER || "puppeteer-core");
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOCALAPPDATA = process.env.LOCAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local");

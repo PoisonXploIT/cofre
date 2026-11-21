@@ -1,6 +1,10 @@
 // Lee los resultados de la sonda H23 desde un Chrome/Brave con CDP abierto.
 //   node tools/nm_probe/read_probe.mjs 9226
-import puppeteer from "file:///C:/Users/Sammi/.pi/agent/skills/browser-tools/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js";
+// Requiere puppeteer-core. Se busca en el proyecto (npm i puppeteer-core) o en la
+// ruta que diga la variable COFRE_PUPPETEER, para no clavar rutas de una maquina.
+import { createRequire } from "node:module";
+const puppeteer = createRequire(import.meta.url)(
+  process.env.COFRE_PUPPETEER || "puppeteer-core");
 
 const port = process.argv[2] || "9226";
 const browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null });
