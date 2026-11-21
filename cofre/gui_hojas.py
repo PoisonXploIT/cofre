@@ -238,6 +238,8 @@ class HojasGUI:
             ("Esc", "Ocultar el valor o cerrar el diálogo"),
             ("Ctrl+Q", "Salir"),
             ("F1", "Estos atajos"),
+            ("Guía", "El botón Guía (columna izquierda), o Ctrl+K y escribe "
+                     "guia"),
         ]
         for tecla, que in filas:
             fila = tk.Frame(win, bg=PANEL)

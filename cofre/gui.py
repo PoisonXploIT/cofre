@@ -1450,44 +1450,63 @@ class CofreGUI(PuenteGUI, HojasGUI, LlavesGUI, ListaGUI, DetalleGUI,
 
     GUIDE = [
         ("1. Conecta el pendrive", [
-            "Enchufa cualquiera de los dos: E: (principal) o F: (reserva).",
-            "Solo hace falta uno. No los dos.",
-            "El pendrive es la llave: sin el, el cofre no se abre.",
+            "Enchufa uno de los dos: E: (principal) o F: (reserva). Solo hace falta uno.",
+            "El pendrive guarda la llave. Sin el no se abre nada.",
+            "Si Windows no lo ve, desconectalo y vuelve a enchufarlo.",
         ]),
-        ("2. Abre el cofre", [
-            "Doble click en el icono COFRE del escritorio.",
-            "Arriba a la derecha tiene que poner 'abierto' con el punto verde.",
-            "Si pone 'cerrado', enchufa el pendrive y pulsa Reconectar.",
+        ("2. Abre el cofre con la frase", [
+            "Abre COFRE con el icono del escritorio.",
+            "Escribe tu frase (5-6 palabras) en el campo PIN de la pantalla de bloqueo.",
+            "Pulsa Abrir el cofre, o Enter. Arriba queda Abierto con la llave usada.",
+            "Si dice falta el PIN, el campo esta vacio. Si dice el PIN no abre, "
+            "la frase no es esa.",
         ]),
-        ("3. Guardar una clave", [
-            "Nombre: como la vas a llamar. Sin espacios. Ej: TAVILY_API_KEY",
-            "Valor: la clave tal cual. Puedes pegarla o generarla con un boton.",
-            "Tags: opcional, para agrupar. Ej: google, trabajo",
-            "Pulsa Guardar. Aparece en la lista de la izquierda.",
+        ("3. Guarda una clave", [
+            "Ctrl+N. Nombre en mayusculas y sin espacios: TAVILY_API_KEY.",
+            "Valor: la clave tal cual, pegada.",
+            "Tags y sitios son opcionales; los sitios son donde el navegador "
+            "puede rellenarla.",
+            "Guardar. Aparece en la lista de la izquierda.",
         ]),
-        ("4. Usarla en una web", [
-            "Selecciona el secreto en la lista.",
-            "Pulsa 'Copiar valor' y pega en la web (Ctrl+V).",
-            "El portapapeles se vacia solo en 30 segundos.",
-            "Para verla en pantalla: boton Ver (se oculta a los 15 s).",
+        ("4. Usala en una web", [
+            "Con el cofre abierto, en la web: Ctrl+Shift+L.",
+            "Arriba sale Para este sitio con los secretos que valen ahi.",
+            "Elige uno y pulsa Rellenar.",
+            "A mano: Copiar valor y Ctrl+V. El portapapeles se vacia solo en 30 s.",
         ]),
-        ("5. Usarla en un programa", [
-            "Pulsa 'Comando exec' y pega en la terminal.",
-            "Queda así: run.cmd exec --name TAVILY_API_KEY -- python script.py",
-            "La clave va dentro de ese proceso, no a ningún fichero.",
-            "Cuando el proceso termina, la clave desaparece con el.",
+        ("5. Usala en un programa o en git", [
+            "En la consola, dentro de la carpeta del cofre: "
+            "run.cmd run -- python mi_script.py  (en PowerShell, ./run.cmd)",
+            "Una sola variable: run.cmd exec --name TAVILY_API_KEY -- python buscar.py",
+            "La clave vive dentro de ese proceso y desaparece con el.",
+            "git push pide permiso la primera vez por host: pulsa Permitir.",
         ]),
-        ("6. Terminar", [
-            "Pulsa Bloquear: la llave se borra de la memoria.",
-            "O quita el pendrive: el cofre se bloquea solo.",
-            "Cerrar la ventana tambien bloquea.",
+        ("6. El papel: 25 palabras", [
+            "Es la tercera llave, solo para cuando no tienes ningún pendrive.",
+            "No se guarda en el ordenador: solo en papel, y lejos del portatil.",
+            "Llaves y recuperacion, Probar código: comprueba que el papel esta bien.",
+            "Sin pendrive: run.cmd --recovery get NOMBRE y escribes las 25 palabras.",
+        ]),
+        ("7. Una vez al mes", [
+            "Con E:, F: y D: puestos: run.cmd --gate usb-pin sesion",  # no-tildes
+            "Pide la frase una vez y comprueba el registro, las dos llaves, la copia "
+            "y el plan de emergencia.",
+            "La copia son tres ficheros a la carpeta D: de copias: cofre.json, "
+            ".cofre-sticks.json y .cofre-salt.",
+            "Borra las copias viejas: una copia de antes se abre con el código viejo.",
+        ]),
+        ("8. Termina", [
+            "Pulsa Bloquear (Ctrl+L) o quita el pendrive: se bloquea solo.",
+            "A los 10 minutos sin usarlo tambien, y a las 8 horas seguro.",
+            "Para volver a entrar hacen falta el pendrive y la frase otra vez.",
         ]),
         ("Si algo va mal", [
-            "'cerrado': el pendrive no esta puesto o no es de este cofre.",
-            "'cofre no inicializado': falta crearlo (panel Puesta en marcha).",
-            "'serial no registrado': ese pendrive no es de este cofre.",
-            "'la clave no corresponde': pendrive de otro cofre o PIN mal.",
-            "Si no abre y no dice nada: usa el acceso COFRE (diagnostico).",
+            "falta el PIN: escribe la frase y pulsa Abrir.",
+            "el PIN no abre este pendrive: repasa la frase, no es el USB.",
+            "ese pendrive ya pide PIN: abre con el icono COFRE, no a mano.",
+            "no se encuentra la llave: enchufa el pendrive y pulsa Reconectar.",
+            "run.cmd no se reconoce: en PowerShell se escribe ./run.cmd",
+            "2 llaves inservibles: la frase no es la buena.",
         ]),
     ]
 
